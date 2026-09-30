@@ -10,6 +10,8 @@ export interface RateLimitOptions {
   readonly trustProxy: boolean;
   /** Rightmost hops appended by our own proxies. Ignored unless trustProxy is set. */
   readonly trustedHops?: number;
+  /** Credential routes accept JSON only, so a text/plain body cannot skip the account key. */
+  readonly jsonOnly?: boolean;
   readonly now?: () => number;
 }
 
@@ -65,6 +67,18 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
         429,
       );
     }
+    if (
+      options.jsonOnly &&
+      c.req.method !== "GET" &&
+      c.req.method !== "HEAD" &&
+      c.req.method !== "OPTIONS" &&
+      !(c.req.header("content-type") ?? "").toLowerCase().includes("application/json")
+    ) {
+      return c.json(
+        { error: { code: "UNSUPPORTED_MEDIA_TYPE", message: "Send application/json" } },
+        415,
+      );
+    }
     await next();
   };
 }
@@ -73,7 +87,8 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
  * Client address for rate limits.
  * With trustProxy, the rightmost `trustedHops` entries were appended by our proxies
  * (the ALB appends the peer it saw). The address is the entry just before those hops.
- * A client-supplied leftmost value is ignored.
+ * A client-supplied leftmost value is ignored. Fewer entries than trusted hops means the
+ * header is incomplete, so the socket address is used.
  */
 export function clientAddress(c: AppContext, trustProxy: boolean, trustedHops = 1): string {
   if (trustProxy) {
@@ -81,10 +96,9 @@ export function clientAddress(c: AppContext, trustProxy: boolean, trustedHops = 
       .split(",")
       .map((part) => part.trim())
       .filter((part) => part.length > 0);
-    if (forwarded.length > 0) {
-      const hops = Math.max(1, trustedHops);
-      const index = Math.max(0, forwarded.length - hops);
-      return forwarded[index] ?? "unknown";
+    const hops = Math.max(1, trustedHops);
+    if (forwarded.length >= hops) {
+      return forwarded[forwarded.length - hops] ?? "unknown";
     }
   }
   try {

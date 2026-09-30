@@ -258,11 +258,27 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const body = disableSchema.parse(await c.req.json());
     const account = await store.findUser(session.actorId);
     await requirePassword(c, store, account, session.actorId, body.password);
+    const now = new Date();
+    const subject = lockoutSubject("totp", session.actorId);
+    const current = await store.readLockout(subject);
+    const locked = lockoutStatus(current, now);
+    if (locked.locked) {
+      c.header("retry-after", String(locked.retryAfterSeconds));
+      throw new ApiError(
+        429,
+        "AUTH_LOCKED",
+        "Sign-in is temporarily unavailable. Try again later.",
+      );
+    }
     const totp = await store.getTotp(session.actorId);
     const secret = totp?.enabled ? openSecret(auth.secret, totp.secretCipher) : null;
-    if (!totp?.enabled || !secret || !verifyTotp(secret, body.code)) {
+    const step = secret ? matchingTotpStep(secret, body.code) : null;
+    const accepted = step !== null && (await store.acceptTotpStep(session.actorId, step));
+    if (!totp?.enabled || !accepted) {
+      await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
     }
+    await store.clearLockout(subject);
     const disabled = await store.disableTotp(session.actorId, new Date().toISOString());
     if (!disabled) {
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
@@ -424,11 +440,9 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
 function holdMagicResponse(started: number): Promise<void> {
   const remaining = MAGIC_RESPONSE_FLOOR_MS - (performance.now() - started);
   if (remaining <= 0) return Promise.resolve();
-  const end = performance.now() + remaining;
-  while (performance.now() < end) {
-    // Busy wait. A timer would jitter by more than the timing bound.
-  }
-  return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, remaining);
+  });
 }
 
 async function requirePassword(

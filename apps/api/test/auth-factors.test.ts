@@ -474,7 +474,10 @@ describe("auth regressions", () => {
         cookie: replayCookie,
         "x-csrf-token": replayCsrf,
       },
-      body: JSON.stringify({ password: TEST_PASSWORD, code }),
+      body: JSON.stringify({
+        password: TEST_PASSWORD,
+        code: totpCode(replaySecret, Date.now() + 30_000),
+      }),
     });
     expect(disabled.status).toBe(200);
     const plain = await app.request(
@@ -684,6 +687,39 @@ describe("auth regressions", () => {
     expect(sameAccount.status).toBe(429);
     expect(await errorCode(sameAccount)).toBe("RATE_LIMITED");
     expect((await send("1.1.1.1, 8.8.8.8", "other.xff@example.com")).status).toBe(202);
+    const plain = await limited.request("/auth/magic-link", {
+      method: "POST",
+      headers: { "content-type": "text/plain", "x-forwarded-for": "1.1.1.1, 8.8.4.4" },
+      body: JSON.stringify({ email: "plain.xff@example.com" }),
+    });
+    expect(plain.status).toBe(415);
+    expect(await errorCode(plain)).toBe("UNSUPPORTED_MEDIA_TYPE");
+
+    const shortHeader = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: {
+        ...DEFAULT_HTTP,
+        trustProxy: true,
+        trustedProxyHops: 2,
+        rateLimit: { windowMs: 60_000, max: 100_000, authMax: 2 },
+      },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      demoMode: true,
+    });
+    const short = (forwarded: string, email: string) =>
+      shortHeader.request("/auth/magic-link", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": forwarded },
+        body: JSON.stringify({ email }),
+      });
+    expect((await short("1.1.1.1", "short.one@example.com")).status).toBe(202);
+    expect((await short("2.2.2.2", "short.two@example.com")).status).toBe(202);
+    const sharedSocket = await short("3.3.3.3", "short.three@example.com");
+    expect(sharedSocket.status).toBe(429);
+    expect(await errorCode(sharedSocket)).toBe("RATE_LIMITED");
   });
 
   it("counts second-factor password failures toward login lockout and requires a totp code to disable", async () => {
@@ -797,6 +833,128 @@ describe("auth regressions", () => {
       body: JSON.stringify({ password: TEST_PASSWORD, code: disableCode }),
     });
     expect(disabled.status).toBe(200);
+  });
+
+  it("keeps health checks fast while magic-link responses are held", async () => {
+    const started = performance.now();
+    const pending = Array.from({ length: 20 }, (_, index) =>
+      app.request("/auth/magic-link", json("POST", { email: `held.${index}@example.com` })),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const healthStarted = performance.now();
+    const health = await app.request("/healthz");
+    const healthElapsed = performance.now() - healthStarted;
+    expect(health.status).toBe(200);
+    expect(healthElapsed, `healthz ${healthElapsed.toFixed(1)}ms`).toBeLessThan(50);
+    const held = await Promise.all(pending);
+    const elapsed = performance.now() - started;
+    expect(held.every((response) => response.status === 202)).toBe(true);
+    expect(elapsed, `20 held requests took ${elapsed.toFixed(0)}ms`).toBeLessThan(500);
+  });
+
+  it("locks totp disable after five failures and rejects a reused step", async () => {
+    await sessions(app).register("totp-lock");
+    const login = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "totp-lock", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const headers = {
+      "content-type": "application/json",
+      cookie: cookieFrom(login),
+      "x-csrf-token": ((await login.json()) as { csrfToken: string }).csrfToken,
+    };
+    const enrolled = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const secret = ((await enrolled.json()) as { secret: string }).secret;
+    const code = totpCode(secret);
+    expect(
+      (
+        await app.request("/auth/2fa/confirm", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ code }),
+        })
+      ).status,
+    ).toBe(200);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await app.request("/auth/2fa/disable", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ password: TEST_PASSWORD, code: "000000" }),
+      });
+      expect(wrong.status).toBe(401);
+    }
+    const locked = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ password: TEST_PASSWORD, code }),
+    });
+    expect(locked.status).toBe(429);
+    expect(await errorCode(locked)).toBe("AUTH_LOCKED");
+    const lockedLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "totp-lock", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    expect(lockedLogin.status).toBe(429);
+
+    await sessions(app).register("totp-replay-off");
+    const replayLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "totp-replay-off", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const replayHeaders = {
+      "content-type": "application/json",
+      cookie: cookieFrom(replayLogin),
+      "x-csrf-token": ((await replayLogin.json()) as { csrfToken: string }).csrfToken,
+    };
+    const replayEnroll = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers: replayHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const replaySecret = ((await replayEnroll.json()) as { secret: string }).secret;
+    const fresh = Date.now();
+    const current = totpCode(replaySecret, fresh);
+    const next = totpCode(replaySecret, fresh + 30_000);
+    expect(
+      (
+        await app.request("/auth/2fa/confirm", {
+          method: "POST",
+          headers: replayHeaders,
+          body: JSON.stringify({ code: current }),
+        })
+      ).status,
+    ).toBe(200);
+    const challenged = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "totp-replay-off", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const challengeId = ((await challenged.json()) as { challengeId: string }).challengeId;
+    const verified = await app.request(
+      "/auth/2fa/verify",
+      json("POST", { challengeId, code: current }),
+    );
+    expect(verified.status).toBe(200);
+    const disableHeaders = {
+      "content-type": "application/json",
+      cookie: cookieFrom(verified),
+      "x-csrf-token": ((await verified.json()) as { csrfToken: string }).csrfToken,
+    };
+    const reused = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD, code: current }),
+    });
+    expect(reused.status).toBe(401);
+    const stepped = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD, code: next }),
+    });
+    expect(stepped.status).toBe(200);
   });
 
   it("refuses a weak password cost in production", async () => {

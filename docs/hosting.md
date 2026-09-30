@@ -20,7 +20,7 @@ Fargate is the choice because the API must reach RDS and object storage without 
 
 The template includes a VPC with public and private subnets, an internet-facing load balancer (TLS listener, certificate, and target groups) as the only public entry, private Fargate services, a one-shot migration task (`aws_ecs_task_definition.migrate`, started with `ecs run-task`, not a service), RDS Postgres with `rds.force_ssl`, 7-day backups (PITR while retention is at least one day), an S3 bucket with SSE-KMS that denies non-TLS access, and Secrets Manager entries for `AUTH_SECRET`, the API database URL, and the migration URL. Images are references only. The template does not build or push them.
 
-The task role may call `kms:GenerateDataKey` and `kms:Decrypt` only on `aws_kms_key.data`, which is the uploads bucket key. Without those actions S3 rejects every SSE-KMS upload. `terraform validate` and `tflint` check the policy shape. They do not call IAM policy simulation, and nothing here has been applied.
+The task role may call `kms:GenerateDataKey` and `kms:Decrypt` only on `aws_kms_key.data` when `kms:ViaService` is `s3.ap-south-1.amazonaws.com`. That is the uploads bucket key. Without those actions S3 rejects every SSE-KMS upload. `terraform validate` and `tflint` check the policy shape. They do not call IAM policy simulation, and nothing here has been applied.
 
 `aws_acm_certificate.main` uses DNS validation. `aws_acm_certificate_validation.main` waits on the records in `aws_acm_certificate.main.domain_validation_options`. Create those CNAMEs in Cloudflare by hand (name, type, and value from the `acm_validation_records` output) before any apply. This repository does not configure Cloudflare and does not run `terraform apply`.
 

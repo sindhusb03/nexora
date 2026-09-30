@@ -469,6 +469,11 @@ resource "aws_iam_role_policy" "task_uploads" {
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = [aws_kms_key.data.arn]
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "s3.ap-south-1.amazonaws.com"
+          }
+        }
       },
     ]
   })

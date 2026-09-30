@@ -85,7 +85,7 @@ Open [http://127.0.0.1:4317](http://127.0.0.1:4317). The API listens on `http://
 
 No secrets are required for the seeded demo. Copy `.env.example` to `.env` when you point `DATABASE_URL` at Neon or turn on a live model. Do not commit `.env`.
 
-Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0005_auth_hosting.sql` before starting the API with `DATABASE_URL`. The demo seed runs only when `DATABASE_URL` is unset and `DEMO_MODE=true`. Hosting templates are in [docs/hosting.md](docs/hosting.md).
+Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0005_auth_hosting.sql` before starting the API with `DATABASE_URL`. The demo seed runs only when `DATABASE_URL` is unset and `DEMO_MODE=true`. Hosting templates are in [docs/hosting.md](docs/hosting.md). The ACM certificate stays pending until its DNS validation CNAMEs (`acm_validation_records`) are created in Cloudflare. This repo does not create those records, and the template must not be applied from here.
 
 ### Environment
 

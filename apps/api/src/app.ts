@@ -120,6 +120,7 @@ export function createApp(options: AppOptions) {
     max: http.rateLimit.authMax,
     trustProxy: http.trustProxy,
     trustedHops: http.trustedProxyHops,
+    jsonOnly: true,
   });
   const generalLimit = rateLimit({
     name: "API",
