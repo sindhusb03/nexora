@@ -1,10 +1,14 @@
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 
-import { createAuthStore } from "../src/auth-store.js";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
+
+import { createAuthStore } from "../src/auth-store.js";
 import { runMigrations, type SqlExecutor } from "../src/migrate.js";
 import { schema } from "../src/schema.js";
+import { runWithRlsSession } from "../src/session-context.js";
+import { tenantTx } from "../src/store.js";
 
 function executor(db: PGlite): SqlExecutor {
   return {
@@ -79,5 +83,29 @@ describe("auth audit row-level security", () => {
     } finally {
       await client.exec("ROLLBACK");
     }
+  });
+
+  it("copies the session actor and tenant into the row-level security settings", async () => {
+    const client = new PGlite();
+    await runMigrations(executor(client));
+    const db = drizzle({ client, schema });
+    const tenantId = "11111111-1111-4111-8111-111111111111";
+    const seen = await runWithRlsSession({ actorId: "owner-1", tenantId }, () =>
+      tenantTx(db, tenantId, async (tx) => {
+        const rows = await tx.execute<{ actor: string; tenant: string }>(
+          sql`select current_setting('app.actor_id', true) as actor, current_setting('app.tenant_id', true) as tenant`,
+        );
+        return rows.rows[0];
+      }),
+    );
+    expect(seen?.actor).toBe("owner-1");
+    expect(seen?.tenant).toBe(tenantId);
+    const empty = await tenantTx(db, tenantId, async (tx) => {
+      const rows = await tx.execute<{ actor: string }>(
+        sql`select current_setting('app.actor_id', true) as actor`,
+      );
+      return rows.rows[0]?.actor;
+    });
+    expect(empty).toBe("");
   });
 });

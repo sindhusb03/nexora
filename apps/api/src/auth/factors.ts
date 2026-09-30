@@ -7,7 +7,8 @@ import type { AuthConfig } from "../config.js";
 import { ApiError, type AppContext, type AppEnv } from "../http.js";
 import type { Logger } from "../observability.js";
 import type { EmailSender, MemoryMailbox } from "./email.js";
-import { issueSession, recordAuth } from "./issue.js";
+import { verifyPassword } from "./crypto.js";
+import { endPresentedSession, issueSession, recordAuth } from "./issue.js";
 import { lockoutStatus, lockoutSubject, nextLockout } from "./lockout.js";
 import { sha256, startOidc, type OidcProviderConfig } from "./oidc.js";
 import { openSecret, sealSecret } from "./secret-box.js";
@@ -16,6 +17,7 @@ import {
   generateRecoveryCodes,
   generateTotpSecret,
   hashRecoveryCode,
+  matchingTotpStep,
   totpAuthUrl,
   verifyTotp,
 } from "./totp.js";
@@ -38,6 +40,18 @@ const consumeSchema = z.object({
 const confirmSchema = z.object({
   code: z.string().trim().min(6).max(8),
 });
+const enrollSchema = z.object({
+  password: z.string().min(1).max(200),
+});
+const disableSchema = z
+  .object({
+    password: z.string().min(1).max(200),
+    code: z.string().trim().min(6).max(12).optional(),
+    recoveryCode: z.string().trim().min(8).max(32).optional(),
+  })
+  .refine((value) => value.code !== undefined || value.recoveryCode !== undefined, {
+    message: "Enter an authenticator code or a recovery code",
+  });
 const verifySchema = z
   .object({
     challengeId: z.uuid(),
@@ -79,12 +93,13 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
       );
     }
     const user = await store.findUserByEmail(body.email);
-    if (!user || user.disabled) {
-      await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
+    const live = user && !user.disabled ? user : null;
+    await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
+    if (!live) {
       await recordAuth(store, logger, {
         eventType: "magic_link_sent",
         outcome: "failure",
-        actorId: user?.actorId ?? null,
+        actorId: null,
         tenantId: null,
         requestId: c.get("requestId"),
       });
@@ -97,7 +112,7 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const createdAt = now.toISOString();
     await store.createMagicLink({
       tokenHash: sha256(token),
-      actorId: user.actorId,
+      actorId: live.actorId,
       createdAt,
       expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
     });
@@ -107,11 +122,10 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
       subject: "Your Nexora sign-in link",
       text: `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`,
     });
-    await store.clearLockout(subject);
     await recordAuth(store, logger, {
       eventType: "magic_link_sent",
       outcome: "success",
-      actorId: user.actorId,
+      actorId: live.actorId,
       tenantId: null,
       requestId: c.get("requestId"),
     });
@@ -148,6 +162,7 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
         "That sign-in link is invalid or expired.",
       );
     }
+    if (user.email) await store.clearLockout(lockoutSubject("magic", user.email));
     const totp = await store.getTotp(actorId);
     if (totp?.enabled) {
       const challenge = await openChallenge(deps, actorId, region);
@@ -161,6 +176,7 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
       });
       return c.json({ mfaRequired: true, challengeId: challenge }, 200);
     }
+    await endPresentedSession(c, store, auth, logger);
     const session = await issueSession(c, store, auth, { actorId, region });
     await recordAuth(store, logger, {
       eventType: "magic_link_used",
@@ -182,6 +198,11 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
 
   app.post("/auth/2fa/enroll", async (c) => {
     const session = await requireActor(c, deps);
+    const body = enrollSchema.parse(await c.req.json());
+    const account = await store.findUser(session.actorId);
+    if (!account || !(await verifyPassword(body.password, account.passwordHash))) {
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
+    }
     const secret = generateTotpSecret();
     const saved = await store.saveTotp({
       actorId: session.actorId,
@@ -191,8 +212,8 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     if (saved === "locked") {
       throw new ApiError(409, "AUTH_TOTP_ENABLED", "Two-factor authentication is already enabled.");
     }
-    const account = session.email ?? session.actorId;
-    const otpauthUrl = totpAuthUrl("Nexora", account, secret);
+    const label = session.email ?? session.actorId;
+    const otpauthUrl = totpAuthUrl("Nexora", label, secret);
     const qrDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 192 });
     return c.json({ otpauthUrl, qrDataUrl, secret });
   });
@@ -223,7 +244,7 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const recoveryCodes = generateRecoveryCodes();
     await store.saveRecoveryCodes(
       session.actorId,
-      recoveryCodes.map((code) => hashRecoveryCode(code)),
+      recoveryCodes.map((code) => hashRecoveryCode(code, auth.secret)),
     );
     await recordAuth(store, logger, {
       eventType: "totp_enroll",
@@ -235,10 +256,47 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     return c.json({ recoveryCodes });
   });
 
+  app.post("/auth/2fa/disable", async (c) => {
+    const session = await requireActor(c, deps);
+    const body = disableSchema.parse(await c.req.json());
+    const account = await store.findUser(session.actorId);
+    if (!account || !(await verifyPassword(body.password, account.passwordHash))) {
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
+    }
+    const totp = await store.getTotp(session.actorId);
+    const secret = totp?.enabled ? openSecret(auth.secret, totp.secretCipher) : null;
+    const codeOk = body.code !== undefined && secret !== null && verifyTotp(secret, body.code);
+    const recoveryOk =
+      !codeOk && body.recoveryCode !== undefined
+        ? await store.consumeRecoveryCode(
+            session.actorId,
+            hashRecoveryCode(body.recoveryCode, auth.secret),
+            new Date().toISOString(),
+          )
+        : false;
+    if (!totp?.enabled || (!codeOk && !recoveryOk)) {
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
+    }
+    const disabled = await store.disableTotp(session.actorId, new Date().toISOString());
+    if (!disabled) {
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
+    }
+    await recordAuth(store, logger, {
+      eventType: "totp_enroll",
+      outcome: "success",
+      actorId: session.actorId,
+      tenantId: session.tenantId,
+      requestId: c.get("requestId"),
+      payload: { action: "disabled" },
+    });
+    return c.json({ disabled: true });
+  });
+
   app.post("/auth/2fa/verify", async (c) => {
     assertOrigin(c, deps.webOrigins);
     const body = verifySchema.parse(await c.req.json());
-    const challenge = await store.consumeMfaChallenge(body.challengeId, new Date().toISOString());
+    const now = new Date();
+    const challenge = await store.readMfaChallenge(body.challengeId);
     if (!challenge) {
       await recordAuth(store, logger, {
         eventType: "totp_verify",
@@ -249,15 +307,28 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
       });
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
     }
+    const subject = lockoutSubject("totp", challenge.actorId);
+    const current = await store.readLockout(subject);
+    const locked = lockoutStatus(current, now);
+    if (locked.locked) {
+      c.header("retry-after", String(locked.retryAfterSeconds));
+      throw new ApiError(
+        429,
+        "AUTH_LOCKED",
+        "Sign-in is temporarily unavailable. Try again later.",
+      );
+    }
     const totp = await store.getTotp(challenge.actorId);
     const secret = totp?.enabled ? openSecret(auth.secret, totp.secretCipher) : null;
-    const codeOk = body.code !== undefined && secret !== null && verifyTotp(secret, body.code);
+    const step =
+      body.code !== undefined && secret !== null ? matchingTotpStep(secret, body.code) : null;
+    const codeOk = step !== null && (await store.acceptTotpStep(challenge.actorId, step));
     const recoveryOk =
       !codeOk && body.recoveryCode !== undefined
         ? await store.consumeRecoveryCode(
             challenge.actorId,
-            hashRecoveryCode(body.recoveryCode),
-            new Date().toISOString(),
+            hashRecoveryCode(body.recoveryCode, auth.secret),
+            now.toISOString(),
           )
         : false;
     if (!codeOk && !recoveryOk) {
@@ -268,8 +339,19 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
         tenantId: null,
         requestId: c.get("requestId"),
       });
+      await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
     }
+    const consumed = await store.consumeMfaChallenge(body.challengeId, now.toISOString());
+    if (!consumed) {
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
+    }
+    await store.clearLockout(subject);
+    const account = await store.findUser(challenge.actorId);
+    await store.clearLockout(lockoutSubject("password", challenge.actorId));
+    if (account?.email) await store.clearLockout(lockoutSubject("password", account.email));
+    if (account?.email) await store.clearLockout(lockoutSubject("magic", account.email));
+    await endPresentedSession(c, store, auth, logger);
     const session = await issueSession(c, store, auth, {
       actorId: challenge.actorId,
       region: challenge.region,
@@ -355,6 +437,10 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
 
 async function openChallenge(deps: FactorDeps, actorId: string, region: string): Promise<string> {
   const now = new Date();
+  const locked = lockoutStatus(await deps.store.readLockout(lockoutSubject("totp", actorId)), now);
+  if (locked.locked) {
+    throw new ApiError(429, "AUTH_LOCKED", "Sign-in is temporarily unavailable. Try again later.");
+  }
   const challengeId = crypto.randomUUID();
   await deps.store.createMfaChallenge({
     challengeId,

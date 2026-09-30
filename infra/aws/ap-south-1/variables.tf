@@ -19,3 +19,18 @@ variable "web_image" {
   type    = string
   default = "public.ecr.aws/docker/library/busybox:1.36"
 }
+
+variable "web_hostname" {
+  type    = string
+  default = "app.example.com"
+}
+
+variable "api_hostname" {
+  type    = string
+  default = "api.example.com"
+}
+
+variable "web_origin" {
+  type    = string
+  default = "https://app.example.com"
+}

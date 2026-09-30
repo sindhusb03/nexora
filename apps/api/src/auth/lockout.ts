@@ -10,7 +10,7 @@ export interface LockoutSnapshot {
   readonly lockedUntil: string | null;
 }
 
-export function lockoutSubject(kind: "password" | "magic", value: string): string {
+export function lockoutSubject(kind: "password" | "magic" | "totp", value: string): string {
   const normalized = value.normalize("NFKC").trim().toLowerCase();
   return createHash("sha256").update(`${kind}|${normalized}`).digest("hex");
 }

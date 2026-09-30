@@ -161,6 +161,8 @@ export function TwoFactorPanel(props: {
   readonly busy: boolean;
   readonly notice: string | null;
   readonly onConfirm: (code: string) => Promise<void>;
+  readonly onEnroll: (password: string) => Promise<void>;
+  readonly onDisable: (password: string, code: string) => Promise<void>;
   readonly onClose: () => void;
 }) {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -176,19 +178,40 @@ export function TwoFactorPanel(props: {
         Scan the code with an authenticator app, then enter the 6-digit code. Recovery codes are
         shown once.
       </p>
-      {props.qrDataUrl ? (
-        <img src={props.qrDataUrl} alt="Authenticator QR code" data-testid="totp-qr" />
-      ) : null}
-      <p className="nx-secret" data-testid="totp-secret">
-        {props.secret}
-      </p>
-      {props.recoveryCodes.length > 0 ? (
+      {props.secret ? (
+        <>
+          {props.qrDataUrl ? (
+            <img src={props.qrDataUrl} alt="Authenticator QR code" data-testid="totp-qr" />
+          ) : null}
+          <p className="nx-secret" data-testid="totp-secret">
+            {props.secret}
+          </p>
+        </>
+      ) : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            void props.onEnroll(String(form.get("password") ?? ""));
+          }}
+        >
+          <label>
+            Password
+            <Input name="password" type="password" data-testid="totp-password" required />
+          </label>
+          <Button type="submit" disabled={props.busy}>
+            Continue
+          </Button>
+        </form>
+      )}
+      {props.secret && props.recoveryCodes.length > 0 ? (
         <ul data-testid="recovery-codes">
           {props.recoveryCodes.map((code) => (
             <li key={code}>{code}</li>
           ))}
         </ul>
-      ) : (
+      ) : null}
+      {props.secret && props.recoveryCodes.length === 0 ? (
         <form onSubmit={onSubmit}>
           <label>
             Authenticator code
@@ -198,7 +221,34 @@ export function TwoFactorPanel(props: {
             Enable two-factor
           </Button>
         </form>
-      )}
+      ) : null}
+      {!props.secret ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            void props.onDisable(
+              String(form.get("password") ?? ""),
+              String(form.get("code") ?? "").trim(),
+            );
+          }}
+        >
+          <p>
+            To turn two-factor off, enter the account password and a current authenticator code.
+          </p>
+          <label>
+            Password
+            <Input name="password" type="password" data-testid="totp-disable-password" required />
+          </label>
+          <label>
+            Authenticator code
+            <Input name="code" inputMode="numeric" data-testid="totp-disable-code" required />
+          </label>
+          <Button type="submit" disabled={props.busy}>
+            Turn off two-factor
+          </Button>
+        </form>
+      ) : null}
       {props.notice ? (
         <p className="nx-notice" role="alert">
           {props.notice}

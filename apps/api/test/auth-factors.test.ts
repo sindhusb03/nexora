@@ -2,8 +2,15 @@ import { createPgliteStore, type LedgerStore } from "@nexora/db";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { MemoryMailbox, consoleEmailSender } from "../src/auth/email.js";
+import { sha256 } from "../src/auth/oidc.js";
 import { lockoutSubject, nextLockout } from "../src/auth/lockout.js";
-import { hashPassword, verifyPassword } from "../src/auth/crypto.js";
+import {
+  ARGON2_MEMORY_KIB,
+  ARGON2_TIME_COST,
+  argon2Params,
+  hashPassword,
+  verifyPassword,
+} from "../src/auth/crypto.js";
 import { hashRecoveryCode, totpCode, verifyTotp } from "../src/auth/totp.js";
 import { createApp, DEFAULT_HTTP, type AppOptions } from "../src/app.js";
 import { ConfigError, loadConfig } from "../src/config.js";
@@ -13,6 +20,7 @@ import { cookieFrom, json, sessions, TEST_PASSWORD, testAuth, type TestApp } fro
 describe("password hashing", () => {
   it("stores argon2id and rejects a wrong password or a broken scrypt string", async () => {
     const stored = await hashPassword(TEST_PASSWORD, 1_024);
+    expect(argon2Params()).toEqual({ memoryKiB: ARGON2_MEMORY_KIB, timeCost: ARGON2_TIME_COST });
     expect(stored.startsWith("$argon2id$v=19$m=1024,t=1,p=1$")).toBe(true);
     expect(await verifyPassword(TEST_PASSWORD, stored)).toBe(true);
     expect(await verifyPassword("wrong-password-123", stored)).toBe(false);
@@ -36,7 +44,9 @@ describe("password hashing", () => {
     expect(state.failures).toBe(5);
     expect(state.lockedUntil).not.toBeNull();
     expect(lockoutSubject("password", "Owner-1")).toBe(lockoutSubject("password", "owner-1"));
-    expect(hashRecoveryCode("ABCD-EFGH")).toBe(hashRecoveryCode("abcdefgh"));
+    const hmacKey = "test-only-secret-that-is-long-enough-000000";
+    expect(hashRecoveryCode("ABCD-EFGH", hmacKey)).toBe(hashRecoveryCode("abcdefgh", hmacKey));
+    expect(hashRecoveryCode("ABCD-EFGH", hmacKey)).not.toBe(hashRecoveryCode("ABCD-EFGH", "other"));
   });
 });
 
@@ -55,6 +65,7 @@ describe("magic link, second factor, rotation, and audit", () => {
       passwordCost: 1_024,
       email: consoleEmailSender(silentLogger, mailbox),
       devMailbox: mailbox,
+      demoMode: true,
       ...overrides,
     });
   }
@@ -116,7 +127,8 @@ describe("magic link, second factor, rotation, and audit", () => {
     const { csrfToken } = (await login.json()) as { csrfToken: string };
     const enroll = await app.request("/auth/2fa/enroll", {
       method: "POST",
-      headers: { cookie, "x-csrf-token": csrfToken },
+      headers: { "content-type": "application/json", cookie, "x-csrf-token": csrfToken },
+      body: JSON.stringify({ password: TEST_PASSWORD }),
     });
     expect(enroll.status).toBe(200);
     const enrolled = (await enroll.json()) as {
@@ -314,6 +326,301 @@ describe("magic link, second factor, rotation, and audit", () => {
   });
 });
 
+describe("auth regressions", () => {
+  let store: LedgerStore;
+  let app: TestApp;
+  let mailbox: MemoryMailbox;
+
+  beforeAll(async () => {
+    store = await createPgliteStore();
+    mailbox = new MemoryMailbox();
+    app = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 100_000 } },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      email: consoleEmailSender(silentLogger, mailbox),
+      devMailbox: mailbox,
+      demoMode: true,
+    });
+    await app.request(
+      "/auth/signup",
+      json("POST", {
+        actorId: "enum-user",
+        email: "enum.user@example.com",
+        password: TEST_PASSWORD,
+      }),
+    );
+  });
+
+  it("does not distinguish known and unknown magic-link addresses", async () => {
+    const codesFor = async (email: string) => {
+      const codes: number[] = [];
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        codes.push((await app.request("/auth/magic-link", json("POST", { email }))).status);
+      }
+      return codes;
+    };
+    const unknown = await codesFor("nobody-enum@example.com");
+    const known = await codesFor("enum.user@example.com");
+    expect(known).toEqual(unknown);
+    expect(known.slice(0, 5)).toEqual([202, 202, 202, 202, 202]);
+    expect(known[5]).toBe(429);
+  });
+
+  it("rejects an expired magic link", async () => {
+    const token = `expired-${crypto.randomUUID()}`;
+    await store.createMagicLink({
+      tokenHash: sha256(token),
+      actorId: "enum-user",
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const response = await app.request(
+      "/auth/magic-link/consume",
+      json("POST", { token, region: "us-east-1" }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("locks TOTP verification and rejects a replayed code", async () => {
+    await sessions(app).register("brute-user");
+    const login = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "brute-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const cookie = cookieFrom(login);
+    const { csrfToken } = (await login.json()) as { csrfToken: string };
+    const enroll = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, "x-csrf-token": csrfToken },
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const secret = ((await enroll.json()) as { secret: string }).secret;
+    await app.request("/auth/2fa/confirm", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie, "x-csrf-token": csrfToken },
+      body: JSON.stringify({ code: totpCode(secret) }),
+    });
+    const challenged = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "brute-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const { challengeId } = (await challenged.json()) as { challengeId: string };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await app.request(
+        "/auth/2fa/verify",
+        json("POST", { challengeId, code: "000000" }),
+      );
+      expect(wrong.status).toBe(401);
+    }
+    const blocked = await app.request(
+      "/auth/2fa/verify",
+      json("POST", { challengeId, code: totpCode(secret) }),
+    );
+    expect(blocked.status).toBe(429);
+
+    await sessions(app).register("replay-user");
+    const replayLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "replay-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const replayCookie = cookieFrom(replayLogin);
+    const replayCsrf = ((await replayLogin.json()) as { csrfToken: string }).csrfToken;
+    const replayEnroll = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: replayCookie,
+        "x-csrf-token": replayCsrf,
+      },
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const replaySecret = ((await replayEnroll.json()) as { secret: string }).secret;
+    const code = totpCode(replaySecret);
+    await app.request("/auth/2fa/confirm", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: replayCookie,
+        "x-csrf-token": replayCsrf,
+      },
+      body: JSON.stringify({ code }),
+    });
+    const first = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "replay-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const firstChallenge = ((await first.json()) as { challengeId: string }).challengeId;
+    expect(
+      (await app.request("/auth/2fa/verify", json("POST", { challengeId: firstChallenge, code })))
+        .status,
+    ).toBe(200);
+    const second = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "replay-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const secondChallenge = ((await second.json()) as { challengeId: string }).challengeId;
+    expect(
+      (await app.request("/auth/2fa/verify", json("POST", { challengeId: secondChallenge, code })))
+        .status,
+    ).toBe(401);
+    const disabled = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: replayCookie,
+        "x-csrf-token": replayCsrf,
+      },
+      body: JSON.stringify({ password: TEST_PASSWORD, code }),
+    });
+    expect(disabled.status).toBe(200);
+    const plain = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "replay-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    expect(plain.headers.get("set-cookie")).toContain("nexora_session=");
+  });
+
+  it("rate limits magic-link and second-factor calls", async () => {
+    const limited = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 3 } },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      demoMode: true,
+    });
+    const magic = () =>
+      limited.request("/auth/magic-link", json("POST", { email: "rate@example.com" }));
+    expect((await magic()).status).toBe(202);
+    expect((await magic()).status).toBe(202);
+    expect((await magic()).status).toBe(202);
+    const blockedMagic = await magic();
+    expect(blockedMagic.status).toBe(429);
+    expect(await errorCode(blockedMagic)).toBe("RATE_LIMITED");
+    const verifyApp = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 3 } },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      demoMode: true,
+    });
+    const verify = () =>
+      verifyApp.request(
+        "/auth/2fa/verify",
+        json("POST", { challengeId: "00000000-0000-4000-8000-000000000001", code: "000000" }),
+      );
+    expect((await verify()).status).toBe(401);
+    expect((await verify()).status).toBe(401);
+    expect((await verify()).status).toBe(401);
+    const blockedVerify = await verify();
+    expect(blockedVerify.status).toBe(429);
+    expect(await errorCode(blockedVerify)).toBe("RATE_LIMITED");
+  });
+
+  it("hides the dev mailbox unless demo mode is on outside production", async () => {
+    const hidden = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      logger: silentLogger,
+      passwordCost: 1_024,
+      devMailbox: mailbox,
+      demoMode: false,
+      production: false,
+    });
+    expect((await hidden.request("/auth/dev/mailbox")).status).toBe(404);
+    const open = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      logger: silentLogger,
+      passwordCost: 1_024,
+      devMailbox: mailbox,
+      demoMode: true,
+      production: false,
+    });
+    expect((await open.request("/auth/dev/mailbox")).status).toBe(200);
+  });
+
+  it("rejects a sign-in region that is not the deployment region", async () => {
+    const pinned = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth({ pinnedRegion: "ap-south-1" }),
+      logger: silentLogger,
+      passwordCost: 1_024,
+      demoMode: false,
+    });
+    const mismatch = await pinned.request(
+      "/auth/login",
+      json("POST", { actorId: "enum-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    expect(mismatch.status).toBe(403);
+    expect(await errorCode(mismatch)).toBe("REGION_MISMATCH");
+    const matched = await pinned.request(
+      "/auth/login",
+      json("POST", { actorId: "enum-user", password: TEST_PASSWORD, region: "ap-south-1" }),
+    );
+    expect(matched.status).toBe(200);
+  });
+
+  it("ends the presented session when a magic link signs in", async () => {
+    await app.request(
+      "/auth/signup",
+      json("POST", {
+        actorId: "fresh-user",
+        email: "fresh.user@example.com",
+        password: TEST_PASSWORD,
+      }),
+    );
+    const first = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "enum-user", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const oldCookie = cookieFrom(first);
+    await app.request("/auth/magic-link", json("POST", { email: "fresh.user@example.com" }));
+    const token = /magic=([A-Za-z0-9-]+)/.exec(
+      mailbox.list().find((item) => item.to === "fresh.user@example.com")?.text ?? "",
+    )?.[1];
+    const next = await app.request("/auth/magic-link/consume", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: oldCookie },
+      body: JSON.stringify({ token, region: "us-east-1" }),
+    });
+    expect(next.status).toBe(200);
+    const stale = await app.request("/auth/session", { headers: { cookie: oldCookie } });
+    expect(stale.status).toBe(401);
+  });
+
+  it("refuses a weak password cost in production", async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      await expect(hashPassword(TEST_PASSWORD, 1_024)).rejects.toThrow(/production argon2id/);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+    expect(() =>
+      createApp({
+        store,
+        platformAdminActorIds: ["platform-admin"],
+        auth: testAuth(),
+        logger: silentLogger,
+        production: true,
+        passwordCost: 1_024,
+      }),
+    ).toThrow(ConfigError);
+  });
+});
+
 describe("demo mode configuration", () => {
   const production = {
     NODE_ENV: "production",
@@ -322,8 +629,9 @@ describe("demo mode configuration", () => {
     WEB_ORIGIN: "https://app.example.com",
   };
 
-  it("is on for local development and refused in production", () => {
-    expect(loadConfig({}).demoMode).toBe(true);
+  it("stays off unless DEMO_MODE=true and is refused in production", () => {
+    expect(loadConfig({}).demoMode).toBe(false);
+    expect(loadConfig({ DEMO_MODE: "true" }).demoMode).toBe(true);
     expect(loadConfig(production).demoMode).toBe(false);
     expect(() => loadConfig({ ...production, DEMO_MODE: "true" })).toThrow(ConfigError);
     expect(

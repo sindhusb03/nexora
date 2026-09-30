@@ -43,6 +43,15 @@ export function argon2Params(memoryKiB?: number): Argon2Params {
 
 /** PHC string: $argon2id$v=19$m=...,t=...,p=1$salt$hash */
 export async function hashPassword(password: string, memoryKiB?: number): Promise<string> {
+  if (
+    process.env.NODE_ENV === "production" &&
+    memoryKiB !== undefined &&
+    memoryKiB < ARGON2_MEMORY_KIB
+  ) {
+    throw new Error(
+      `passwordCost ${memoryKiB} is below the production argon2id minimum of ${ARGON2_MEMORY_KIB} KiB.`,
+    );
+  }
   const params = argon2Params(memoryKiB);
   const salt = randomBytes(16);
   const key = await argon2idAsync(password.normalize("NFKC"), salt, {

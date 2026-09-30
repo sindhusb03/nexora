@@ -93,7 +93,7 @@ const app = createApp({
   directory,
   demoMode: config.demoMode,
   email,
-  devMailbox: config.production ? null : mailbox,
+  devMailbox: !config.production && config.demoMode ? mailbox : null,
   oidcProviders: config.oidcProviders,
   errorReporter: createErrorReporter(config.sentryDsn),
 });

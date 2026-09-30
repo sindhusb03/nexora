@@ -1,9 +1,15 @@
 import { createHmac } from "node:crypto";
 import { mkdirSync } from "node:fs";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-mkdirSync("/opt/cursor/artifacts", { recursive: true });
+const artifacts = process.env.NEXORA_E2E_ARTIFACTS;
+
+async function shot(page: Page, name: string): Promise<void> {
+  if (!artifacts) return;
+  mkdirSync(artifacts, { recursive: true });
+  await page.screenshot({ path: `${artifacts}/${name}`, fullPage: true });
+}
 
 const API = "http://127.0.0.1:8787";
 const PASSWORD = "correct horse battery staple";
@@ -11,7 +17,7 @@ const PASSWORD = "correct horse battery staple";
 test("demo mode still signs in as sindhu", async ({ page }) => {
   await page.goto("/studio");
   await expect(page.getByTestId("demo-actors")).toContainText("sindhu");
-  await page.screenshot({ path: "/opt/cursor/artifacts/auth-password.png", fullPage: true });
+  await shot(page, "auth-password.png");
   await page.getByTestId("signin-actor").fill("sindhu");
   await page.getByTestId("signin-password").fill("nexora-demo-2026");
   await page.getByTestId("signin-submit").click();
@@ -28,7 +34,7 @@ test("magic link and two-factor sign-in", async ({ page, request }) => {
 
   await page.goto("/studio");
   await page.getByTestId("signin-magic-toggle").click();
-  await page.screenshot({ path: "/opt/cursor/artifacts/auth-magic-link.png", fullPage: true });
+  await shot(page, "auth-magic-link.png");
   await page.getByTestId("magic-email").fill(email);
   await page.getByTestId("signin-submit").click();
   await expect(page.getByTestId("signin-notice")).toContainText("If an account exists");
@@ -44,8 +50,11 @@ test("magic link and two-factor sign-in", async ({ page, request }) => {
   await expect(page.getByLabel(`Account ${actorId}`)).toBeVisible();
   await page.getByLabel(`Account ${actorId}`).click();
   await page.getByTestId("open-2fa").click();
+  await expect(page.getByTestId("totp-password")).toBeVisible();
+  await page.getByTestId("totp-password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByTestId("screen-2fa")).toBeVisible();
-  await page.screenshot({ path: "/opt/cursor/artifacts/auth-2fa.png", fullPage: true });
+  await shot(page, "auth-2fa.png");
   const secret = (await page.getByTestId("totp-secret").textContent())?.trim() ?? "";
   await page.getByTestId("totp-confirm").fill(totpCode(secret));
   await page.getByRole("button", { name: "Enable two-factor" }).click();

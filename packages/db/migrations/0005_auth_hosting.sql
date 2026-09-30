@@ -150,7 +150,8 @@ CREATE TABLE auth_totp (
   actor_id text PRIMARY KEY REFERENCES auth_user (actor_id),
   secret_cipher text NOT NULL,
   created_at timestamptz NOT NULL,
-  enabled_at timestamptz
+  enabled_at timestamptz,
+  last_accepted_step bigint
 );
 
 CREATE OR REPLACE FUNCTION auth_totp_guard()
@@ -161,15 +162,17 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'FIN_IMMUTABLE_RECORD';
   END IF;
-  IF OLD.enabled_at IS NOT NULL AND (
+  IF NEW.actor_id <> OLD.actor_id OR NEW.created_at <> OLD.created_at THEN
+    RAISE EXCEPTION 'FIN_IMMUTABLE_RECORD';
+  END IF;
+  IF OLD.enabled_at IS NOT NULL AND NEW.enabled_at IS NOT NULL AND (
     NEW.secret_cipher IS DISTINCT FROM OLD.secret_cipher
     OR NEW.enabled_at IS DISTINCT FROM OLD.enabled_at
-    OR NEW.actor_id <> OLD.actor_id
-    OR NEW.created_at <> OLD.created_at
   ) THEN
     RAISE EXCEPTION 'FIN_IMMUTABLE_RECORD';
   END IF;
-  IF NEW.actor_id <> OLD.actor_id OR NEW.created_at <> OLD.created_at THEN
+  IF NEW.last_accepted_step IS NOT NULL AND OLD.last_accepted_step IS NOT NULL
+    AND NEW.last_accepted_step < OLD.last_accepted_step THEN
     RAISE EXCEPTION 'FIN_IMMUTABLE_RECORD';
   END IF;
   RETURN NEW;
@@ -341,7 +344,7 @@ GRANT SELECT, INSERT ON auth_audit_event TO nexora_app;
 GRANT SELECT, INSERT ON auth_magic_link TO nexora_app;
 GRANT UPDATE (used_at) ON auth_magic_link TO nexora_app;
 GRANT SELECT, INSERT ON auth_totp TO nexora_app;
-GRANT UPDATE (secret_cipher, enabled_at) ON auth_totp TO nexora_app;
+GRANT UPDATE (secret_cipher, enabled_at, last_accepted_step) ON auth_totp TO nexora_app;
 GRANT SELECT, INSERT ON auth_recovery_code TO nexora_app;
 GRANT UPDATE (used_at) ON auth_recovery_code TO nexora_app;
 GRANT SELECT, INSERT, UPDATE ON auth_lockout TO nexora_app;

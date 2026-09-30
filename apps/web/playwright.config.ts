@@ -15,6 +15,7 @@ export default defineConfig({
       command: "pnpm --filter @nexora/api dev",
       url: "http://127.0.0.1:8787/health",
       reuseExistingServer: reuse,
+      env: { ...process.env, DEMO_MODE: "true" },
       timeout: 180_000,
       cwd: "../..",
     },

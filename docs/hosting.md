@@ -18,7 +18,7 @@ Primary region is **ap-south-1 (Mumbai)**. Templates are in `infra/aws/ap-south-
 
 Fargate is the choice because the API must reach RDS and object storage without a public database, and migrations must run as the schema owner in a separate task. App Runner remains a possible later host for the web container alone.
 
-The template includes a VPC with public and private subnets, an RDS Postgres instance with pgvector available, 7-day backups (PITR while retention is at least one day), an S3 bucket with SSE-KMS and public access blocked, Secrets Manager entries for the database URL and `AUTH_SECRET`, and Fargate services for the API and web app. Images are references only. The template does not build or push them.
+The template includes a VPC with public and private subnets, an internet-facing load balancer (TLS listener, certificate, and target groups) as the only public entry, private Fargate services, a one-shot migration task (`aws_ecs_task_definition.migrate`, started with `ecs run-task`, not a service), RDS Postgres with `rds.force_ssl`, 7-day backups (PITR while retention is at least one day), an S3 bucket with SSE-KMS that denies non-TLS access, and Secrets Manager entries for `AUTH_SECRET`, the API database URL, and the migration URL. Images are references only. The template does not build or push them.
 
 ## Data residency
 

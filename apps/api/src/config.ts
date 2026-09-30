@@ -146,7 +146,7 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
     );
   }
 
-  const demoMode = values.DEMO_MODE ? values.DEMO_MODE === "true" : !production;
+  const demoMode = values.DEMO_MODE === "true";
   if (production && demoMode) {
     throw new ConfigError(
       "DEMO_MODE=true is refused when NODE_ENV=production. The demo password is a local seed credential.",

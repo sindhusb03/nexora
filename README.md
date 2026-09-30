@@ -85,7 +85,7 @@ Open [http://127.0.0.1:4317](http://127.0.0.1:4317). The API listens on `http://
 
 No secrets are required for the seeded demo. Copy `.env.example` to `.env` when you point `DATABASE_URL` at Neon or turn on a live model. Do not commit `.env`.
 
-Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0005_auth_hosting.sql` before starting the API with `DATABASE_URL`. The demo seed runs only when `DATABASE_URL` is unset and `DEMO_MODE` is on (the default outside production). Hosting templates are in [docs/hosting.md](docs/hosting.md).
+Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0005_auth_hosting.sql` before starting the API with `DATABASE_URL`. The demo seed runs only when `DATABASE_URL` is unset and `DEMO_MODE=true`. Hosting templates are in [docs/hosting.md](docs/hosting.md).
 
 ### Environment
 
@@ -96,7 +96,7 @@ Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0005_auth_hos
 | `WEB_ORIGIN`                     | Comma-separated browser origins allowed to call the API. Defaults include `http://127.0.0.1:4317`. |
 | `NEXORA_DEV_HEADERS`             | `true` trusts identity headers. Local only. Refused in production.                                 |
 | `NEXORA_SEED_DEMO`               | `false` skips the Nazareno seed.                                                                   |
-| `DEMO_MODE`                      | `false` hides the demo password and seed. Refused when `NODE_ENV=production`. Default on in dev.   |
+| `DEMO_MODE`                      | `true` enables the demo seed and dev mailbox. Off unless set. Refused in production.               |
 | `NEXORA_DEMO_PASSWORD`           | Demo password. Default `nexora-demo-2026`.                                                         |
 | `SENTRY_DSN`                     | Optional. Unset reports nothing.                                                                   |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`    | Optional OTLP HTTP endpoint. Unset exports nothing.                                                |

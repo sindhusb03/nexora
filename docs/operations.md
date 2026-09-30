@@ -35,7 +35,7 @@ The API reads only the process environment. It does not load `.env`. Local scrip
 | `API_BODY_LIMIT_BYTES`                                          | 1 KiB – 50 MiB                                                     | 8388608                                       |
 | `TRUST_PROXY`                                                   | `true` only behind a proxy that sets `X-Forwarded-For`             | `false`                                       |
 | `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX` | Tune per deployment                                                | 60000, 600, 20                                |
-| `DEMO_MODE`                                                     | Refused when `true`. Default `false`                               | `true` when unset                             |
+| `DEMO_MODE`                                                     | Refused when `true`. Default `false`                               | `false` unless set to `true`                  |
 | `OIDC_PROVIDERS`                                                | Optional JSON array. No provider is required (section 5)           | Unset                                         |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`                                   | Optional (section 6)                                               | Unset                                         |
 | `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`                 | `otlp` or `none`. `otlp` requires the endpoint                     | Follow the endpoint when unset                |
@@ -121,7 +121,7 @@ None of this needs Neon credentials.
 - Passwords are argon2id (memory 19456 KiB, time 2, parallelism 1). Existing scrypt hashes still verify. New passwords are argon2id.
 - Email magic links and optional TOTP (QR enroll, recovery codes) are available. The email sender is an interface; the shipped transport logs a redacted recipient and keeps the token in a dev mailbox. `GET /auth/dev/mailbox` exists only outside production.
 - Login and magic-link requests share a credential rate limit. Five failures in 15 minutes lock that subject for 15 minutes. Errors stay generic (`AUTH_INVALID_CREDENTIALS`, then `AUTH_LOCKED`) so an identifier is not confirmed.
-- `DEMO_MODE` defaults on outside production and is refused when `NODE_ENV=production`. It keeps the seeded company and `sindhu` / `nexora-demo-2026`.
+- `DEMO_MODE` is off unless set to `true`, and `true` is refused when `NODE_ENV=production`. When it is on, the seeded company and `sindhu` / `nexora-demo-2026` are available. The dev mailbox is registered only when `DEMO_MODE=true` and the process is not production.
 - OIDC is optional. `OIDC_PROVIDERS` is a JSON array of `{id, label, issuer, clientId, clientSecret, redirectUri, scopes}`. Start and callback routes exist. The callback does not exchange a code or open a session.
 - Auth events (login success and failure, magic link sent and used, 2FA enroll and verify, session revoke, role change) append to `auth_audit_event` under forced RLS.
 - The header seam (`x-actor-id`, `x-tenant-id`, `x-region`) exists only when `NEXORA_DEV_HEADERS=true`, and production refuses that flag. Local dev-header use needs both `NEXORA_DEV_HEADERS=true` on the API and `NEXT_PUBLIC_NEXORA_DEV_HEADERS=true` on the web app.

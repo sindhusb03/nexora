@@ -4,7 +4,7 @@ import type { AuthConfig } from "../config.js";
 import type { AppContext } from "../http.js";
 import type { Logger } from "../observability.js";
 import { csrfTokenFor } from "./crypto.js";
-import { writeSessionCookie } from "./session.js";
+import { lookupSession, writeSessionCookie } from "./session.js";
 
 export async function issueSession(
   c: AppContext,
@@ -29,6 +29,26 @@ export async function issueSession(
   });
   writeSessionCookie(c, auth, sessionId);
   return { sessionId, expiresAt, csrfToken: csrfTokenFor(auth.secret, sessionId) };
+}
+
+/** Ends the cookie's current session before a new sign-in replaces it. */
+export async function endPresentedSession(
+  c: AppContext,
+  store: LedgerStore,
+  auth: AuthConfig,
+  logger: Logger,
+): Promise<void> {
+  const previous = await lookupSession(c, store, auth);
+  if (previous.status !== "active") return;
+  await store.revokeSession(previous.identity.sessionId, new Date().toISOString());
+  await recordAuth(store, logger, {
+    eventType: "session_revoke",
+    outcome: "success",
+    actorId: previous.identity.actorId,
+    tenantId: previous.identity.tenantId,
+    requestId: c.get("requestId"),
+    payload: { reason: "replaced" },
+  });
 }
 
 export async function recordAuth(

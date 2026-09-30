@@ -10,4 +10,5 @@ coverage
 uploads/
 test-results/
 playwright-report/
+.terraform/
 .DS_Store

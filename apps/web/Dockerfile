@@ -24,7 +24,7 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:8787
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_NEXORA_DEV_HEADERS=false \
     NODE_ENV=production
-RUN pnpm --filter @nexora/web build
+RUN pnpm --filter @nexora/web build && pnpm prune --prod
 
 FROM node:22-bookworm-slim AS runner
 

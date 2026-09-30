@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -72,6 +73,7 @@ export const authTotp = pgTable("auth_totp", {
   secretCipher: text("secret_cipher").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "string" }),
+  lastAcceptedStep: bigint("last_accepted_step", { mode: "number" }),
 });
 
 export const authRecoveryCode = pgTable("auth_recovery_code", {

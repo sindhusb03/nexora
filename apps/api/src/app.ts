@@ -8,11 +8,12 @@ import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { z, ZodError } from "zod";
 
+import { ARGON2_MEMORY_KIB } from "./auth/crypto.js";
 import type { EmailSender, MemoryMailbox } from "./auth/email.js";
 import type { OidcProviderConfig } from "./auth/oidc.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { requireIdentity } from "./auth/session.js";
-import type { AuthConfig, HttpConfig } from "./config.js";
+import { ConfigError, type AuthConfig, type HttpConfig } from "./config.js";
 import { ApiError, readActor, statusFor, type AppContext, type AppEnv } from "./http.js";
 import { registerFileImportRoutes } from "./imports/file-import.js";
 import { errorFields, jsonLogger, requestLog, type Logger } from "./observability.js";
@@ -50,7 +51,7 @@ export interface AppOptions {
   readonly http?: HttpConfig;
   readonly production?: boolean;
   readonly logger?: Logger;
-  /** scrypt N for new password hashes. Tests lower it; production keeps the default. */
+  /** Argon2id memory in KiB. Tests lower it. Production refuses a value below the OWASP minimum. */
   readonly passwordCost?: number;
   readonly storeKind?: "postgres" | "pglite";
   /** Extra readiness gate beyond a store round trip, such as a migration check. */
@@ -64,6 +65,15 @@ export interface AppOptions {
 }
 
 export function createApp(options: AppOptions) {
+  if (
+    options.production &&
+    options.passwordCost !== undefined &&
+    options.passwordCost < ARGON2_MEMORY_KIB
+  ) {
+    throw new ConfigError(
+      `passwordCost ${options.passwordCost} is below the production argon2id minimum of ${ARGON2_MEMORY_KIB} KiB.`,
+    );
+  }
   const http = options.http ?? DEFAULT_HTTP;
   const logger = options.logger ?? jsonLogger();
   const errorReporter = options.errorReporter ?? noopReporter;
@@ -228,7 +238,8 @@ export function createApp(options: AppOptions) {
     ...(options.passwordCost ? { passwordCost: options.passwordCost } : {}),
     ...(options.demoMode !== undefined ? { demoMode: options.demoMode } : {}),
     ...(options.email ? { email: options.email } : {}),
-    devMailbox: options.production ? null : (options.devMailbox ?? null),
+    devMailbox:
+      options.production || options.demoMode !== true ? null : (options.devMailbox ?? null),
     ...(options.oidcProviders ? { oidcProviders: options.oidcProviders } : {}),
   });
 

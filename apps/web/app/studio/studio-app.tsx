@@ -28,6 +28,7 @@ import {
   fetchPlatform,
   confirmTotp,
   consumeMagicLink,
+  disableTotp,
   enrollTotp,
   fetchAuthConfig,
   fetchSession,
@@ -97,7 +98,12 @@ type Screen =
   | "admin"
   | "platform";
 
-const EMPTY_AUTH: AuthConfigView = { demoMode: false, signupAllowed: false, oidcProviders: [] };
+const EMPTY_AUTH: AuthConfigView = {
+  demoMode: false,
+  signupAllowed: false,
+  region: null,
+  oidcProviders: [],
+};
 
 export function StudioApp() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -137,7 +143,9 @@ export function StudioApp() {
       const magic = new URLSearchParams(window.location.search).get("magic");
       if (magic) {
         window.history.replaceState({}, "", "/studio");
-        const result = await consumeMagicLink(magic);
+        const config = await fetchAuthConfig().catch(() => EMPTY_AUTH);
+        setAuthConfig(config);
+        const result = await consumeMagicLink(magic, config.region);
         if (result.kind === "mfa") {
           setChallengeId(result.challengeId);
           setAuthConfig(await fetchAuthConfig().catch(() => EMPTY_AUTH));
@@ -218,7 +226,7 @@ export function StudioApp() {
     setBusy(true);
     setNotice(null);
     try {
-      await acceptLogin(await login(actorId, password));
+      await acceptLogin(await login(actorId, password, authConfig.region));
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "Sign-in failed");
     } finally {
@@ -255,13 +263,34 @@ export function StudioApp() {
   async function openTwoFactor() {
     if (!session) return;
     setMenuOpen(false);
+    setNotice(null);
+    setFactor({ secret: "", qrDataUrl: "", recoveryCodes: [] });
+  }
+
+  async function startEnroll(password: string) {
+    if (!session) return;
     setBusy(true);
     setNotice(null);
     try {
-      const enrolled = await enrollTotp(session.csrfToken);
+      const enrolled = await enrollTotp(session.csrfToken, password);
       setFactor({ secret: enrolled.secret, qrDataUrl: enrolled.qrDataUrl, recoveryCodes: [] });
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "Two-factor could not be started");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function turnOffTwoFactor(password: string, code: string) {
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await disableTotp(session.csrfToken, password, code, false);
+      setFactor(null);
+      setNotice("Two-factor authentication is off.");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Two-factor could not be turned off");
     } finally {
       setBusy(false);
     }
@@ -563,6 +592,8 @@ export function StudioApp() {
               busy={busy}
               notice={notice}
               onConfirm={confirmTwoFactor}
+              onEnroll={startEnroll}
+              onDisable={turnOffTwoFactor}
               onClose={() => setFactor(null)}
             />
           ) : null}

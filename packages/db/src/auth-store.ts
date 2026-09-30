@@ -26,6 +26,8 @@ type AuthMethods = Pick<
   | "consumeMagicLink"
   | "saveTotp"
   | "confirmTotp"
+  | "acceptTotpStep"
+  | "disableTotp"
   | "getTotp"
   | "saveRecoveryCodes"
   | "consumeRecoveryCode"
@@ -33,6 +35,7 @@ type AuthMethods = Pick<
   | "writeLockout"
   | "clearLockout"
   | "createMfaChallenge"
+  | "readMfaChallenge"
   | "consumeMfaChallenge"
   | "insertAuthAudit"
   | "listAuthAudit"
@@ -151,6 +154,39 @@ export function createAuthStore(db: AppDatabase): AuthMethods {
       });
     },
 
+    acceptTotpStep(actorId, step) {
+      return authTx(db, async (tx) => {
+        const rows = await tx
+          .update(authTotp)
+          .set({ lastAcceptedStep: step })
+          .where(
+            and(
+              eq(authTotp.actorId, actorId),
+              sql`${authTotp.enabledAt} IS NOT NULL`,
+              sql`${authTotp.lastAcceptedStep} IS NULL OR ${authTotp.lastAcceptedStep} < ${step}`,
+            ),
+          )
+          .returning({ actorId: authTotp.actorId });
+        return rows.length === 1;
+      });
+    },
+
+    disableTotp(actorId, retiredAt) {
+      return authTx(db, async (tx) => {
+        const rows = await tx
+          .update(authTotp)
+          .set({ enabledAt: null, secretCipher: "retired", lastAcceptedStep: null })
+          .where(and(eq(authTotp.actorId, actorId), sql`${authTotp.enabledAt} IS NOT NULL`))
+          .returning({ actorId: authTotp.actorId });
+        if (rows.length !== 1) return false;
+        await tx
+          .update(authRecoveryCode)
+          .set({ usedAt: retiredAt })
+          .where(and(eq(authRecoveryCode.actorId, actorId), isNull(authRecoveryCode.usedAt)));
+        return true;
+      });
+    },
+
     confirmTotp(actorId, enabledAt) {
       return authTx(db, async (tx) => {
         const rows = await tx
@@ -258,6 +294,23 @@ export function createAuthStore(db: AppDatabase): AuthMethods {
     createMfaChallenge(input) {
       return authTx(db, async (tx) => {
         await tx.insert(authMfaChallenge).values({ ...input, usedAt: null });
+      });
+    },
+
+    readMfaChallenge(challengeId) {
+      return authTx(db, async (tx) => {
+        const rows = await tx
+          .select({ actorId: authMfaChallenge.actorId, region: authMfaChallenge.region })
+          .from(authMfaChallenge)
+          .where(
+            and(
+              eq(authMfaChallenge.challengeId, challengeId),
+              isNull(authMfaChallenge.usedAt),
+              sql`${authMfaChallenge.expiresAt} > now()`,
+            ),
+          )
+          .limit(1);
+        return rows[0] ?? null;
       });
     },
 

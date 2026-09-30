@@ -6,11 +6,12 @@ import { z } from "zod";
 import type { AuthConfig } from "../config.js";
 import { ApiError, type AppContext, type AppEnv, type Identity } from "../http.js";
 import type { Logger } from "../observability.js";
+import { DEMO_REGION } from "../demo/seed.js";
 import { expireSupportGrants } from "../workspace/routes.js";
 import { burnPasswordCheck, csrfTokenFor, hashPassword, verifyPassword } from "./crypto.js";
 import type { EmailSender, MemoryMailbox } from "./email.js";
 import { openChallenge, registerFactorRoutes } from "./factors.js";
-import { issueSession, recordAuth } from "./issue.js";
+import { endPresentedSession, issueSession, recordAuth } from "./issue.js";
 import { lockoutStatus, lockoutSubject, nextLockout } from "./lockout.js";
 import type { OidcProviderConfig } from "./oidc.js";
 import {
@@ -73,6 +74,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     c.json({
       signupAllowed: auth.allowSignup,
       pinnedRegion: auth.pinnedRegion,
+      region: auth.pinnedRegion ?? (deps.demoMode ? DEMO_REGION : null),
       sessionTtlSeconds: auth.sessionTtlSeconds,
       demoMode: deps.demoMode ?? false,
       oidcProviders: (deps.oidcProviders ?? []).map((provider) => ({
@@ -157,8 +159,6 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
       });
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
     }
-    await store.clearLockout(subject);
-
     const totp = await store.getTotp(user.actorId);
     if (totp?.enabled) {
       const challengeId = await openChallenge(
@@ -183,18 +183,8 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
       return c.json({ mfaRequired: true, challengeId }, 200);
     }
 
-    const previous = await lookupSession(c, store, auth);
-    if (previous.status === "active") {
-      await store.revokeSession(previous.identity.sessionId, new Date().toISOString());
-      await recordAuth(store, logger, {
-        eventType: "session_revoke",
-        outcome: "success",
-        actorId: previous.identity.actorId,
-        tenantId: previous.identity.tenantId,
-        requestId: c.get("requestId"),
-        payload: { reason: "rotated" },
-      });
-    }
+    await store.clearLockout(subject);
+    await endPresentedSession(c, store, auth, logger);
     const session = await issueSession(c, store, auth, { actorId: user.actorId, region });
     await recordAuth(store, logger, {
       eventType: "login_success",

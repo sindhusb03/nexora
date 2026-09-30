@@ -92,13 +92,6 @@ resource "aws_security_group" "alb" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 }
 
 resource "aws_security_group" "tasks" {
@@ -120,9 +113,10 @@ resource "aws_security_group" "tasks" {
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS to AWS APIs, ECR, and S3"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -139,10 +133,44 @@ resource "aws_security_group" "db" {
   }
 }
 
+data "aws_iam_policy_document" "kms" {
+  statement {
+    sid = "RootAdmin"
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+    actions   = ["kms:*"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "CloudWatchLogs"
+    principals {
+      type        = "Service"
+      identifiers = ["logs.ap-south-1.amazonaws.com"]
+    }
+    actions = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:ReEncrypt*",
+      "kms:GenerateDataKey*",
+      "kms:DescribeKey",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "ArnLike"
+      variable = "kms:EncryptionContext:aws:logs:arn"
+      values   = ["arn:aws:logs:ap-south-1:${data.aws_caller_identity.current.account_id}:*"]
+    }
+  }
+}
+
 resource "aws_kms_key" "data" {
   description             = "Nexora data key (ap-south-1)"
   deletion_window_in_days = 30
   enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.kms.json
 }
 
 resource "aws_db_subnet_group" "main" {
@@ -150,24 +178,36 @@ resource "aws_db_subnet_group" "main" {
   subnet_ids = aws_subnet.private[*].id
 }
 
+resource "aws_db_parameter_group" "main" {
+  name   = "${var.name}-postgres17"
+  family = "postgres17"
+
+  parameter {
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "immediate"
+  }
+}
+
 resource "aws_db_instance" "main" {
-  identifier                 = "${var.name}-postgres"
-  engine                     = "postgres"
-  engine_version             = "17"
-  instance_class             = "db.t4g.micro"
-  allocated_storage          = 20
-  db_subnet_group_name       = aws_db_subnet_group.main.name
-  vpc_security_group_ids     = [aws_security_group.db.id]
-  username                   = "nexora_owner"
+  identifier                  = "${var.name}-postgres"
+  engine                      = "postgres"
+  engine_version              = "17"
+  instance_class              = "db.t4g.micro"
+  allocated_storage           = 20
+  db_subnet_group_name        = aws_db_subnet_group.main.name
+  parameter_group_name        = aws_db_parameter_group.main.name
+  vpc_security_group_ids      = [aws_security_group.db.id]
+  username                    = "nexora_owner"
   manage_master_user_password = true
-  storage_encrypted          = true
-  kms_key_id                 = aws_kms_key.data.arn
-  backup_retention_period    = 7
-  copy_tags_to_snapshot      = true
-  deletion_protection        = true
-  publicly_accessible        = false
-  skip_final_snapshot        = false
-  final_snapshot_identifier  = "${var.name}-final"
+  storage_encrypted           = true
+  kms_key_id                  = aws_kms_key.data.arn
+  backup_retention_period     = 7
+  copy_tags_to_snapshot       = true
+  deletion_protection         = true
+  publicly_accessible         = false
+  skip_final_snapshot         = false
+  final_snapshot_identifier   = "${var.name}-final"
   # pgvector is available on RDS Postgres 17. Create it once as the owner:
   # CREATE EXTENSION IF NOT EXISTS vector;
   # Do not put that statement in the shared application migrations.
@@ -215,6 +255,11 @@ resource "aws_secretsmanager_secret" "database_url" {
   kms_key_id = aws_kms_key.data.arn
 }
 
+resource "aws_secretsmanager_secret" "migration_url" {
+  name       = "${var.name}/migration-url"
+  kms_key_id = aws_kms_key.data.arn
+}
+
 resource "aws_ecs_cluster" "main" {
   name = var.name
 }
@@ -235,14 +280,16 @@ resource "aws_ecs_task_definition" "api" {
   task_role_arn            = aws_iam_role.task.arn
 
   container_definitions = jsonencode([{
-    name        = "api"
-    image       = var.api_image
-    essential   = true
+    name         = "api"
+    image        = var.api_image
+    essential    = true
     portMappings = [{ containerPort = 8787, protocol = "tcp" }]
     environment = [
       { name = "NODE_ENV", value = "production" },
       { name = "DEMO_MODE", value = "false" },
-      { name = "NEXORA_REGION", value = "ap-south-1" }
+      { name = "NEXORA_REGION", value = "ap-south-1" },
+      { name = "WEB_ORIGIN", value = var.web_origin },
+      { name = "TRUST_PROXY", value = "true" }
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
@@ -268,10 +315,42 @@ resource "aws_ecs_task_definition" "web" {
   execution_role_arn       = aws_iam_role.exec.arn
 
   container_definitions = jsonencode([{
-    name      = "web"
-    image     = var.web_image
-    essential = true
+    name         = "web"
+    image        = var.web_image
+    essential    = true
     portMappings = [{ containerPort = 3000, protocol = "tcp" }]
+  }])
+}
+
+resource "aws_ecs_task_definition" "migrate" {
+  family                   = "${var.name}-migrate"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.exec.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([{
+    name      = "migrate"
+    image     = var.api_image
+    command   = ["node_modules/.bin/tsx", "src/migrate.ts"]
+    essential = true
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "NEXORA_API_LOGIN_ROLE", value = "nexora_api" }
+    ]
+    secrets = [
+      { name = "DATABASE_MIGRATION_URL", valueFrom = aws_secretsmanager_secret.migration_url.arn }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.api.name
+        awslogs-region        = "ap-south-1"
+        awslogs-stream-prefix = "migrate"
+      }
+    }
   }])
 }
 
@@ -287,6 +366,14 @@ resource "aws_ecs_service" "api" {
     security_groups  = [aws_security_group.tasks.id]
     assign_public_ip = false
   }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 8787
+  }
+
+  depends_on = [aws_lb_listener.https]
 }
 
 resource "aws_ecs_service" "web" {
@@ -301,6 +388,14 @@ resource "aws_ecs_service" "web" {
     security_groups  = [aws_security_group.tasks.id]
     assign_public_ip = false
   }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.web.arn
+    container_name   = "web"
+    container_port   = 3000
+  }
+
+  depends_on = [aws_lb_listener.https]
 }
 
 data "aws_iam_policy_document" "ecs_assume" {
@@ -326,4 +421,74 @@ resource "aws_iam_role_policy_attachment" "exec" {
 resource "aws_iam_role" "task" {
   name               = "${var.name}-ecs-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+resource "aws_iam_role_policy" "exec_secrets" {
+  name = "${var.name}-exec-secrets"
+  role = aws_iam_role.exec.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = [
+          aws_secretsmanager_secret.auth.arn,
+          aws_secretsmanager_secret.database_url.arn,
+          aws_secretsmanager_secret.migration_url.arn,
+        ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [aws_kms_key.data.arn]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "task_uploads" {
+  name = "${var.name}-task-uploads"
+  role = aws_iam_role.task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = [aws_s3_bucket.uploads.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = ["${aws_s3_bucket.uploads.arn}/*"]
+      },
+    ]
+  })
+}
+
+data "aws_iam_policy_document" "uploads_tls" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.uploads.arn,
+      "${aws_s3_bucket.uploads.arn}/*",
+    ]
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+  policy = data.aws_iam_policy_document.uploads_tls.json
 }

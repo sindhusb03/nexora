@@ -202,6 +202,9 @@ export interface IdentityStore {
     createdAt: string;
   }): Promise<"saved" | "locked">;
   confirmTotp(actorId: string, enabledAt: string): Promise<boolean>;
+  /** Records a TOTP step once. Returns false when that step was already accepted. */
+  acceptTotpStep(actorId: string, step: number): Promise<boolean>;
+  disableTotp(actorId: string, retiredAt: string): Promise<boolean>;
   getTotp(actorId: string): Promise<{ secretCipher: string; enabled: boolean } | null>;
   saveRecoveryCodes(actorId: string, codeHashes: readonly string[]): Promise<void>;
   consumeRecoveryCode(actorId: string, codeHash: string, usedAt: string): Promise<boolean>;
@@ -215,6 +218,7 @@ export interface IdentityStore {
     createdAt: string;
     expiresAt: string;
   }): Promise<void>;
+  readMfaChallenge(challengeId: string): Promise<{ actorId: string; region: string } | null>;
   consumeMfaChallenge(
     challengeId: string,
     usedAt: string,

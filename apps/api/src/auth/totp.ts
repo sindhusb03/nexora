@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const STEP_SECONDS = 30;
 const DIGITS = 6;
@@ -26,18 +26,23 @@ export function totpCode(secret: string, now = Date.now()): string {
   return hotp(key, Math.floor(now / 1000 / STEP_SECONDS));
 }
 
-/** Accepts the current 30-second step and one step on either side. */
-export function verifyTotp(secret: string, code: string, now = Date.now()): boolean {
+/** Step the code matches, or null. The same step must not be accepted twice. */
+export function matchingTotpStep(secret: string, code: string, now = Date.now()): number | null {
   const normalized = code.replace(/\s/g, "");
-  if (!/^\d{6}$/.test(normalized)) return false;
+  if (!/^\d{6}$/.test(normalized)) return null;
   const key = base32Decode(secret);
-  if (!key) return false;
+  if (!key) return null;
   const counter = Math.floor(now / 1000 / STEP_SECONDS);
   for (const step of [counter - 1, counter, counter + 1]) {
     if (step < 0) continue;
-    if (safeEqual(normalized, hotp(key, step))) return true;
+    if (safeEqual(normalized, hotp(key, step))) return step;
   }
-  return false;
+  return null;
+}
+
+/** Accepts the current 30-second step and one step on either side. */
+export function verifyTotp(secret: string, code: string, now = Date.now()): boolean {
+  return matchingTotpStep(secret, code, now) !== null;
 }
 
 export function generateRecoveryCodes(count = 8): readonly string[] {
@@ -49,9 +54,9 @@ export function generateRecoveryCodes(count = 8): readonly string[] {
   });
 }
 
-export function hashRecoveryCode(code: string): string {
+export function hashRecoveryCode(code: string, secret: string): string {
   const normalized = code.replace(/[-\s]/g, "").toUpperCase();
-  return createHash("sha256").update(normalized).digest("hex");
+  return createHmac("sha256", secret).update(normalized).digest("hex");
 }
 
 function hotp(key: Buffer, counter: number): string {

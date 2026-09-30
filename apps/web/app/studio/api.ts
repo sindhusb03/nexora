@@ -53,6 +53,7 @@ export async function fetchSession(): Promise<SessionView | null> {
 export interface AuthConfigView {
   readonly demoMode: boolean;
   readonly signupAllowed: boolean;
+  readonly region: string | null;
   readonly oidcProviders: readonly { readonly id: string; readonly label: string }[];
 }
 
@@ -63,11 +64,12 @@ export type LoginResult =
 export async function fetchAuthConfig(): Promise<AuthConfigView> {
   const body = await request("/auth/config", { method: "GET" }, null);
   if (typeof body !== "object" || body === null) {
-    return { demoMode: false, signupAllowed: false, oidcProviders: [] };
+    return { demoMode: false, signupAllowed: false, region: null, oidcProviders: [] };
   }
   const record = body as {
     demoMode?: unknown;
     signupAllowed?: unknown;
+    region?: unknown;
     oidcProviders?: unknown;
   };
   const providers = Array.isArray(record.oidcProviders)
@@ -82,6 +84,7 @@ export async function fetchAuthConfig(): Promise<AuthConfigView> {
   return {
     demoMode: record.demoMode === true,
     signupAllowed: record.signupAllowed === true,
+    region: typeof record.region === "string" ? record.region : null,
     oidcProviders: providers,
   };
 }
@@ -102,10 +105,14 @@ function readLogin(body: unknown): LoginResult {
   return { kind: "session", session: body };
 }
 
-export async function login(actorId: string, password: string): Promise<LoginResult> {
+export async function login(
+  actorId: string,
+  password: string,
+  region: string | null,
+): Promise<LoginResult> {
   const body = await request(
     "/auth/login",
-    { method: "POST", body: JSON.stringify({ actorId, password, region: "us-east-1" }) },
+    { method: "POST", body: JSON.stringify(withRegion({ actorId, password }, region)) },
     null,
   );
   return readLogin(body);
@@ -127,13 +134,17 @@ export async function requestMagicLink(email: string): Promise<string> {
   return "If an account exists for that address, a sign-in link was sent.";
 }
 
-export async function consumeMagicLink(token: string): Promise<LoginResult> {
+export async function consumeMagicLink(token: string, region: string | null): Promise<LoginResult> {
   const body = await request(
     "/auth/magic-link/consume",
-    { method: "POST", body: JSON.stringify({ token, region: "us-east-1" }) },
+    { method: "POST", body: JSON.stringify(withRegion({ token }, region)) },
     null,
   );
   return readLogin(body);
+}
+
+function withRegion(fields: Record<string, string>, region: string | null): Record<string, string> {
+  return region ? { ...fields, region } : fields;
 }
 
 export async function verifySecondFactor(
@@ -156,8 +167,13 @@ export async function verifySecondFactor(
 
 export async function enrollTotp(
   csrf: string,
+  password: string,
 ): Promise<{ readonly secret: string; readonly qrDataUrl: string; readonly otpauthUrl: string }> {
-  const body = await request("/auth/2fa/enroll", { method: "POST" }, csrf);
+  const body = await request(
+    "/auth/2fa/enroll",
+    { method: "POST", body: JSON.stringify({ password }) },
+    csrf,
+  );
   if (
     typeof body !== "object" ||
     body === null ||
@@ -172,6 +188,22 @@ export async function enrollTotp(
     qrDataUrl: record.qrDataUrl,
     otpauthUrl: typeof record.otpauthUrl === "string" ? record.otpauthUrl : "",
   };
+}
+
+export async function disableTotp(
+  csrf: string,
+  password: string,
+  code: string,
+  recovery: boolean,
+): Promise<void> {
+  await request(
+    "/auth/2fa/disable",
+    {
+      method: "POST",
+      body: JSON.stringify(recovery ? { password, recoveryCode: code } : { password, code }),
+    },
+    csrf,
+  );
 }
 
 export async function confirmTotp(csrf: string, code: string): Promise<readonly string[]> {

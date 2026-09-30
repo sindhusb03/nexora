@@ -74,7 +74,7 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         ...card,
         support: supportActive(card, actor.actorId, now),
       })),
-      demoPasswordHint: deps.demoMode === false ? null : "nexora-demo-2026",
+      demoPasswordHint: deps.demoMode === true ? "nexora-demo-2026" : null,
     });
   });
 
