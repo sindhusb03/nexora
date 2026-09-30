@@ -46,6 +46,10 @@ Light and dark captures are in `/opt/cursor/artifacts/screenshots/`:
 - `admin-light.png`, `admin-dark.png`
 - `palette-light.png`, `palette-dark.png`
 
+## Polish pass
+
+The studio shell is a grouped sidebar with icons, a collapse control, and a workspace switcher. The top bar is compact switchers, a search field with a command-palette hint, and an avatar menu. KPI cards show kernel period-over-period deltas and sparklines. The revenue and cash chart draws every month with area fills, currency axis ticks, and click-through to that period's statements. Proposal text is currency, with status chips, filters, and agent icons. The copilot is a chat with streaming text, citation chips, suggested prompts, and a mock-mode badge. The earnings bridge is a waterfall. Charts do not animate, so the full series is on screen immediately. The Next.js dev indicator is off.
+
 ## Next
 
 1. Parse bank PDFs and tie the reconciliation certificate to those totals.

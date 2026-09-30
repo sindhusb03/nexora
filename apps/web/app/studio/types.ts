@@ -174,6 +174,7 @@ export interface Workspace {
     readonly title: string;
     readonly summary: string;
     readonly citationId: string;
+    readonly amountMinor: string;
   }[];
   readonly documents: readonly { readonly id: string; readonly title: string; readonly fileName: string; readonly excerpt: string }[];
   readonly admin: {
@@ -188,7 +189,15 @@ export interface Workspace {
     }[];
     readonly auditLocked: boolean;
   };
-  readonly series: readonly { readonly label: string; readonly revenue: string; readonly netIncome: string; readonly cash: string }[];
+  readonly series: readonly {
+    readonly label: string;
+    readonly revenue: string;
+    readonly netIncome: string;
+    readonly cash: string;
+    readonly revenueDelta: string;
+    readonly netIncomeDelta: string;
+    readonly cashDelta: string;
+  }[];
 }
 
 export interface SessionView {

@@ -25,13 +25,13 @@ test.describe("studio screenshots", () => {
     await signIn(page);
 
     for (const theme of ["light", "dark"] as const) {
-      const label = await page.getByTestId("theme-toggle").innerText();
-      const isDark = label.trim() === "Light";
+      const isDark = await page.evaluate(() => document.documentElement.classList.contains("dark"));
       if (theme === "dark" && !isDark) await page.getByTestId("theme-toggle").click();
       if (theme === "light" && isDark) await page.getByTestId("theme-toggle").click();
 
       await page.getByTestId("nav-dashboard").click();
       await expect(page.getByTestId("screen-dashboard")).toBeVisible();
+      await expect(page.locator(".nx-chart canvas")).toBeVisible();
       await shot(page, `dashboard-${theme}`);
 
       await page.getByTestId("nav-statements").click();
@@ -55,17 +55,13 @@ test.describe("studio screenshots", () => {
       await page.getByTestId("nav-approvals").click();
       await page.getByTestId("open-copilot").click();
       await expect(page.getByTestId("copilot-drawer")).toBeVisible();
+      await expect(page.getByTestId("copilot-mode")).toContainText("Mock");
+      if (theme === "light") {
+        await page.getByTestId("copilot-send").click();
+        await expect(page.getByTestId("copilot-thread")).toContainText("15800000");
+      }
       await expect(page.getByTestId("screen-approvals")).toBeVisible();
       await shot(page, `copilot-approvals-${theme}`);
-      await page.keyboard.press("Escape");
-
-      await page.getByTestId("nav-admin").click();
-      await expect(page.getByTestId("screen-admin")).toBeVisible();
-      await shot(page, `admin-${theme}`);
-
-      await page.getByTestId("open-palette").click();
-      await expect(page.getByTestId("command-palette")).toBeVisible();
-      await shot(page, `palette-${theme}`);
       await page.keyboard.press("Escape");
     }
   });

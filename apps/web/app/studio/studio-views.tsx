@@ -1,6 +1,18 @@
 "use client";
 
 import type * as echarts from "echarts";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  GitCompare,
+  Inbox,
+  LayoutDashboard,
+  LineChart,
+  Minus,
+  Presentation,
+  Scale,
+  Upload,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -8,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { Chart } from "./charts";
-import { csvCell, minorToAxis, minorToDisplay, percentFromRatio, shortHash, withCurrency } from "./format";
+import { axisCurrency, csvCell, humanizeMinorPhrases, minorToAxis, minorToDisplay, percentFromRatio, shortHash, withCurrency } from "./format";
 import { StatementGrid } from "./statement-grid";
 import type { JournalView, PlatformView, Workspace } from "./types";
 
@@ -31,30 +43,92 @@ function colors(dark: boolean) {
 function baseOption(dark: boolean): echarts.EChartsOption {
   const tone = colors(dark);
   return {
+    animation: false,
     textStyle: { fontFamily: "inherit", color: tone.text },
-    grid: { left: 48, right: 16, top: 28, bottom: 28 },
+    grid: { left: 8, right: 16, top: 36, bottom: 8, containLabel: true },
     tooltip: { trigger: "axis" },
-    legend: { textStyle: { color: tone.muted }, top: 0 },
-    xAxis: { type: "category", axisLabel: { color: tone.muted }, axisLine: { lineStyle: { color: tone.split } } },
-    yAxis: { type: "value", axisLabel: { color: tone.muted }, splitLine: { lineStyle: { color: tone.split } } },
+    legend: { textStyle: { color: tone.muted }, top: 0, icon: "circle" },
+    xAxis: {
+      type: "category",
+      axisLabel: { color: tone.muted, hideOverlap: true },
+      axisLine: { lineStyle: { color: tone.split } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: tone.muted, formatter: (value: number) => axisCurrency(value) },
+      splitLine: { lineStyle: { color: tone.split, type: "dashed" } },
+    },
   };
 }
 
-export function DashboardView({ workspace, periodIndex, dark }: { readonly workspace: Workspace; readonly periodIndex: number; readonly dark: boolean }) {
+const AGENT_ICONS = {
+  mapping: Upload,
+  variance: GitCompare,
+  normalization: Scale,
+  board: Presentation,
+  watcher: LineChart,
+  general: LayoutDashboard,
+} as const;
+
+export function agentIcon(agent: string): typeof Inbox {
+  return AGENT_ICONS[agent as keyof typeof AGENT_ICONS] ?? Inbox;
+}
+
+export function DashboardView({
+  workspace,
+  periodIndex,
+  dark,
+  onDrill,
+}: {
+  readonly workspace: Workspace;
+  readonly periodIndex: number;
+  readonly dark: boolean;
+  readonly onDrill: (index: number) => void;
+}) {
   const currency = workspace.context.currency;
   const period = workspace.statements.periods[periodIndex];
   const tone = colors(dark);
+  const point = workspace.series[periodIndex];
   const option = useMemo<echarts.EChartsOption>(() => {
-    const labels = workspace.series.map((point) => point.label);
+    const labels = workspace.series.map((item) => item.label);
     return {
       ...baseOption(dark),
-      xAxis: { ...(baseOption(dark).xAxis as object), data: labels },
+      tooltip: {
+        trigger: "axis",
+        formatter: (params) => {
+          const rows = Array.isArray(params) ? params : [params];
+          const index = rows[0]?.dataIndex ?? 0;
+          const item = workspace.series[index];
+          if (!item) return "";
+          return `${item.label}<br/>Revenue ${money(item.revenue, currency)}<br/>Ending cash ${money(item.cash, currency)}`;
+        },
+      },
+      xAxis: { ...(baseOption(dark).xAxis as object), data: labels, boundaryGap: false },
       series: [
-        { name: "Revenue", type: "line", smooth: true, showSymbol: false, data: workspace.series.map((point) => minorToAxis(point.revenue)), color: tone.revenue },
-        { name: "Ending cash", type: "line", smooth: true, showSymbol: false, data: workspace.series.map((point) => minorToAxis(point.cash)), color: tone.cash },
+        {
+          name: "Revenue",
+          type: "line",
+          smooth: true,
+          showSymbol: false,
+          connectNulls: true,
+          data: workspace.series.map((item) => minorToAxis(item.revenue)),
+          color: tone.revenue,
+          areaStyle: { color: tone.revenue, opacity: 0.12 },
+        },
+        {
+          name: "Ending cash",
+          type: "line",
+          smooth: true,
+          showSymbol: false,
+          connectNulls: true,
+          data: workspace.series.map((item) => minorToAxis(item.cash)),
+          color: tone.cash,
+          areaStyle: { color: tone.cash, opacity: 0.1 },
+        },
       ],
     };
-  }, [dark, tone.cash, tone.revenue, workspace.series]);
+  }, [currency, dark, tone.cash, tone.revenue, workspace.series]);
   const revenue = cell(workspace, "revenue", periodIndex);
   const net = cell(workspace, "net", periodIndex);
   const cash = cell(workspace, "end", periodIndex);
@@ -70,16 +144,19 @@ export function DashboardView({ workspace, periodIndex, dark }: { readonly works
         <span className={`nx-pill ${equityGap === 0n ? "is-good" : "is-bad"}`}>{equityGap === 0n ? "Assets = liabilities + equity" : "Balance sheet out of identity"}</span>
       </header>
       <div className="nx-kpis">
-        <KpiCard label="Revenue" display={withCurrency(revenue, currency)} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
-        <KpiCard label="Net income" display={withCurrency(net, currency)} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
-        <KpiCard label="Ending cash" display={withCurrency(cash, currency)} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
+        <KpiCard label="Revenue" display={withCurrency(revenue, currency)} delta={point?.revenueDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.revenue)} color={tone.revenue} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
+        <KpiCard label="Net income" display={withCurrency(net, currency)} delta={point?.netIncomeDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.netIncome)} color={tone.revenue} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
+        <KpiCard label="Ending cash" display={withCurrency(cash, currency)} delta={point?.cashDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.cash)} color={tone.cash} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
         {workspace.kpis.filter((item) => item.id === "normalized").map((item) => (
-          <KpiCard key={item.id} label={item.label} display={withCurrency(item.display, currency)} hash={item.lineage.inputHash} engine={item.lineage.engineVersion} />
+          <KpiCard key={item.id} label={item.label} display={withCurrency(item.display, currency)} delta={null} currency={currency} spark={[]} color={tone.plan} hash={item.lineage.inputHash} engine={item.lineage.engineVersion} />
         ))}
       </div>
       <section className="nx-panel">
-        <h2>Revenue and cash</h2>
-        <Chart option={option} label="Revenue and ending cash by month" />
+        <div className="nx-panel-head">
+          <h2>Revenue and cash</h2>
+          <p className="nx-muted">All {workspace.series.length} months. Click a point to open that period.</p>
+        </div>
+        <Chart option={option} label="Revenue and ending cash by month" onPoint={onDrill} />
       </section>
       <div className="nx-split">
         <section className="nx-panel">
@@ -110,13 +187,67 @@ function cellMinor(workspace: Workspace, key: string, index: number): string {
   return workspace.statements.rows.find((row) => row.key === key)?.values[index]?.minor ?? "0";
 }
 
-function KpiCard({ label, display, hash, engine }: { readonly label: string; readonly display: string; readonly hash: string; readonly engine: string }) {
+function KpiCard({
+  label,
+  display,
+  delta,
+  currency,
+  spark,
+  color,
+  hash,
+  engine,
+}: {
+  readonly label: string;
+  readonly display: string;
+  readonly delta: string | null;
+  readonly currency: string;
+  readonly spark: readonly string[];
+  readonly color: string;
+  readonly hash: string;
+  readonly engine: string;
+}) {
+  const direction = delta === null || delta === "0" ? "flat" : delta.startsWith("-") ? "down" : "up";
   return (
     <article className="nx-kpi">
-      <p>{label}</p>
+      <div className="nx-kpi-top">
+        <p>{label}</p>
+        {spark.length > 1 ? <Sparkline values={spark} color={color} /> : null}
+      </div>
       <strong>{display}</strong>
+      {delta === null ? <small>Bridge total</small> : <Delta direction={direction} label={money(delta, currency)} />}
       <small title={hash}>{engine} · {shortHash(hash)}</small>
     </article>
+  );
+}
+
+function Delta({ direction, label }: { readonly direction: "up" | "down" | "flat"; readonly label: string }) {
+  const Icon = direction === "up" ? ArrowUpRight : direction === "down" ? ArrowDownRight : Minus;
+  return (
+    <span className={`nx-delta is-${direction}`}>
+      <Icon size={14} aria-hidden="true" />
+      {direction === "flat" ? "Flat vs prior month" : `${label} vs prior month`}
+    </span>
+  );
+}
+
+function Sparkline({ values, color }: { readonly values: readonly string[]; readonly color: string }) {
+  const nums = values.map((value) => minorToAxis(value));
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const span = max - min || 1;
+  const width = 88;
+  const height = 28;
+  const d = nums
+    .map((value, index) => {
+      const x = (index / Math.max(nums.length - 1, 1)) * width;
+      const y = height - ((value - min) / span) * (height - 4) - 2;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg className="nx-spark" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -261,8 +392,8 @@ export function ForecastView({
     ...baseOption(dark),
     xAxis: { ...(baseOption(dark).xAxis as object), data: workspace.forecast.base.months.map((month) => `M${month.period}`) },
     series: [
-      { name: "Base revenue", type: "line", data: workspace.forecast.base.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.revenue },
-      { name: "Scenario revenue", type: "line", data: workspace.forecast.scenario.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.plan },
+      { name: "Base revenue", type: "line", smooth: true, showSymbol: false, connectNulls: true, areaStyle: { color: tone.revenue, opacity: 0.12 }, data: workspace.forecast.base.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.revenue },
+      { name: "Scenario revenue", type: "line", smooth: true, showSymbol: false, connectNulls: true, data: workspace.forecast.scenario.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.plan },
     ],
   }), [dark, tone.plan, tone.revenue, workspace.forecast.base.months, workspace.forecast.scenario.months]);
   return (
@@ -281,10 +412,10 @@ export function ForecastView({
           onSave({ revenueMinor, growthRate, grossMargin, opexMinor, scenarioGrowthRate });
         }}
       >
-        <label>Run-rate revenue (minor)<Input value={revenueMinor} onChange={(event) => setRevenue(event.target.value)} data-testid="driver-revenue" /></label>
+        <label>Run-rate revenue<small>{money(revenueMinor, currency)}</small><Input value={revenueMinor} onChange={(event) => setRevenue(event.target.value)} data-testid="driver-revenue" /></label>
         <label>Growth rate<Input value={growthRate} onChange={(event) => setGrowth(event.target.value)} /></label>
         <label>Gross margin<Input value={grossMargin} onChange={(event) => setMargin(event.target.value)} /></label>
-        <label>Opex (minor)<Input value={opexMinor} onChange={(event) => setOpex(event.target.value)} /></label>
+        <label>Operating expenses<small>{money(opexMinor, currency)}</small><Input value={opexMinor} onChange={(event) => setOpex(event.target.value)} /></label>
         <label>Scenario growth<Input value={scenarioGrowthRate} onChange={(event) => setScenario(event.target.value)} /></label>
         <Button type="submit" disabled={!workspace.permissions.canWrite || busy}>{busy ? "Saving" : "Recompute"}</Button>
       </form>
@@ -411,15 +542,7 @@ export function VarianceView({ workspace, dark }: { readonly workspace: Workspac
 export function QoeView({ workspace, dark }: { readonly workspace: Workspace; readonly dark: boolean }) {
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(() => {
-    const labels = ["Reported", ...workspace.qoe.steps.map((step) => step.label), "Normalized"];
-    const values = [workspace.qoe.reported, ...workspace.qoe.steps.map((step) => step.amount), workspace.qoe.normalized];
-    return {
-      ...baseOption(dark),
-      xAxis: { ...(baseOption(dark).xAxis as object), data: labels },
-      series: [{ name: "Bridge", type: "bar", data: values.map((value) => minorToAxis(value)), color: tone.revenue }],
-    };
-  }, [dark, tone.revenue, workspace.qoe]);
+  const option = useMemo<echarts.EChartsOption>(() => waterfall(workspace, dark, currency, tone), [currency, dark, tone, workspace]);
   return (
     <div className="nx-stack" data-testid="screen-qoe">
       <header className="nx-page-head">
@@ -478,7 +601,15 @@ export function ApprovalsView({
   readonly busyId: string | null;
   readonly onDecide: (id: string, decision: "accepted" | "rejected") => void;
 }) {
-  const waiting = workspace.approvals.filter((item) => item.status === "suggested");
+  const [filter, setFilter] = useState<"all" | "suggested" | "accepted" | "rejected">("all");
+  const currency = workspace.context.currency;
+  const visible = workspace.approvals.filter((item) => filter === "all" || item.status === filter);
+  const counts = {
+    all: workspace.approvals.length,
+    suggested: workspace.approvals.filter((item) => item.status === "suggested").length,
+    accepted: workspace.approvals.filter((item) => item.status === "accepted").length,
+    rejected: workspace.approvals.filter((item) => item.status === "rejected").length,
+  };
   return (
     <div className="nx-stack" data-testid="screen-approvals">
       <header className="nx-page-head">
@@ -488,28 +619,106 @@ export function ApprovalsView({
           <p className="nx-lede">Accepting records a decision. It does not post a journal or change actuals.</p>
         </div>
       </header>
-      {workspace.approvals.length === 0 ? <p className="nx-empty">No proposals yet. Ask a specialist in the copilot.</p> : null}
-      <ul className="nx-cards">
-        {workspace.approvals.map((item) => (
-          <li key={item.id} className="nx-card" data-testid={`proposal-${item.status}`}>
-            <div>
-              <p className="nx-kicker">{item.agent} · {item.status}</p>
-              <h2>{item.title}</h2>
-              <p>{item.summary}</p>
-              <small title={item.citationId}>Citation {shortHash(item.citationId)}</small>
-            </div>
-            {item.status === "suggested" ? (
-              <div className="nx-row">
-                <Button type="button" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "accepted")} data-testid="accept-proposal">Accept</Button>
-                <Button type="button" variant="outline" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "rejected")}>Reject</Button>
-              </div>
-            ) : null}
-          </li>
+      <div className="nx-filters" role="tablist">
+        {(["all", "suggested", "accepted", "rejected"] as const).map((status) => (
+          <button key={status} type="button" className={filter === status ? "is-on" : ""} onClick={() => setFilter(status)}>
+            {status} <span>{counts[status]}</span>
+          </button>
         ))}
+      </div>
+      {workspace.approvals.length === 0 ? <ScreenState title="Inbox is empty" body="Ask a specialist in the copilot. Agents file proposals. They do not post." /> : null}
+      {workspace.approvals.length > 0 && visible.length === 0 ? <ScreenState title="Nothing in this filter" body="Switch status to see the other proposals." /> : null}
+      <ul className="nx-cards">
+        {visible.map((item) => {
+          const Icon = agentIcon(item.agent);
+          return (
+            <li key={item.id} className="nx-card" data-testid={`proposal-${item.status}`}>
+              <div className="nx-card-copy">
+                <div className="nx-card-meta">
+                  <span className="nx-agent"><Icon size={14} aria-hidden="true" />{item.agent}</span>
+                  <span className={`nx-chip is-${item.status}`}>{item.status}</span>
+                  {item.amountMinor ? <span className="nx-chip">{money(item.amountMinor, currency)}</span> : null}
+                </div>
+                <h2>{item.title}</h2>
+                <p>{humanizeMinorPhrases(item.summary, currency)}</p>
+                <small title={item.citationId}>Citation {shortHash(item.citationId)}</small>
+              </div>
+              {item.status === "suggested" ? (
+                <div className="nx-row">
+                  <Button type="button" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "accepted")} data-testid="accept-proposal">Accept</Button>
+                  <Button type="button" variant="outline" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "rejected")}>Reject</Button>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
-      {waiting.length === 0 && workspace.approvals.length > 0 ? <p className="nx-muted">Nothing is waiting. Earlier decisions stay on the record.</p> : null}
     </div>
   );
+}
+
+function ScreenState({ title, body }: { readonly title: string; readonly body: string }) {
+  return (
+    <div className="nx-state" role="status">
+      <h2>{title}</h2>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function waterfall(workspace: Workspace, dark: boolean, currency: string, tone: ReturnType<typeof colors>): echarts.EChartsOption {
+  const steps = [
+    { label: "Reported", minor: workspace.qoe.reported, total: true },
+    ...workspace.qoe.steps.map((step) => ({ label: step.label, minor: step.amount, total: false })),
+    { label: "Normalized", minor: workspace.qoe.normalized, total: true },
+  ];
+  let running = 0;
+  const assist: number[] = [];
+  const rise: number[] = [];
+  const fall: number[] = [];
+  const totals: number[] = [];
+  for (const step of steps) {
+    const value = minorToAxis(step.minor);
+    if (step.total) {
+      assist.push(0);
+      rise.push(0);
+      fall.push(0);
+      totals.push(value);
+      running = value;
+    } else if (value >= 0) {
+      assist.push(running);
+      rise.push(value);
+      fall.push(0);
+      totals.push(0);
+      running += value;
+    } else {
+      running += value;
+      assist.push(running);
+      rise.push(0);
+      fall.push(-value);
+      totals.push(0);
+    }
+  }
+  return {
+    ...baseOption(dark),
+    tooltip: {
+      trigger: "axis",
+      formatter: (params) => {
+        const rows = Array.isArray(params) ? params : [params];
+        const index = rows[0]?.dataIndex ?? 0;
+        const step = steps[index];
+        if (!step) return "";
+        return `${step.label}<br/>${money(step.minor, currency)}`;
+      },
+    },
+    xAxis: { ...(baseOption(dark).xAxis as object), data: steps.map((step) => step.label) },
+    series: [
+      { name: "Base", type: "bar", stack: "bridge", silent: true, itemStyle: { color: "transparent" }, emphasis: { disabled: true }, data: assist },
+      { name: "Add-back", type: "bar", stack: "bridge", data: rise, color: tone.cash, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+      { name: "Reduction", type: "bar", stack: "bridge", data: fall, color: tone.alert, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+      { name: "Total", type: "bar", stack: "bridge", data: totals, color: tone.revenue, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+    ],
+  };
 }
 
 export function AdminView({

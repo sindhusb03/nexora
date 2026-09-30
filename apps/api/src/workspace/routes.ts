@@ -474,6 +474,7 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
       title: text(item.payload.title),
       summary: text(item.payload.summary),
       citationId: text(item.payload.citationId),
+      amountMinor: text(item.payload.amount),
     })),
     documents: documents.map((item) => ({ id: item.id, title: text(item.payload.title), fileName: text(item.payload.fileName), excerpt: text(item.payload.body).slice(0, 280) })),
     admin: {
@@ -482,12 +483,18 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
       audit: auditEvents,
       auditLocked,
     },
-    series: series.map((item) => ({
-      label: item.period.endDate.slice(0, 7),
-      revenue: item.statement.incomeStatement.revenueMinor,
-      netIncome: item.statement.incomeStatement.netIncomeMinor,
-      cash: item.statement.cashFlow.endingCashMinor,
-    })),
+    series: series.map((item, index) => {
+      const prior = series[index - 1]?.statement;
+      return {
+        label: item.period.endDate.slice(0, 7),
+        revenue: item.statement.incomeStatement.revenueMinor,
+        netIncome: item.statement.incomeStatement.netIncomeMinor,
+        cash: item.statement.cashFlow.endingCashMinor,
+        revenueDelta: deltaMinor(currency, item.statement.incomeStatement.revenueMinor, prior?.incomeStatement.revenueMinor ?? null),
+        netIncomeDelta: deltaMinor(currency, item.statement.incomeStatement.netIncomeMinor, prior?.incomeStatement.netIncomeMinor ?? null),
+        cashDelta: deltaMinor(currency, item.statement.cashFlow.endingCashMinor, prior?.cashFlow.endingCashMinor ?? null),
+      };
+    }),
   };
 }
 
@@ -573,6 +580,11 @@ function figure(label: string, minor: string, currency: string, inputHash: strin
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function deltaMinor(currency: string, current: string, prior: string | null): string {
+  if (prior === null) return "0";
+  return subtractMoney(money(currency, current), money(currency, prior)).minor;
 }
 
 function envKey(): string | null {

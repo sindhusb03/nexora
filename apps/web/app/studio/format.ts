@@ -20,6 +20,26 @@ export function withCurrency(display: string, currency: string): string {
 }
 
 /** Chart axis scale only. Tooltips use the server display string, not this number. */
+export function axisCurrency(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const sign = value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    const millions = abs / 1_000_000;
+    return `${sign}$${millions.toFixed(millions >= 10 ? 0 : 1)}M`;
+  }
+  if (abs >= 1_000) {
+    const thousands = abs / 1_000;
+    return `${sign}$${thousands.toFixed(thousands >= 10 ? 0 : 1)}k`;
+  }
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
+/** Replaces "15000000 minor-unit" phrases with currency. The stored minor string is unchanged. */
+export function humanizeMinorPhrases(text: string, currency: string): string {
+  return text.replace(/\b(\d+)\s+minor(?:-unit)?(?:\s+units?)?\b/g, (_match, digits: string) => withCurrency(minorToDisplay(digits), currency));
+}
+
 export function minorToAxis(minor: string): number {
   const negative = minor.startsWith("-");
   const digits = (negative ? minor.slice(1) : minor).replace(/\D/g, "");

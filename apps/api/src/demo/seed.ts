@@ -124,7 +124,7 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "suggested", {
     agent: "variance",
     title: "September revenue variance",
-    summary: "Revenue is ahead of the 15000000 minor-unit plan. Commentary is suggested until you accept it.",
+    summary: "Revenue is ahead of the $150,000.00 plan. Commentary is suggested until you accept it.",
     citationId: "variance",
   });
   await insertRecord(store, owner, "proposal", "suggested", {
@@ -136,7 +136,7 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "accepted", {
     agent: "normalization",
     title: "Owner travel add-back",
-    summary: "450000 minor units of owner personal travel. Accepted as a bridge line. Posted actuals are unchanged.",
+    summary: "Owner personal travel of $4,500.00. Accepted as a bridge line. Posted actuals are unchanged.",
     citationId: "adj-owner-travel",
     amount: "450000",
     sourceRowId: "src-owner-travel",
@@ -144,7 +144,7 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "accepted", {
     agent: "normalization",
     title: "One-time litigation",
-    summary: "1200000 minor units. Accepted as a bridge line. Posted actuals are unchanged.",
+    summary: "One-time litigation of $12,000.00. Accepted as a bridge line. Posted actuals are unchanged.",
     citationId: "adj-litigation",
     amount: "1200000",
     sourceRowId: "src-litigation",
