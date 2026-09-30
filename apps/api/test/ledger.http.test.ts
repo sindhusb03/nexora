@@ -41,8 +41,25 @@ describe("financial kernel API", () => {
       cash: await account(app, tenantId, entityId, "1000", "Cash", "asset", "cash"),
       ppe: await account(app, tenantId, entityId, "1500", "PPE", "asset", "cfi"),
       debt: await account(app, tenantId, entityId, "2000", "Debt", "liability", "cff"),
-      re: await account(app, tenantId, entityId, "3000", "Retained earnings", "equity", "non_cash", true),
-      dividends: await account(app, tenantId, entityId, "3100", "Dividends", "equity", "distribution"),
+      re: await account(
+        app,
+        tenantId,
+        entityId,
+        "3000",
+        "Retained earnings",
+        "equity",
+        "non_cash",
+        true,
+      ),
+      dividends: await account(
+        app,
+        tenantId,
+        entityId,
+        "3100",
+        "Dividends",
+        "equity",
+        "distribution",
+      ),
       revenue: await account(app, tenantId, entityId, "4000", "Revenue", "revenue", "cfo"),
       expense: await account(app, tenantId, entityId, "5000", "Expense", "expense", "cfo"),
     };
@@ -106,11 +123,19 @@ describe("financial kernel API", () => {
     const body = await readJson<{
       engineVersion: string;
       incomeStatement: { netIncome: { minor: string; amount: string; currency: string } };
-      balanceSheet: { assets: { minor: string }; liabilities: { minor: string }; equity: { minor: string } };
+      balanceSheet: {
+        assets: { minor: string };
+        liabilities: { minor: string };
+        equity: { minor: string };
+      };
       cashFlow: Record<string, { minor: string }>;
       retainedEarnings: { ending: { minor: string }; close: string };
     }>(statements);
-    expect(body.incomeStatement.netIncome).toEqual({ minor: "50000", amount: "500.00", currency: "USD" });
+    expect(body.incomeStatement.netIncome).toEqual({
+      minor: "50000",
+      amount: "500.00",
+      currency: "USD",
+    });
     expect(body.balanceSheet.assets.minor).toBe("160000");
     expect(body.balanceSheet.liabilities.minor).toBe("15000");
     expect(body.balanceSheet.equity.minor).toBe("145000");
@@ -138,10 +163,18 @@ describe("financial kernel API", () => {
       body: { actorId: "auditor-1", role: "auditor" },
     });
 
-    const viewerPost = await journal(app, tenantId, entityId, current, "viewer-1-key", [
-      [accounts.cash, "1.00", "0.00"],
-      [accounts.revenue, "0.00", "1.00"],
-    ], "viewer-1");
+    const viewerPost = await journal(
+      app,
+      tenantId,
+      entityId,
+      current,
+      "viewer-1-key",
+      [
+        [accounts.cash, "1.00", "0.00"],
+        [accounts.revenue, "0.00", "1.00"],
+      ],
+      "viewer-1",
+    );
     expect(viewerPost.status).toBe(403);
 
     const viewerRead = await call(app, "GET", `/v1/journals/${distributionId}`, {
@@ -164,7 +197,9 @@ describe("financial kernel API", () => {
     });
     expect(auditorAudit.status).toBe(200);
     const auditBody = await readJson<{ events: Array<{ eventType: string }> }>(auditorAudit);
-    expect(auditBody.events.some((event: { eventType: string }) => event.eventType === "JournalPosted")).toBe(true);
+    expect(
+      auditBody.events.some((event: { eventType: string }) => event.eventType === "JournalPosted"),
+    ).toBe(true);
 
     const otherTenant = await call(app, "GET", `/v1/journals/${distributionId}`, {
       actor: "owner-1",
@@ -173,11 +208,16 @@ describe("financial kernel API", () => {
     });
     expect(otherTenant.status).toBe(404);
 
-    const wrongRegion = await call(app, "GET", `/v1/entities/${entityId}/periods/${current}/statements`, {
-      actor: "owner-1",
-      tenant: tenantId,
-      region: "eu-central-1",
-    });
+    const wrongRegion = await call(
+      app,
+      "GET",
+      `/v1/entities/${entityId}/periods/${current}/statements`,
+      {
+        actor: "owner-1",
+        tenant: tenantId,
+        region: "eu-central-1",
+      },
+    );
     expect(wrongRegion.status).toBe(403);
 
     const closed = await call(app, "POST", `/v1/periods/${current}/close`, {

@@ -63,7 +63,11 @@ export function StatementGrid({
             id: period.periodId,
             header: period.label,
             cell: (info) => info.row.original.values[index]?.display ?? "",
-            sortFn: (left, right) => compareMinor(left.original.values[index]?.minor ?? "0", right.original.values[index]?.minor ?? "0"),
+            sortFn: (left, right) =>
+              compareMinor(
+                left.original.values[index]?.minor ?? "0",
+                right.original.values[index]?.minor ?? "0",
+              ),
           }),
         ),
       ]),
@@ -93,9 +97,16 @@ export function StatementGrid({
       <div className="nx-toolbar">
         <label className="nx-search">
           <span>Filter lines</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Revenue, cash, balance" data-testid="statement-filter" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Revenue, cash, balance"
+            data-testid="statement-filter"
+          />
         </label>
-        <p className="nx-muted">{modelRows.length} lines · line column pinned · click a month to drill into journals</p>
+        <p className="nx-muted">
+          {modelRows.length} lines · line column pinned · click a month to drill into journals
+        </p>
       </div>
       <div className="nx-grid-scroll" ref={scrollRef} data-testid="statement-grid">
         <div className="nx-grid-head" style={{ gridTemplateColumns: template }}>
@@ -153,7 +164,9 @@ export function StatementGrid({
             );
           })}
         </div>
-        {modelRows.length === 0 ? <p className="nx-empty">No statement lines match that filter.</p> : null}
+        {modelRows.length === 0 ? (
+          <p className="nx-empty">No statement lines match that filter.</p>
+        ) : null}
       </div>
     </div>
   );

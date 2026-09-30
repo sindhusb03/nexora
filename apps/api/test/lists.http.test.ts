@@ -35,9 +35,9 @@ describe("ledger lists", () => {
     });
     expect(accountResponse.status).toBe(201);
 
-    const accounts = await readJson<{ accounts: Array<{ code: string; retainedEarnings: boolean }> }>(
-      await call(app, "GET", `/v1/entities/${entityId}/accounts`, first),
-    );
+    const accounts = await readJson<{
+      accounts: Array<{ code: string; retainedEarnings: boolean }>;
+    }>(await call(app, "GET", `/v1/entities/${entityId}/accounts`, first));
     expect(accounts.accounts).toEqual([
       expect.objectContaining({ code: "3000", retainedEarnings: true, currency: "USD" }),
     ]);
@@ -55,7 +55,14 @@ describe("ledger lists", () => {
     const cash = await readJson<{ accountId: string }>(
       await call(app, "POST", "/v1/accounts", {
         ...first,
-        body: { entityId, code: "1000", name: "Cash", report: "asset", cashFlow: "cash", retainedEarnings: false },
+        body: {
+          entityId,
+          code: "1000",
+          name: "Cash",
+          report: "asset",
+          cashFlow: "cash",
+          retainedEarnings: false,
+        },
       }),
     );
     const revenue = await readJson<{ accountId: string }>(
@@ -85,23 +92,31 @@ describe("ledger lists", () => {
       },
     });
     expect(posted.status).toBe(201);
-    const journals = await readJson<{ journals: Array<{ totalDebit: string; payloadHash: string }> }>(
-      await call(app, "GET", `/v1/entities/${entityId}/journals?periodId=${periodId}`, first),
-    );
+    const journals = await readJson<{
+      journals: Array<{ totalDebit: string; payloadHash: string }>;
+    }>(await call(app, "GET", `/v1/entities/${entityId}/journals?periodId=${periodId}`, first));
     expect(journals.journals).toHaveLength(1);
     expect(journals.journals[0]?.totalDebit).toBe("10.00");
     expect(journals.journals[0]?.payloadHash).toHaveLength(64);
 
-    const viewer = await call(app, "GET", `/v1/entities/${entityId}/journals?periodId=${periodId}`, {
-      actor: "viewer-1",
-      tenant: first.tenant,
-      region: first.region,
-    });
+    const viewer = await call(
+      app,
+      "GET",
+      `/v1/entities/${entityId}/journals?periodId=${periodId}`,
+      {
+        actor: "viewer-1",
+        tenant: first.tenant,
+        region: first.region,
+      },
+    );
     expect(viewer.status).toBe(403);
   });
 });
 
-async function provision(app: TestApp, name: string): Promise<{ actor: string; tenant: string; region: string }> {
+async function provision(
+  app: TestApp,
+  name: string,
+): Promise<{ actor: string; tenant: string; region: string }> {
   const response = await call(app, "POST", "/v1/tenants", {
     actor: "platform-admin",
     region: "us-east-1",
@@ -111,7 +126,10 @@ async function provision(app: TestApp, name: string): Promise<{ actor: string; t
   return { actor: "owner-1", tenant: body.tenantId, region: "us-east-1" };
 }
 
-async function createEntity(app: TestApp, scope: { actor: string; tenant: string; region: string }): Promise<string> {
+async function createEntity(
+  app: TestApp,
+  scope: { actor: string; tenant: string; region: string },
+): Promise<string> {
   const response = await call(app, "POST", "/v1/entities", {
     ...scope,
     body: { legalName: "OpCo", functionalCurrency: "USD" },

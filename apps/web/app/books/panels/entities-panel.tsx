@@ -79,7 +79,11 @@ export function EntitiesPanel({
                     <tr key={entity.entityId} className={selected ? "row-selected" : undefined}>
                       <td>{entity.legalName}</td>
                       <td>{entity.functionalCurrency}</td>
-                      <td>{entity.retainedEarningsAccountId ?? <span className="muted">Not designated</span>}</td>
+                      <td>
+                        {entity.retainedEarningsAccountId ?? (
+                          <span className="muted">Not designated</span>
+                        )}
+                      </td>
                       <td>
                         <code className="hash">{entity.entityId}</code>
                       </td>
@@ -106,7 +110,11 @@ export function EntitiesPanel({
         <h3>New entity</h3>
         <div className="form-row">
           <Field label="Legal name">
-            <Input value={legalName} onChange={(event) => setLegalName(event.target.value)} maxLength={200} />
+            <Input
+              value={legalName}
+              onChange={(event) => setLegalName(event.target.value)}
+              maxLength={200}
+            />
           </Field>
           <Field label="Functional currency">
             <Input
@@ -121,7 +129,9 @@ export function EntitiesPanel({
           </Button>
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

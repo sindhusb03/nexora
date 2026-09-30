@@ -42,13 +42,7 @@ function money(amount: Amount): string {
   return amount.amount;
 }
 
-export function Insights({
-  session,
-  health,
-}: {
-  session: Session;
-  health: KernelHealth | null;
-}) {
+export function Insights({ session, health }: { session: Session; health: KernelHealth | null }) {
   const [load, setLoad] = useState<Load>({ status: "idle" });
 
   const tenantId = session.tenantId;
@@ -57,7 +51,10 @@ export function Insights({
 
   useEffect(() => {
     if (tenantId.length === 0) {
-      setLoad({ status: "empty", message: "Sign in and open a company before Insights can show actuals." });
+      setLoad({
+        status: "empty",
+        message: "Sign in and open a company before Insights can show actuals.",
+      });
       return;
     }
     const current: Session = { actorId, tenantId, region };
@@ -72,7 +69,10 @@ export function Insights({
       }
       const entity = entities.data[0];
       if (!entity) {
-        setLoad({ status: "empty", message: "No company is on the books yet. Create one in the ledger, then post a journal." });
+        setLoad({
+          status: "empty",
+          message: "No company is on the books yet. Create one in the ledger, then post a journal.",
+        });
         return;
       }
       const periods = await listPeriods(current, entity.entityId);
@@ -83,7 +83,10 @@ export function Insights({
       }
       const period = latestPeriod(periods.data);
       if (!period) {
-        setLoad({ status: "empty", message: `${entity.legalName} has no period. Open an accounting period, then post activity.` });
+        setLoad({
+          status: "empty",
+          message: `${entity.legalName} has no period. Open an accounting period, then post activity.`,
+        });
         return;
       }
       const statements = await getStatements(current, entity.entityId, period.periodId);
@@ -107,8 +110,8 @@ export function Insights({
         <div>
           <h1>Insights</h1>
           <p>
-            Actuals for the latest period, derived by the kernel from posted journals. Projections, valuation, and the board pack
-            stay on their own pages and use the same engine.
+            Actuals for the latest period, derived by the kernel from posted journals. Projections,
+            valuation, and the board pack stay on their own pages and use the same engine.
           </p>
         </div>
         <Link href="/books?tab=statements" className="button-ghost">
@@ -121,13 +124,23 @@ export function Insights({
           label="Net income"
           value={ready ? money(ready.statements.incomeStatement.netIncome) : null}
           unit={ready ? ready.statements.currency : undefined}
-          basis={ready ? `${ready.entity.legalName} · ${ready.period.startDate} to ${ready.period.endDate}` : load.status === "loading" ? "Reading the ledger" : "Waiting for posted activity"}
+          basis={
+            ready
+              ? `${ready.entity.legalName} · ${ready.period.startDate} to ${ready.period.endDate}`
+              : load.status === "loading"
+                ? "Reading the ledger"
+                : "Waiting for posted activity"
+          }
         />
         <MetricTile
           label="Assets"
           value={ready ? money(ready.statements.balanceSheet.assets) : null}
           unit={ready ? ready.statements.currency : undefined}
-          basis={ready ? `Liabilities ${ready.statements.balanceSheet.liabilities.amount} · Equity ${ready.statements.balanceSheet.equity.amount}` : "Balance sheet from the kernel"}
+          basis={
+            ready
+              ? `Liabilities ${ready.statements.balanceSheet.liabilities.amount} · Equity ${ready.statements.balanceSheet.equity.amount}`
+              : "Balance sheet from the kernel"
+          }
         />
         <MetricTile
           label="Ending cash"
@@ -143,8 +156,22 @@ export function Insights({
           label="Engine"
           value={ready ? ready.statements.engineVersion : health ? health.engineVersion : null}
           small
-          status={health ? <span className="badge badge-green">Online</span> : <span className="badge badge-red">Unreachable</span>}
-          basis={ready ? <code className="hash-wrap">{ready.statements.inputHash}</code> : health ? health.service : "Start the API"}
+          status={
+            health ? (
+              <span className="badge badge-green">Online</span>
+            ) : (
+              <span className="badge badge-red">Unreachable</span>
+            )
+          }
+          basis={
+            ready ? (
+              <code className="hash-wrap">{ready.statements.inputHash}</code>
+            ) : health ? (
+              health.service
+            ) : (
+              "Start the API"
+            )
+          }
         />
       </div>
 
@@ -167,7 +194,8 @@ export function Insights({
           <div>
             <dt>Retained earnings</dt>
             <dd>
-              <Figure value={ready.statements.retainedEarnings.ending.amount} /> {ready.statements.currency} · {ready.statements.retainedEarnings.close}
+              <Figure value={ready.statements.retainedEarnings.ending.amount} />{" "}
+              {ready.statements.currency} · {ready.statements.retainedEarnings.close}
             </dd>
           </div>
           <div>

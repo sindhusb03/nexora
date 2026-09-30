@@ -41,12 +41,20 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
   const { store, auth, logger } = deps;
 
   app.get("/auth/config", (c) =>
-    c.json({ signupAllowed: auth.allowSignup, pinnedRegion: auth.pinnedRegion, sessionTtlSeconds: auth.sessionTtlSeconds }),
+    c.json({
+      signupAllowed: auth.allowSignup,
+      pinnedRegion: auth.pinnedRegion,
+      sessionTtlSeconds: auth.sessionTtlSeconds,
+    }),
   );
 
   app.post("/auth/signup", async (c) => {
     if (!auth.allowSignup) {
-      throw new ApiError(403, "AUTH_SIGNUP_DISABLED", "Self sign-up is disabled on this deployment; an operator creates accounts");
+      throw new ApiError(
+        403,
+        "AUTH_SIGNUP_DISABLED",
+        "Self sign-up is disabled on this deployment; an operator creates accounts",
+      );
     }
     const body = signupSchema.parse(await c.req.json());
     const outcome = await store.createUser({
@@ -87,11 +95,21 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     const now = new Date();
     const sessionId = crypto.randomUUID();
     const expiresAt = new Date(now.getTime() + auth.sessionTtlSeconds * 1000).toISOString();
-    await store.createSession({ sessionId, actorId: body.actorId, region, createdAt: now.toISOString(), expiresAt });
+    await store.createSession({
+      sessionId,
+      actorId: body.actorId,
+      region,
+      createdAt: now.toISOString(),
+      expiresAt,
+    });
     writeSessionCookie(c, auth, sessionId);
     logger.info("auth.login", { requestId: c.get("requestId"), actorId: body.actorId, region });
     return c.json(
-      await view(deps, { actorId: body.actorId, tenantId: null, region, source: "session", sessionId }, expiresAt),
+      await view(
+        deps,
+        { actorId: body.actorId, tenantId: null, region, source: "session", sessionId },
+        expiresAt,
+      ),
       200,
     );
   });
@@ -101,7 +119,10 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     if (session.status === "active") {
       assertCsrf(c, auth, deps.webOrigins, session.identity.sessionId);
       await store.revokeSession(session.identity.sessionId, new Date().toISOString());
-      logger.info("auth.logout", { requestId: c.get("requestId"), actorId: session.identity.actorId });
+      logger.info("auth.logout", {
+        requestId: c.get("requestId"),
+        actorId: session.identity.actorId,
+      });
     }
     clearSessionCookie(c, auth);
     return c.body(null, 204);
@@ -132,19 +153,36 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     }
     if (!(await store.selectSessionTenant(session.sessionId, body.tenantId))) {
       clearSessionCookie(c, auth);
-      throw new ApiError(401, "AUTH_SESSION_INVALID", "The session is expired or revoked; sign in again");
+      throw new ApiError(
+        401,
+        "AUTH_SESSION_INVALID",
+        "The session is expired or revoked; sign in again",
+      );
     }
-    logger.info("auth.tenant_selected", { requestId: c.get("requestId"), actorId: session.actorId, tenantId: body.tenantId });
+    logger.info("auth.tenant_selected", {
+      requestId: c.get("requestId"),
+      actorId: session.actorId,
+      tenantId: body.tenantId,
+    });
     const record = await store.getActiveSession(session.sessionId);
-    return c.json(await view(deps, { ...session, tenantId: body.tenantId }, record?.expiresAt ?? null));
+    return c.json(
+      await view(deps, { ...session, tenantId: body.tenantId }, record?.expiresAt ?? null),
+    );
   });
 }
 
-async function requireSession(c: AppContext, deps: AuthRouteDeps): Promise<Identity & { readonly sessionId: string }> {
+async function requireSession(
+  c: AppContext,
+  deps: AuthRouteDeps,
+): Promise<Identity & { readonly sessionId: string }> {
   const session = await lookupSession(c, deps.store, deps.auth);
   if (session.status === "invalid") {
     clearSessionCookie(c, deps.auth);
-    throw new ApiError(401, "AUTH_SESSION_INVALID", "The session is expired, revoked, or not recognised; sign in again");
+    throw new ApiError(
+      401,
+      "AUTH_SESSION_INVALID",
+      "The session is expired, revoked, or not recognised; sign in again",
+    );
   }
   if (session.status === "none") {
     throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
@@ -153,8 +191,14 @@ async function requireSession(c: AppContext, deps: AuthRouteDeps): Promise<Ident
   return session.identity;
 }
 
-async function view(deps: AuthRouteDeps, session: Identity & { readonly sessionId: string }, expiresAt: string | null) {
-  const roles = session.tenantId ? await deps.store.listRoles(session.tenantId, session.actorId) : [];
+async function view(
+  deps: AuthRouteDeps,
+  session: Identity & { readonly sessionId: string },
+  expiresAt: string | null,
+) {
+  const roles = session.tenantId
+    ? await deps.store.listRoles(session.tenantId, session.actorId)
+    : [];
   return {
     actorId: session.actorId,
     tenantId: session.tenantId,

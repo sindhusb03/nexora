@@ -73,7 +73,10 @@ export function authorize(roles: readonly Role[], action: Action): void {
 
 export function assertSameRegion(homeRegion: string, requestRegion: string): void {
   if (homeRegion.length === 0 || homeRegion !== requestRegion) {
-    throw new KernelError("REGION_MISMATCH", "Request region does not match the tenant home region");
+    throw new KernelError(
+      "REGION_MISMATCH",
+      "Request region does not match the tenant home region",
+    );
   }
 }
 

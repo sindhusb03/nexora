@@ -20,7 +20,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { Chart } from "./charts";
-import { axisCurrency, csvCell, humanizeMinorPhrases, minorToAxis, minorToDisplay, percentFromRatio, shortHash, withCurrency } from "./format";
+import {
+  axisCurrency,
+  csvCell,
+  humanizeMinorPhrases,
+  minorToAxis,
+  minorToDisplay,
+  percentFromRatio,
+  shortHash,
+  withCurrency,
+} from "./format";
 import { StatementGrid } from "./statement-grid";
 import type { JournalView, PlatformView, Workspace } from "./types";
 
@@ -132,29 +141,78 @@ export function DashboardView({
   const revenue = cell(workspace, "revenue", periodIndex);
   const net = cell(workspace, "net", periodIndex);
   const cash = cell(workspace, "end", periodIndex);
-  const equityGap = BigInt(cellMinor(workspace, "assets", periodIndex)) - BigInt(cellMinor(workspace, "liabilities", periodIndex)) - BigInt(cellMinor(workspace, "equity", periodIndex));
+  const equityGap =
+    BigInt(cellMinor(workspace, "assets", periodIndex)) -
+    BigInt(cellMinor(workspace, "liabilities", periodIndex)) -
+    BigInt(cellMinor(workspace, "equity", periodIndex));
   return (
     <div className="nx-stack" data-testid="screen-dashboard">
       <header className="nx-page-head">
         <div>
           <p className="nx-kicker">Board-ready close</p>
           <h1>{workspace.context.entityName}</h1>
-          <p className="nx-lede">Kernel figures for {period?.label ?? workspace.context.periodLabel}. Supervised autonomy proposes; posted books stay posted.</p>
+          <p className="nx-lede">
+            Kernel figures for {period?.label ?? workspace.context.periodLabel}. Supervised autonomy
+            proposes; posted books stay posted.
+          </p>
         </div>
-        <span className={`nx-pill ${equityGap === 0n ? "is-good" : "is-bad"}`}>{equityGap === 0n ? "Assets = liabilities + equity" : "Balance sheet out of identity"}</span>
+        <span className={`nx-pill ${equityGap === 0n ? "is-good" : "is-bad"}`}>
+          {equityGap === 0n ? "Assets = liabilities + equity" : "Balance sheet out of identity"}
+        </span>
       </header>
       <div className="nx-kpis">
-        <KpiCard label="Revenue" display={withCurrency(revenue, currency)} delta={point?.revenueDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.revenue)} color={tone.revenue} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
-        <KpiCard label="Net income" display={withCurrency(net, currency)} delta={point?.netIncomeDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.netIncome)} color={tone.revenue} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
-        <KpiCard label="Ending cash" display={withCurrency(cash, currency)} delta={point?.cashDelta ?? "0"} currency={currency} spark={workspace.series.map((item) => item.cash)} color={tone.cash} hash={period?.inputHash ?? ""} engine={period?.engineVersion ?? workspace.engineVersion} />
-        {workspace.kpis.filter((item) => item.id === "normalized").map((item) => (
-          <KpiCard key={item.id} label={item.label} display={withCurrency(item.display, currency)} delta={null} currency={currency} spark={[]} color={tone.plan} hash={item.lineage.inputHash} engine={item.lineage.engineVersion} />
-        ))}
+        <KpiCard
+          label="Revenue"
+          display={withCurrency(revenue, currency)}
+          delta={point?.revenueDelta ?? "0"}
+          currency={currency}
+          spark={workspace.series.map((item) => item.revenue)}
+          color={tone.revenue}
+          hash={period?.inputHash ?? ""}
+          engine={period?.engineVersion ?? workspace.engineVersion}
+        />
+        <KpiCard
+          label="Net income"
+          display={withCurrency(net, currency)}
+          delta={point?.netIncomeDelta ?? "0"}
+          currency={currency}
+          spark={workspace.series.map((item) => item.netIncome)}
+          color={tone.revenue}
+          hash={period?.inputHash ?? ""}
+          engine={period?.engineVersion ?? workspace.engineVersion}
+        />
+        <KpiCard
+          label="Ending cash"
+          display={withCurrency(cash, currency)}
+          delta={point?.cashDelta ?? "0"}
+          currency={currency}
+          spark={workspace.series.map((item) => item.cash)}
+          color={tone.cash}
+          hash={period?.inputHash ?? ""}
+          engine={period?.engineVersion ?? workspace.engineVersion}
+        />
+        {workspace.kpis
+          .filter((item) => item.id === "normalized")
+          .map((item) => (
+            <KpiCard
+              key={item.id}
+              label={item.label}
+              display={withCurrency(item.display, currency)}
+              delta={null}
+              currency={currency}
+              spark={[]}
+              color={tone.plan}
+              hash={item.lineage.inputHash}
+              engine={item.lineage.engineVersion}
+            />
+          ))}
       </div>
       <section className="nx-panel">
         <div className="nx-panel-head">
           <h2>Revenue and cash</h2>
-          <p className="nx-muted">All {workspace.series.length} months. Click a point to open that period.</p>
+          <p className="nx-muted">
+            All {workspace.series.length} months. Click a point to open that period.
+          </p>
         </div>
         <Chart option={option} label="Revenue and ending cash by month" onPoint={onDrill} />
       </section>
@@ -165,14 +223,19 @@ export function DashboardView({
             {workspace.variance.lines.map((line) => (
               <li key={line.key}>
                 <span>{line.label}</span>
-                <strong className={line.favorable ? "is-good" : "is-bad"}>{money(line.varianceMinor, currency)}</strong>
+                <strong className={line.favorable ? "is-good" : "is-bad"}>
+                  {money(line.varianceMinor, currency)}
+                </strong>
               </li>
             ))}
           </ul>
         </section>
         <section className="nx-panel">
           <h2>Waiting on you</h2>
-          <p className="nx-muted">{workspace.approvals.filter((item) => item.status === "suggested").length} suggested proposals. Agents do not post.</p>
+          <p className="nx-muted">
+            {workspace.approvals.filter((item) => item.status === "suggested").length} suggested
+            proposals. Agents do not post.
+          </p>
         </section>
       </div>
     </div>
@@ -206,7 +269,8 @@ function KpiCard({
   readonly hash: string;
   readonly engine: string;
 }) {
-  const direction = delta === null || delta === "0" ? "flat" : delta.startsWith("-") ? "down" : "up";
+  const direction =
+    delta === null || delta === "0" ? "flat" : delta.startsWith("-") ? "down" : "up";
   return (
     <article className="nx-kpi">
       <div className="nx-kpi-top">
@@ -214,13 +278,25 @@ function KpiCard({
         {spark.length > 1 ? <Sparkline values={spark} color={color} /> : null}
       </div>
       <strong>{display}</strong>
-      {delta === null ? <small>Bridge total</small> : <Delta direction={direction} label={money(delta, currency)} />}
-      <small title={hash}>{engine} · {shortHash(hash)}</small>
+      {delta === null ? (
+        <small>Bridge total</small>
+      ) : (
+        <Delta direction={direction} label={money(delta, currency)} />
+      )}
+      <small title={hash}>
+        {engine} · {shortHash(hash)}
+      </small>
     </article>
   );
 }
 
-function Delta({ direction, label }: { readonly direction: "up" | "down" | "flat"; readonly label: string }) {
+function Delta({
+  direction,
+  label,
+}: {
+  readonly direction: "up" | "down" | "flat";
+  readonly label: string;
+}) {
   const Icon = direction === "up" ? ArrowUpRight : direction === "down" ? ArrowDownRight : Minus;
   return (
     <span className={`nx-delta is-${direction}`}>
@@ -230,7 +306,13 @@ function Delta({ direction, label }: { readonly direction: "up" | "down" | "flat
   );
 }
 
-function Sparkline({ values, color }: { readonly values: readonly string[]; readonly color: string }) {
+function Sparkline({
+  values,
+  color,
+}: {
+  readonly values: readonly string[];
+  readonly color: string;
+}) {
   const nums = values.map((value) => minorToAxis(value));
   const min = Math.min(...nums);
   const max = Math.max(...nums);
@@ -246,7 +328,14 @@ function Sparkline({ values, color }: { readonly values: readonly string[]; read
     .join(" ");
   return (
     <svg className="nx-spark" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -259,7 +348,10 @@ export function OnboardingView({ workspace }: { readonly workspace: Workspace })
         <div>
           <p className="nx-kicker">Onboarding</p>
           <h1>Trial balance, statements, then a certificate</h1>
-          <p className="nx-lede">The demo books are a balanced reconstruction of Nazareno Services. Workbook totals are evidence, not silent journal imports.</p>
+          <p className="nx-lede">
+            The demo books are a balanced reconstruction of Nazareno Services. Workbook totals are
+            evidence, not silent journal imports.
+          </p>
         </div>
       </header>
       <ol className="nx-steps">
@@ -276,14 +368,37 @@ export function OnboardingView({ workspace }: { readonly workspace: Workspace })
       <section className="nx-panel" data-testid="reconciliation">
         <h2>Reconciliation certificate</h2>
         <dl className="nx-facts">
-          <div><dt>Book cash</dt><dd>{withCurrency(certificate.bookCash.display, workspace.context.currency)}</dd></div>
-          <div><dt>Staged bank figure</dt><dd>{withCurrency(certificate.bankCash.display, workspace.context.currency)}</dd></div>
-          <div><dt>Difference</dt><dd>{withCurrency(certificate.difference.display, workspace.context.currency)}</dd></div>
-          <div><dt>Status</dt><dd>{certificate.status}</dd></div>
-          <div><dt>Source</dt><dd>{certificate.sourceDocument}</dd></div>
-          <div><dt>Lineage</dt><dd title={certificate.inputHash}>{certificate.engineVersion} · {shortHash(certificate.inputHash)}</dd></div>
+          <div>
+            <dt>Book cash</dt>
+            <dd>{withCurrency(certificate.bookCash.display, workspace.context.currency)}</dd>
+          </div>
+          <div>
+            <dt>Staged bank figure</dt>
+            <dd>{withCurrency(certificate.bankCash.display, workspace.context.currency)}</dd>
+          </div>
+          <div>
+            <dt>Difference</dt>
+            <dd>{withCurrency(certificate.difference.display, workspace.context.currency)}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{certificate.status}</dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>{certificate.sourceDocument}</dd>
+          </div>
+          <div>
+            <dt>Lineage</dt>
+            <dd title={certificate.inputHash}>
+              {certificate.engineVersion} · {shortHash(certificate.inputHash)}
+            </dd>
+          </div>
         </dl>
-        <p className="nx-muted">The certificate difference is a kernel subtraction. The bank PDFs are staged; their printed totals are not parsed into a second cash number in this build.</p>
+        <p className="nx-muted">
+          The certificate difference is a kernel subtraction. The bank PDFs are staged; their
+          printed totals are not parsed into a second cash number in this build.
+        </p>
       </section>
     </div>
   );
@@ -302,7 +417,11 @@ export function StatementsView({
   const journals = workspace.journals.filter((journal) => journal.periodId === period?.periodId);
   function exportCsv() {
     const header = ["Line", "Section", ...workspace.statements.periods.map((item) => item.label)];
-    const body = workspace.statements.rows.map((row) => [row.label, row.section, ...row.values.map((value) => value.display)]);
+    const body = workspace.statements.rows.map((row) => [
+      row.label,
+      row.section,
+      ...row.values.map((value) => value.display),
+    ]);
     const csv = [header, ...body].map((line) => line.map(csvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -318,15 +437,32 @@ export function StatementsView({
         <div>
           <p className="nx-kicker">Three statements</p>
           <h1>Monthly actuals</h1>
-          <p className="nx-lede">Each month is a kernel statement. Prior earnings sit in retained earnings, not in this month&apos;s revenue.</p>
+          <p className="nx-lede">
+            Each month is a kernel statement. Prior earnings sit in retained earnings, not in this
+            month&apos;s revenue.
+          </p>
         </div>
-        <Button type="button" variant="outline" onClick={exportCsv} data-testid="export-csv">Export CSV</Button>
+        <Button type="button" variant="outline" onClick={exportCsv} data-testid="export-csv">
+          Export CSV
+        </Button>
       </header>
-      <StatementGrid periods={workspace.statements.periods} rows={workspace.statements.rows} selectedPeriodId={period?.periodId ?? ""} onSelectPeriod={onSelectPeriod} />
+      <StatementGrid
+        periods={workspace.statements.periods}
+        rows={workspace.statements.rows}
+        selectedPeriodId={period?.periodId ?? ""}
+        onSelectPeriod={onSelectPeriod}
+      />
       <section className="nx-panel">
         <h2>Journals for {period?.label}</h2>
-        <p className="nx-muted">Posted journals are immutable. Hash {period ? shortHash(period.inputHash) : "—"} · {period?.engineVersion}</p>
-        {journals.length === 0 ? <p className="nx-empty">No posted journals in this period.</p> : <JournalList journals={journals} />}
+        <p className="nx-muted">
+          Posted journals are immutable. Hash {period ? shortHash(period.inputHash) : "—"} ·{" "}
+          {period?.engineVersion}
+        </p>
+        {journals.length === 0 ? (
+          <p className="nx-empty">No posted journals in this period.</p>
+        ) : (
+          <JournalList journals={journals} />
+        )}
       </section>
     </div>
   );
@@ -334,14 +470,16 @@ export function StatementsView({
 
 function JournalList({ journals }: { readonly journals: readonly JournalView[] }) {
   const ref = useRef<HTMLDivElement>(null);
-  const lines = journals.flatMap((journal) => journal.lines.map((line, index) => ({
-    id: `${journal.journalId}-${index}`,
-    source: journal.sourceRef,
-    hash: journal.payloadHash,
-    account: line.account,
-    debit: line.debit.display,
-    credit: line.credit.display,
-  })));
+  const lines = journals.flatMap((journal) =>
+    journal.lines.map((line, index) => ({
+      id: `${journal.journalId}-${index}`,
+      source: journal.sourceRef,
+      hash: journal.payloadHash,
+      account: line.account,
+      debit: line.debit.display,
+      credit: line.credit.display,
+    })),
+  );
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => ref.current,
@@ -356,7 +494,12 @@ function JournalList({ journals }: { readonly journals: readonly JournalView[] }
           const line = lines[item.index];
           if (!line) return null;
           return (
-            <div key={line.id} className="nx-journal-row" style={{ transform: `translateY(${item.start}px)` }} title={line.hash}>
+            <div
+              key={line.id}
+              className="nx-journal-row"
+              style={{ transform: `translateY(${item.start}px)` }}
+              title={line.hash}
+            >
               <span>{line.source}</span>
               <span>{line.account}</span>
               <span>{line.debit}</span>
@@ -378,7 +521,13 @@ export function ForecastView({
   readonly workspace: Workspace;
   readonly dark: boolean;
   readonly busy: boolean;
-  readonly onSave: (input: { revenueMinor: string; growthRate: string; grossMargin: string; opexMinor: string; scenarioGrowthRate: string }) => void;
+  readonly onSave: (input: {
+    revenueMinor: string;
+    growthRate: string;
+    grossMargin: string;
+    opexMinor: string;
+    scenarioGrowthRate: string;
+  }) => void;
 }) {
   const drivers = workspace.forecast.drivers;
   const [revenueMinor, setRevenue] = useState(drivers.revenueMinor);
@@ -388,21 +537,53 @@ export function ForecastView({
   const [scenarioGrowthRate, setScenario] = useState(workspace.forecast.scenarioGrowthRate);
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(() => ({
-    ...baseOption(dark),
-    xAxis: { ...(baseOption(dark).xAxis as object), data: workspace.forecast.base.months.map((month) => `M${month.period}`) },
-    series: [
-      { name: "Base revenue", type: "line", smooth: true, showSymbol: false, connectNulls: true, areaStyle: { color: tone.revenue, opacity: 0.12 }, data: workspace.forecast.base.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.revenue },
-      { name: "Scenario revenue", type: "line", smooth: true, showSymbol: false, connectNulls: true, data: workspace.forecast.scenario.months.map((month) => minorToAxis(month.revenueMinor)), color: tone.plan },
+  const option = useMemo<echarts.EChartsOption>(
+    () => ({
+      ...baseOption(dark),
+      xAxis: {
+        ...(baseOption(dark).xAxis as object),
+        data: workspace.forecast.base.months.map((month) => `M${month.period}`),
+      },
+      series: [
+        {
+          name: "Base revenue",
+          type: "line",
+          smooth: true,
+          showSymbol: false,
+          connectNulls: true,
+          areaStyle: { color: tone.revenue, opacity: 0.12 },
+          data: workspace.forecast.base.months.map((month) => minorToAxis(month.revenueMinor)),
+          color: tone.revenue,
+        },
+        {
+          name: "Scenario revenue",
+          type: "line",
+          smooth: true,
+          showSymbol: false,
+          connectNulls: true,
+          data: workspace.forecast.scenario.months.map((month) => minorToAxis(month.revenueMinor)),
+          color: tone.plan,
+        },
+      ],
+    }),
+    [
+      dark,
+      tone.plan,
+      tone.revenue,
+      workspace.forecast.base.months,
+      workspace.forecast.scenario.months,
     ],
-  }), [dark, tone.plan, tone.revenue, workspace.forecast.base.months, workspace.forecast.scenario.months]);
+  );
   return (
     <div className="nx-stack" data-testid="screen-forecast">
       <header className="nx-page-head">
         <div>
           <p className="nx-kicker">Driver forecast</p>
           <h1>Twelve months, two cases</h1>
-          <p className="nx-lede">Period 1 is the opening run-rate. Later months compound growth inside the kernel. Hash {shortHash(workspace.forecast.base.inputHash)}.</p>
+          <p className="nx-lede">
+            Period 1 is the opening run-rate. Later months compound growth inside the kernel. Hash{" "}
+            {shortHash(workspace.forecast.base.inputHash)}.
+          </p>
         </div>
       </header>
       <form
@@ -412,21 +593,50 @@ export function ForecastView({
           onSave({ revenueMinor, growthRate, grossMargin, opexMinor, scenarioGrowthRate });
         }}
       >
-        <label>Run-rate revenue<small>{money(revenueMinor, currency)}</small><Input value={revenueMinor} onChange={(event) => setRevenue(event.target.value)} data-testid="driver-revenue" /></label>
-        <label>Growth rate<Input value={growthRate} onChange={(event) => setGrowth(event.target.value)} /></label>
-        <label>Gross margin<Input value={grossMargin} onChange={(event) => setMargin(event.target.value)} /></label>
-        <label>Operating expenses<small>{money(opexMinor, currency)}</small><Input value={opexMinor} onChange={(event) => setOpex(event.target.value)} /></label>
-        <label>Scenario growth<Input value={scenarioGrowthRate} onChange={(event) => setScenario(event.target.value)} /></label>
-        <Button type="submit" disabled={!workspace.permissions.canWrite || busy}>{busy ? "Saving" : "Recompute"}</Button>
+        <label>
+          Run-rate revenue<small>{money(revenueMinor, currency)}</small>
+          <Input
+            value={revenueMinor}
+            onChange={(event) => setRevenue(event.target.value)}
+            data-testid="driver-revenue"
+          />
+        </label>
+        <label>
+          Growth rate
+          <Input value={growthRate} onChange={(event) => setGrowth(event.target.value)} />
+        </label>
+        <label>
+          Gross margin
+          <Input value={grossMargin} onChange={(event) => setMargin(event.target.value)} />
+        </label>
+        <label>
+          Operating expenses<small>{money(opexMinor, currency)}</small>
+          <Input value={opexMinor} onChange={(event) => setOpex(event.target.value)} />
+        </label>
+        <label>
+          Scenario growth
+          <Input value={scenarioGrowthRate} onChange={(event) => setScenario(event.target.value)} />
+        </label>
+        <Button type="submit" disabled={!workspace.permissions.canWrite || busy}>
+          {busy ? "Saving" : "Recompute"}
+        </Button>
       </form>
-      {!workspace.permissions.canWrite ? <p className="nx-muted">Viewers can read the forecast. They cannot change drivers.</p> : null}
+      {!workspace.permissions.canWrite ? (
+        <p className="nx-muted">Viewers can read the forecast. They cannot change drivers.</p>
+      ) : null}
       <section className="nx-panel">
         <Chart option={option} label="Base and scenario revenue" />
       </section>
       <div className="nx-table-wrap">
         <table className="nx-table">
           <thead>
-            <tr><th>Month</th><th>Base revenue</th><th>Base EBITDA</th><th>Scenario revenue</th><th>Scenario EBITDA</th></tr>
+            <tr>
+              <th>Month</th>
+              <th>Base revenue</th>
+              <th>Base EBITDA</th>
+              <th>Scenario revenue</th>
+              <th>Scenario EBITDA</th>
+            </tr>
           </thead>
           <tbody>
             {workspace.forecast.base.months.map((month, index) => {
@@ -448,36 +658,67 @@ export function ForecastView({
   );
 }
 
-export function CashView({ workspace, scenario, dark }: { readonly workspace: Workspace; readonly scenario: "base" | "downside"; readonly dark: boolean }) {
+export function CashView({
+  workspace,
+  scenario,
+  dark,
+}: {
+  readonly workspace: Workspace;
+  readonly scenario: "base" | "downside";
+  readonly dark: boolean;
+}) {
   const cash = scenario === "base" ? workspace.cash.base : workspace.cash.downside;
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(() => ({
-    ...baseOption(dark),
-    xAxis: { ...(baseOption(dark).xAxis as object), data: cash.weeks.map((week) => week.label.slice(5)) },
-    series: [
-      {
-        name: "Ending cash",
-        type: "bar",
-        data: cash.weeks.map((week) => ({ value: minorToAxis(week.endingMinor), itemStyle: { color: week.belowMinimum ? tone.alert : tone.cash } })),
+  const option = useMemo<echarts.EChartsOption>(
+    () => ({
+      ...baseOption(dark),
+      xAxis: {
+        ...(baseOption(dark).xAxis as object),
+        data: cash.weeks.map((week) => week.label.slice(5)),
       },
-    ],
-  }), [cash.weeks, dark, tone.alert, tone.cash]);
+      series: [
+        {
+          name: "Ending cash",
+          type: "bar",
+          data: cash.weeks.map((week) => ({
+            value: minorToAxis(week.endingMinor),
+            itemStyle: { color: week.belowMinimum ? tone.alert : tone.cash },
+          })),
+        },
+      ],
+    }),
+    [cash.weeks, dark, tone.alert, tone.cash],
+  );
   return (
     <div className="nx-stack" data-testid="screen-cash">
       <header className="nx-page-head">
         <div>
           <p className="nx-kicker">13-week cash</p>
           <h1>{scenario === "base" ? "Base case" : "Downside case"}</h1>
-          <p className="nx-lede">Opening cash is the kernel ending balance. Minimum cash is {money(cash.minimumCashMinor, currency)}. Hash {shortHash(cash.inputHash)}.</p>
+          <p className="nx-lede">
+            Opening cash is the kernel ending balance. Minimum cash is{" "}
+            {money(cash.minimumCashMinor, currency)}. Hash {shortHash(cash.inputHash)}.
+          </p>
         </div>
-        <span className={`nx-pill ${cash.alerts.length === 0 ? "is-good" : "is-bad"}`}>{cash.alerts.length} weeks below minimum</span>
+        <span className={`nx-pill ${cash.alerts.length === 0 ? "is-good" : "is-bad"}`}>
+          {cash.alerts.length} weeks below minimum
+        </span>
       </header>
-      <section className="nx-panel"><Chart option={option} label="Thirteen week ending cash" /></section>
+      <section className="nx-panel">
+        <Chart option={option} label="Thirteen week ending cash" />
+      </section>
       <div className="nx-table-wrap">
         <table className="nx-table">
           <thead>
-            <tr><th>Week</th><th>Beginning</th><th>In</th><th>Out</th><th>Ending</th><th>Headroom</th></tr>
+            <tr>
+              <th>Week</th>
+              <th>Beginning</th>
+              <th>In</th>
+              <th>Out</th>
+              <th>Ending</th>
+              <th>Headroom</th>
+            </tr>
           </thead>
           <tbody>
             {cash.weeks.map((week) => (
@@ -497,30 +738,66 @@ export function CashView({ workspace, scenario, dark }: { readonly workspace: Wo
   );
 }
 
-export function VarianceView({ workspace, dark }: { readonly workspace: Workspace; readonly dark: boolean }) {
+export function VarianceView({
+  workspace,
+  dark,
+}: {
+  readonly workspace: Workspace;
+  readonly dark: boolean;
+}) {
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(() => ({
-    ...baseOption(dark),
-    xAxis: { ...(baseOption(dark).xAxis as object), data: workspace.variance.lines.map((line) => line.label) },
-    series: [
-      { name: "Actual", type: "bar", data: workspace.variance.lines.map((line) => minorToAxis(line.actualMinor)), color: tone.revenue },
-      { name: "Plan", type: "bar", data: workspace.variance.lines.map((line) => minorToAxis(line.planMinor)), color: tone.plan },
-    ],
-  }), [dark, tone.plan, tone.revenue, workspace.variance.lines]);
+  const option = useMemo<echarts.EChartsOption>(
+    () => ({
+      ...baseOption(dark),
+      xAxis: {
+        ...(baseOption(dark).xAxis as object),
+        data: workspace.variance.lines.map((line) => line.label),
+      },
+      series: [
+        {
+          name: "Actual",
+          type: "bar",
+          data: workspace.variance.lines.map((line) => minorToAxis(line.actualMinor)),
+          color: tone.revenue,
+        },
+        {
+          name: "Plan",
+          type: "bar",
+          data: workspace.variance.lines.map((line) => minorToAxis(line.planMinor)),
+          color: tone.plan,
+        },
+      ],
+    }),
+    [dark, tone.plan, tone.revenue, workspace.variance.lines],
+  );
   return (
     <div className="nx-stack" data-testid="screen-variance">
       <header className="nx-page-head">
         <div>
           <p className="nx-kicker">Variance</p>
           <h1>Actual minus plan</h1>
-          <p className="nx-lede">Favorable means higher revenue or profit, or lower expense. Hash {shortHash(workspace.variance.inputHash)}.</p>
+          <p className="nx-lede">
+            Favorable means higher revenue or profit, or lower expense. Hash{" "}
+            {shortHash(workspace.variance.inputHash)}.
+          </p>
         </div>
       </header>
-      <section className="nx-panel"><Chart option={option} label="Actual versus plan" /></section>
+      <section className="nx-panel">
+        <Chart option={option} label="Actual versus plan" />
+      </section>
       <div className="nx-table-wrap">
         <table className="nx-table">
-          <thead><tr><th>Line</th><th>Actual</th><th>Plan</th><th>Variance</th><th>Ratio</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th>Line</th>
+              <th>Actual</th>
+              <th>Plan</th>
+              <th>Variance</th>
+              <th>Ratio</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody>
             {workspace.variance.lines.map((line) => (
               <tr key={line.key}>
@@ -529,7 +806,9 @@ export function VarianceView({ workspace, dark }: { readonly workspace: Workspac
                 <td>{money(line.planMinor, currency)}</td>
                 <td>{money(line.varianceMinor, currency)}</td>
                 <td>{percentFromRatio(line.varianceRatio)}</td>
-                <td className={line.favorable ? "is-good" : "is-bad"}>{line.favorable ? "Favorable" : "Unfavorable"}</td>
+                <td className={line.favorable ? "is-good" : "is-bad"}>
+                  {line.favorable ? "Favorable" : "Unfavorable"}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -539,26 +818,51 @@ export function VarianceView({ workspace, dark }: { readonly workspace: Workspac
   );
 }
 
-export function QoeView({ workspace, dark }: { readonly workspace: Workspace; readonly dark: boolean }) {
+export function QoeView({
+  workspace,
+  dark,
+}: {
+  readonly workspace: Workspace;
+  readonly dark: boolean;
+}) {
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(() => waterfall(workspace, dark, currency, tone), [currency, dark, tone, workspace]);
+  const option = useMemo<echarts.EChartsOption>(
+    () => waterfall(workspace, dark, currency, tone),
+    [currency, dark, tone, workspace],
+  );
   return (
     <div className="nx-stack" data-testid="screen-qoe">
       <header className="nx-page-head">
         <div>
           <p className="nx-kicker">Quality of earnings</p>
           <h1>Reported net income, then accepted add-backs</h1>
-          <p className="nx-lede">The bridge starts from kernel net income. These books have no depreciation line, so the result is normalized earnings, not a full EBITDA build. Hash {shortHash(workspace.qoe.inputHash)}.</p>
+          <p className="nx-lede">
+            The bridge starts from kernel net income. These books have no depreciation line, so the
+            result is normalized earnings, not a full EBITDA build. Hash{" "}
+            {shortHash(workspace.qoe.inputHash)}.
+          </p>
         </div>
       </header>
-      <section className="nx-panel"><Chart option={option} label="Quality of earnings bridge" /></section>
+      <section className="nx-panel">
+        <Chart option={option} label="Quality of earnings bridge" />
+      </section>
       <ol className="nx-bridge">
-        <li><span>Reported</span><strong>{money(workspace.qoe.reported, currency)}</strong></li>
+        <li>
+          <span>Reported</span>
+          <strong>{money(workspace.qoe.reported, currency)}</strong>
+        </li>
         {workspace.qoe.steps.map((step) => (
-          <li key={step.adjustmentId}><span>{step.label}</span><strong>+ {money(step.amount, currency)}</strong><small title={step.stepHash}>{shortHash(step.stepHash)}</small></li>
+          <li key={step.adjustmentId}>
+            <span>{step.label}</span>
+            <strong>+ {money(step.amount, currency)}</strong>
+            <small title={step.stepHash}>{shortHash(step.stepHash)}</small>
+          </li>
         ))}
-        <li><span>Normalized</span><strong>{money(workspace.qoe.normalized, currency)}</strong></li>
+        <li>
+          <span>Normalized</span>
+          <strong>{money(workspace.qoe.normalized, currency)}</strong>
+        </li>
       </ol>
     </div>
   );
@@ -571,7 +875,10 @@ export function BoardView({ workspace }: { readonly workspace: Workspace }) {
         <div>
           <p className="nx-kicker">Board pack</p>
           <h1>{workspace.board.title}</h1>
-          <p className="nx-lede">Cutoff {workspace.board.cutoff}. Every figure opens to a kernel hash. State {shortHash(workspace.board.stateHash)}.</p>
+          <p className="nx-lede">
+            Cutoff {workspace.board.cutoff}. Every figure opens to a kernel hash. State{" "}
+            {shortHash(workspace.board.stateHash)}.
+          </p>
         </div>
       </header>
       {workspace.board.sections.map((section) => (
@@ -616,18 +923,35 @@ export function ApprovalsView({
         <div>
           <p className="nx-kicker">Approvals inbox</p>
           <h1>Suggested, until someone accepts</h1>
-          <p className="nx-lede">Accepting records a decision. It does not post a journal or change actuals.</p>
+          <p className="nx-lede">
+            Accepting records a decision. It does not post a journal or change actuals.
+          </p>
         </div>
       </header>
       <div className="nx-filters" role="tablist">
         {(["all", "suggested", "accepted", "rejected"] as const).map((status) => (
-          <button key={status} type="button" className={filter === status ? "is-on" : ""} onClick={() => setFilter(status)}>
+          <button
+            key={status}
+            type="button"
+            className={filter === status ? "is-on" : ""}
+            onClick={() => setFilter(status)}
+          >
             {status} <span>{counts[status]}</span>
           </button>
         ))}
       </div>
-      {workspace.approvals.length === 0 ? <ScreenState title="Inbox is empty" body="Ask a specialist in the copilot. Agents file proposals. They do not post." /> : null}
-      {workspace.approvals.length > 0 && visible.length === 0 ? <ScreenState title="Nothing in this filter" body="Switch status to see the other proposals." /> : null}
+      {workspace.approvals.length === 0 ? (
+        <ScreenState
+          title="Inbox is empty"
+          body="Ask a specialist in the copilot. Agents file proposals. They do not post."
+        />
+      ) : null}
+      {workspace.approvals.length > 0 && visible.length === 0 ? (
+        <ScreenState
+          title="Nothing in this filter"
+          body="Switch status to see the other proposals."
+        />
+      ) : null}
       <ul className="nx-cards">
         {visible.map((item) => {
           const Icon = agentIcon(item.agent);
@@ -635,9 +959,14 @@ export function ApprovalsView({
             <li key={item.id} className="nx-card" data-testid={`proposal-${item.status}`}>
               <div className="nx-card-copy">
                 <div className="nx-card-meta">
-                  <span className="nx-agent"><Icon size={14} aria-hidden="true" />{item.agent}</span>
+                  <span className="nx-agent">
+                    <Icon size={14} aria-hidden="true" />
+                    {item.agent}
+                  </span>
                   <span className={`nx-chip is-${item.status}`}>{item.status}</span>
-                  {item.amountMinor ? <span className="nx-chip">{money(item.amountMinor, currency)}</span> : null}
+                  {item.amountMinor ? (
+                    <span className="nx-chip">{money(item.amountMinor, currency)}</span>
+                  ) : null}
                 </div>
                 <h2>{item.title}</h2>
                 <p>{humanizeMinorPhrases(item.summary, currency)}</p>
@@ -645,8 +974,22 @@ export function ApprovalsView({
               </div>
               {item.status === "suggested" ? (
                 <div className="nx-row">
-                  <Button type="button" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "accepted")} data-testid="accept-proposal">Accept</Button>
-                  <Button type="button" variant="outline" disabled={!workspace.permissions.canWrite || busyId === item.id} onClick={() => onDecide(item.id, "rejected")}>Reject</Button>
+                  <Button
+                    type="button"
+                    disabled={!workspace.permissions.canWrite || busyId === item.id}
+                    onClick={() => onDecide(item.id, "accepted")}
+                    data-testid="accept-proposal"
+                  >
+                    Accept
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!workspace.permissions.canWrite || busyId === item.id}
+                    onClick={() => onDecide(item.id, "rejected")}
+                  >
+                    Reject
+                  </Button>
                 </div>
               ) : null}
             </li>
@@ -666,7 +1009,12 @@ function ScreenState({ title, body }: { readonly title: string; readonly body: s
   );
 }
 
-function waterfall(workspace: Workspace, dark: boolean, currency: string, tone: ReturnType<typeof colors>): echarts.EChartsOption {
+function waterfall(
+  workspace: Workspace,
+  dark: boolean,
+  currency: string,
+  tone: ReturnType<typeof colors>,
+): echarts.EChartsOption {
   const steps = [
     { label: "Reported", minor: workspace.qoe.reported, total: true },
     ...workspace.qoe.steps.map((step) => ({ label: step.label, minor: step.amount, total: false })),
@@ -713,10 +1061,39 @@ function waterfall(workspace: Workspace, dark: boolean, currency: string, tone: 
     },
     xAxis: { ...(baseOption(dark).xAxis as object), data: steps.map((step) => step.label) },
     series: [
-      { name: "Base", type: "bar", stack: "bridge", silent: true, itemStyle: { color: "transparent" }, emphasis: { disabled: true }, data: assist },
-      { name: "Add-back", type: "bar", stack: "bridge", data: rise, color: tone.cash, itemStyle: { borderRadius: [4, 4, 0, 0] } },
-      { name: "Reduction", type: "bar", stack: "bridge", data: fall, color: tone.alert, itemStyle: { borderRadius: [4, 4, 0, 0] } },
-      { name: "Total", type: "bar", stack: "bridge", data: totals, color: tone.revenue, itemStyle: { borderRadius: [4, 4, 0, 0] } },
+      {
+        name: "Base",
+        type: "bar",
+        stack: "bridge",
+        silent: true,
+        itemStyle: { color: "transparent" },
+        emphasis: { disabled: true },
+        data: assist,
+      },
+      {
+        name: "Add-back",
+        type: "bar",
+        stack: "bridge",
+        data: rise,
+        color: tone.cash,
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
+      },
+      {
+        name: "Reduction",
+        type: "bar",
+        stack: "bridge",
+        data: fall,
+        color: tone.alert,
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
+      },
+      {
+        name: "Total",
+        type: "bar",
+        stack: "bridge",
+        data: totals,
+        color: tone.revenue,
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
+      },
     ],
   };
 }
@@ -738,14 +1115,19 @@ export function AdminView({
         <div>
           <p className="nx-kicker">Organization</p>
           <h1>{workspace.context.tenantName}</h1>
-          <p className="nx-lede">Roles come from membership. The AI policy is a record, not a bypass of the kernel.</p>
+          <p className="nx-lede">
+            Roles come from membership. The AI policy is a record, not a bypass of the kernel.
+          </p>
         </div>
       </header>
       <section className="nx-panel">
         <h2>Members</h2>
         <ul className="nx-list">
           {workspace.admin.members.map((member) => (
-            <li key={member.actorId}><span>{member.actorId}</span><strong>{member.role}</strong></li>
+            <li key={member.actorId}>
+              <span>{member.actorId}</span>
+              <strong>{member.role}</strong>
+            </li>
           ))}
         </ul>
         <form
@@ -755,30 +1137,56 @@ export function AdminView({
             onInvite(actorId, role);
           }}
         >
-          <label>Actor id<Input value={actorId} onChange={(event) => setActorId(event.target.value)} data-testid="member-actor" /></label>
-          <label>Role
-            <select value={role} onChange={(event) => setRole(event.target.value)} data-testid="member-role">
+          <label>
+            Actor id
+            <Input
+              value={actorId}
+              onChange={(event) => setActorId(event.target.value)}
+              data-testid="member-actor"
+            />
+          </label>
+          <label>
+            Role
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              data-testid="member-role"
+            >
               <option value="owner">owner</option>
               <option value="controller">controller</option>
               <option value="viewer">viewer</option>
               <option value="auditor">auditor</option>
             </select>
           </label>
-          <Button type="submit" disabled={!workspace.permissions.canWrite || actorId.trim().length === 0 || busy}>Grant role</Button>
+          <Button
+            type="submit"
+            disabled={!workspace.permissions.canWrite || actorId.trim().length === 0 || busy}
+          >
+            Grant role
+          </Button>
         </form>
       </section>
       <section className="nx-panel">
         <h2>Policies</h2>
         {workspace.admin.policies.map((policy) => (
-          <article key={policy.id}><h3>{policy.name}</h3><p>{policy.body}</p></article>
+          <article key={policy.id}>
+            <h3>{policy.name}</h3>
+            <p>{policy.body}</p>
+          </article>
         ))}
       </section>
       <section className="nx-panel">
         <h2>Audit</h2>
-        {workspace.admin.auditLocked ? <p className="nx-empty">Audit is locked for this role.</p> : (
+        {workspace.admin.auditLocked ? (
+          <p className="nx-empty">Audit is locked for this role.</p>
+        ) : (
           <ul className="nx-audit">
             {workspace.admin.audit.slice(0, 12).map((event) => (
-              <li key={event.eventId}><span>{event.occurredAt.slice(0, 16).replace("T", " ")}</span><strong>{event.eventType}</strong><em>{event.actorId}</em></li>
+              <li key={event.eventId}>
+                <span>{event.occurredAt.slice(0, 16).replace("T", " ")}</span>
+                <strong>{event.eventType}</strong>
+                <em>{event.actorId}</em>
+              </li>
             ))}
           </ul>
         )}
@@ -802,7 +1210,12 @@ export function PlatformViewScreen({
 }) {
   const [hours, setHours] = useState("4");
   const [reason, setReason] = useState("Close support for the September board pack");
-  if (!platform) return <p className="nx-empty" data-testid="screen-platform">Platform console is loading.</p>;
+  if (!platform)
+    return (
+      <p className="nx-empty" data-testid="screen-platform">
+        Platform console is loading.
+      </p>
+    );
   const tenant = platform.tenants[0];
   return (
     <div className="nx-stack" data-testid="screen-platform">
@@ -810,7 +1223,10 @@ export function PlatformViewScreen({
         <div>
           <p className="nx-kicker">Platform</p>
           <h1>Tenants, access, and AI ops</h1>
-          <p className="nx-lede">Platform admin has no standing right to the books. Support access is an auditor membership with an expiry.</p>
+          <p className="nx-lede">
+            Platform admin has no standing right to the books. Support access is an auditor
+            membership with an expiry.
+          </p>
         </div>
       </header>
       <section className="nx-panel">
@@ -818,9 +1234,18 @@ export function PlatformViewScreen({
         <ul className="nx-list">
           {platform.tenants.map((item) => (
             <li key={item.tenantId}>
-              <span>{item.name} · {item.region}</span>
+              <span>
+                {item.name} · {item.region}
+              </span>
               <strong>{item.status}</strong>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => onStatus(item.tenantId, item.status === "active" ? "suspended" : "active")}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  onStatus(item.tenantId, item.status === "active" ? "suspended" : "active")
+                }
+              >
                 {item.status === "active" ? "Suspend" : "Reactivate"}
               </Button>
             </li>
@@ -833,7 +1258,15 @@ export function PlatformViewScreen({
           {platform.flags.map((flag) => (
             <li key={flag.id}>
               <span>{flag.label}</span>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => onFlag(flag.id, !flag.enabled)} data-testid={`flag-${flag.key}`}>{flag.enabled ? "On" : "Off"}</Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => onFlag(flag.id, !flag.enabled)}
+                data-testid={`flag-${flag.key}`}
+              >
+                {flag.enabled ? "On" : "Off"}
+              </Button>
             </li>
           ))}
         </ul>
@@ -842,7 +1275,11 @@ export function PlatformViewScreen({
         <h2>Connectors</h2>
         <ul className="nx-list">
           {platform.connectors.map((connector) => (
-            <li key={connector.id}><span>{connector.label}</span><strong>{connector.status}</strong><em>{connector.detail}</em></li>
+            <li key={connector.id}>
+              <span>{connector.label}</span>
+              <strong>{connector.status}</strong>
+              <em>{connector.detail}</em>
+            </li>
           ))}
         </ul>
       </section>
@@ -856,23 +1293,43 @@ export function PlatformViewScreen({
               onSupport(tenant.tenantId, Number(hours), reason);
             }}
           >
-            <label>Hours<Input value={hours} onChange={(event) => setHours(event.target.value)} /></label>
-            <label>Reason<Input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-            <Button type="submit" disabled={busy}>Grant auditor access</Button>
+            <label>
+              Hours
+              <Input value={hours} onChange={(event) => setHours(event.target.value)} />
+            </label>
+            <label>
+              Reason
+              <Input value={reason} onChange={(event) => setReason(event.target.value)} />
+            </label>
+            <Button type="submit" disabled={busy}>
+              Grant auditor access
+            </Button>
           </form>
-        ) : <p className="nx-empty">No tenant is registered in this process.</p>}
+        ) : (
+          <p className="nx-empty">No tenant is registered in this process.</p>
+        )}
         <ul className="nx-audit">
           {platform.support.map((grant) => (
-            <li key={grant.id}><span>{grant.status}</span><strong>{grant.actorId}</strong><em>{grant.expiresAt}</em></li>
+            <li key={grant.id}>
+              <span>{grant.status}</span>
+              <strong>{grant.actorId}</strong>
+              <em>{grant.expiresAt}</em>
+            </li>
           ))}
         </ul>
       </section>
       <section className="nx-panel">
         <h2>AI runs</h2>
-        {platform.runs.length === 0 ? <p className="nx-empty">No copilot runs yet. A mock or live answer will show up here.</p> : (
+        {platform.runs.length === 0 ? (
+          <p className="nx-empty">No copilot runs yet. A mock or live answer will show up here.</p>
+        ) : (
           <ul className="nx-audit">
             {platform.runs.map((run) => (
-              <li key={run.id}><span>{run.mode}</span><strong>{run.agent}</strong><em>{run.status}</em></li>
+              <li key={run.id}>
+                <span>{run.mode}</span>
+                <strong>{run.agent}</strong>
+                <em>{run.status}</em>
+              </li>
             ))}
           </ul>
         )}

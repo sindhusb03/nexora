@@ -14,7 +14,15 @@ export type RunCommand = (
   idempotencyKey?: string,
 ) => Promise<KernelRecord | null>;
 
-export function WorkbenchHead({ title, note, children }: { title: string; note: string; children?: ReactNode }) {
+export function WorkbenchHead({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note: string;
+  children?: ReactNode;
+}) {
   return (
     <header className="page-head">
       <div>
@@ -26,19 +34,34 @@ export function WorkbenchHead({ title, note, children }: { title: string; note: 
   );
 }
 
-export function GroupPanel({ disabled, entityId, run }: { disabled: boolean; entityId: string; run: RunCommand }) {
+export function GroupPanel({
+  disabled,
+  entityId,
+  run,
+}: {
+  disabled: boolean;
+  entityId: string;
+  run: RunCommand;
+}) {
   const [groupId, setGroupId] = useState("");
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Group and FX" note="CTA is an explicit equity line. The entity books stay in their functional currency." />
+      <WorkbenchHead
+        title="Group and FX"
+        note="CTA is an explicit equity line. The entity books stay in their functional currency."
+      />
       <div className="card">
         <div className="row-actions">
           <Button
             type="button"
             disabled={disabled}
             onClick={async () => {
-              const data = await run(undefined, "/v1/consolidation-groups", { name: "Group", reportingCurrency: "EUR" });
-              if (data && typeof data.consolidationGroupId === "string") setGroupId(data.consolidationGroupId);
+              const data = await run(undefined, "/v1/consolidation-groups", {
+                name: "Group",
+                reportingCurrency: "EUR",
+              });
+              if (data && typeof data.consolidationGroupId === "string")
+                setGroupId(data.consolidationGroupId);
             }}
           >
             Create EUR group
@@ -48,7 +71,13 @@ export function GroupPanel({ disabled, entityId, run }: { disabled: boolean; ent
             variant="outline"
             disabled={disabled || groupId.length === 0}
             onClick={() => {
-              const rate = (value: string) => ({ rateSetId: "rates-2024", base: "USD", quote: "EUR", rate: value, rounding: "half_even" });
+              const rate = (value: string) => ({
+                rateSetId: "rates-2024",
+                base: "USD",
+                quote: "EUR",
+                rate: value,
+                rounding: "half_even",
+              });
               void run(undefined, `/v1/consolidation-groups/${groupId}/translate`, {
                 sourceCurrency: "USD",
                 ctaAccountId: "cta",
@@ -82,7 +111,8 @@ export function GroupPanel({ disabled, entityId, run }: { disabled: boolean; ent
           </Button>
         </div>
         <p className="muted small" style={{ margin: "0.6rem 0 0" }}>
-          Group <code>{groupId || "not created"}</code>. CTA, parent equity, and NCI appear in the inspector exactly as returned.
+          Group <code>{groupId || "not created"}</code>. CTA, parent equity, and NCI appear in the
+          inspector exactly as returned.
         </p>
       </div>
     </section>
@@ -92,7 +122,10 @@ export function GroupPanel({ disabled, entityId, run }: { disabled: boolean; ent
 export function ModelPanel({ disabled, run }: { disabled: boolean; run: RunCommand }) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Models and scenarios" note="The grid is evaluated on the server. A downside scenario leaves the base version unchanged." />
+      <WorkbenchHead
+        title="Models and scenarios"
+        note="The grid is evaluated on the server. A downside scenario leaves the base version unchanged."
+      />
       <div className="card">
         <Button
           type="button"
@@ -126,10 +159,21 @@ export function ModelPanel({ disabled, run }: { disabled: boolean; run: RunComma
   );
 }
 
-export function CapitalPanel({ disabled, entityId, run }: { disabled: boolean; entityId: string; run: RunCommand }) {
+export function CapitalPanel({
+  disabled,
+  entityId,
+  run,
+}: {
+  disabled: boolean;
+  entityId: string;
+  run: RunCommand;
+}) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Capital" note="Schedules reconcile in minor units on the server. These runs do not post journals." />
+      <WorkbenchHead
+        title="Capital"
+        note="Schedules reconcile in minor units on the server. These runs do not post journals."
+      />
       <div className="card">
         <div className="row-actions">
           <Button
@@ -189,13 +233,21 @@ export function CapitalPanel({ disabled, entityId, run }: { disabled: boolean; e
 export function ImportPanel({ disabled, run }: { disabled: boolean; run: RunCommand }) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Import and QoE" note="The same file is one batch. Adjustments sit beside reported results." />
+      <WorkbenchHead
+        title="Import and QoE"
+        note="The same file is one batch. Adjustments sit beside reported results."
+      />
       <div className="card">
         <Button
           type="button"
           disabled={disabled}
           onClick={async () => {
-            const batch = await run(undefined, "/v1/imports", { rows: [{ rowNo: 1, account: "1000", amount: "500.00" }] }, "workspace-file");
+            const batch = await run(
+              undefined,
+              "/v1/imports",
+              { rows: [{ rowNo: 1, account: "1000", amount: "500.00" }] },
+              "workspace-file",
+            );
             if (!batch || typeof batch.importBatchId !== "string") return;
             await run(undefined, "/v1/qoe", {
               reported: "100",
@@ -223,20 +275,27 @@ export function AssistantPanel({
 }) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Assistant" note="The assistant proposes. The kernel validates, and a person approves before anything is recorded." />
+      <WorkbenchHead
+        title="Assistant"
+        note="The assistant proposes. The kernel validates, and a person approves before anything is recorded."
+      />
       <div className="suggested">
         <div className="suggested-head">
           <SuggestedBadge /> Proposal lane
         </div>
-        An uncited number is discarded before it can be shown as a figure. An accepted proposal still goes through
-        journal validation, so an unbalanced draft is refused.
+        An uncited number is discarded before it can be shown as a figure. An accepted proposal
+        still goes through journal validation, so an unbalanced draft is refused.
       </div>
       <div className="card">
         <div className="row-actions">
           <Button
             type="button"
             disabled={disabled}
-            onClick={() => void run(undefined, "/v1/proposals", { claims: [{ text: "EBITDA is 115", citationId: null }] })}
+            onClick={() =>
+              void run(undefined, "/v1/proposals", {
+                claims: [{ text: "EBITDA is 115", citationId: null }],
+              })
+            }
           >
             Propose uncited EBITDA
           </Button>
@@ -264,13 +323,27 @@ export function AssistantPanel({
   );
 }
 
-export function DealPanel({ disabled, stateHash, run }: { disabled: boolean; stateHash: string; run: RunCommand }) {
+export function DealPanel({
+  disabled,
+  stateHash,
+  run,
+}: {
+  disabled: boolean;
+  stateHash: string;
+  run: RunCommand;
+}) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Deal" note="The deal copies the state hash and leaves the base assumptions unchanged." />
+      <WorkbenchHead
+        title="Deal"
+        note="The deal copies the state hash and leaves the base assumptions unchanged."
+      />
       <div className="card">
         <p className="muted small" style={{ marginTop: 0 }}>
-          State hash <code className="hash-wrap">{stateHash || "appears after a financial state is drafted"}</code>
+          State hash{" "}
+          <code className="hash-wrap">
+            {stateHash || "appears after a financial state is drafted"}
+          </code>
         </p>
         <Button
           type="button"
@@ -293,7 +366,10 @@ export function DealPanel({ disabled, stateHash, run }: { disabled: boolean; sta
 export function BasisPanel({ disabled, run }: { disabled: boolean; run: RunCommand }) {
   return (
     <section className="panel panel-narrow">
-      <WorkbenchHead title="Reporting basis" note="Local and group hashes are both stored. Locale leaves the minor units unchanged." />
+      <WorkbenchHead
+        title="Reporting basis"
+        note="Local and group hashes are both stored. Locale leaves the minor units unchanged."
+      />
       <div className="card">
         <Button
           type="button"

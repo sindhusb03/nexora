@@ -4,12 +4,12 @@ How to run the Financial Kernel API and web app outside a laptop. The kernel rul
 
 ## 1. Processes
 
-| Process | Command | Notes |
-|---|---|---|
-| Migrations | `pnpm --filter @nexora/api migrate` | Runs as the schema owner. Idempotent. Takes an advisory lock, so concurrent runs wait |
-| API | `pnpm --filter @nexora/api start` | Hono on `PORT` (default 8787). Refuses to boot if migrations are pending, drifted, or unknown |
-| Web | `pnpm --filter @nexora/web build && pnpm --filter @nexora/web start` | `next start` on port 3000 |
-| Create a user | `NEXORA_NEW_USER_PASSWORD=... pnpm --filter @nexora/api user:create <actor-id>` | For production, where self sign-up is off. The password comes from the environment, not argv |
+| Process       | Command                                                                         | Notes                                                                                         |
+| ------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Migrations    | `pnpm --filter @nexora/api migrate`                                             | Runs as the schema owner. Idempotent. Takes an advisory lock, so concurrent runs wait         |
+| API           | `pnpm --filter @nexora/api start`                                               | Hono on `PORT` (default 8787). Refuses to boot if migrations are pending, drifted, or unknown |
+| Web           | `pnpm --filter @nexora/web build && pnpm --filter @nexora/web start`            | `next start` on port 3000                                                                     |
+| Create a user | `NEXORA_NEW_USER_PASSWORD=... pnpm --filter @nexora/api user:create <actor-id>` | For production, where self sign-up is off. The password comes from the environment, not argv  |
 
 The API reads only the process environment. It does not load `.env`. Local scripts and compose pass variables explicitly.
 
@@ -17,28 +17,28 @@ The API reads only the process environment. It does not load `.env`. Local scrip
 
 `.env.example` lists every variable with placeholders. The API fails closed in production:
 
-| Variable | Production | Development default |
-|---|---|---|
-| `NODE_ENV` | `production` | `development` |
-| `DATABASE_URL` | Required. The API login role (see section 3) | Unset means in-memory PGlite, lost on restart |
-| `DATABASE_MIGRATION_URL` | Schema owner, used only by `migrate` | Falls back to `DATABASE_URL` |
-| `NEXORA_API_LOGIN_ROLE` | Optional. `migrate` grants `nexora_app` to this role | Unset |
-| `AUTH_SECRET` | Required, 32+ characters (`openssl rand -base64 48`) | Ephemeral; sessions end on restart |
-| `AUTH_SESSION_TTL_SECONDS` | 300–604800 | 28800 |
-| `AUTH_ALLOW_SIGNUP` | Default `false` | `true` |
-| `AUTH_COOKIE_SECURE` | Must be `true` (default) | `false` |
-| `AUTH_COOKIE_SAMESITE` | `Lax` (default), `Strict`, or `None` with a secure cookie | `Lax` |
-| `NEXORA_REGION` | Optional. Pins every session to one region | Unset |
-| `PLATFORM_ADMIN_ACTOR_IDS` | Comma-separated actors allowed to provision tenants. Default empty | `platform-admin` |
-| `NEXORA_DEV_HEADERS` | Refused when `true` | `false` |
-| `WEB_ORIGIN` | Comma-separated browser origins (scheme and host) | `http://localhost:3000` |
-| `API_BODY_LIMIT_BYTES` | 1 KiB – 50 MiB | 8388608 |
-| `TRUST_PROXY` | `true` only behind a proxy that sets `X-Forwarded-For` | `false` |
-| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX` | Tune per deployment | 60000, 600, 20 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional (section 6) | Unset |
-| `API_URL` | Server-side API URL for the web app | `http://localhost:8787` |
-| `NEXT_PUBLIC_API_URL` | Browser API URL. Compiled into the web bundle at build time | `http://localhost:8787` |
-| `NEXT_PUBLIC_NEXORA_DEV_HEADERS` | `false`. Compiled in at build time | `false` |
+| Variable                                                        | Production                                                         | Development default                           |
+| --------------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------- |
+| `NODE_ENV`                                                      | `production`                                                       | `development`                                 |
+| `DATABASE_URL`                                                  | Required. The API login role (see section 3)                       | Unset means in-memory PGlite, lost on restart |
+| `DATABASE_MIGRATION_URL`                                        | Schema owner, used only by `migrate`                               | Falls back to `DATABASE_URL`                  |
+| `NEXORA_API_LOGIN_ROLE`                                         | Optional. `migrate` grants `nexora_app` to this role               | Unset                                         |
+| `AUTH_SECRET`                                                   | Required, 32+ characters (`openssl rand -base64 48`)               | Ephemeral; sessions end on restart            |
+| `AUTH_SESSION_TTL_SECONDS`                                      | 300–604800                                                         | 28800                                         |
+| `AUTH_ALLOW_SIGNUP`                                             | Default `false`                                                    | `true`                                        |
+| `AUTH_COOKIE_SECURE`                                            | Must be `true` (default)                                           | `false`                                       |
+| `AUTH_COOKIE_SAMESITE`                                          | `Lax` (default), `Strict`, or `None` with a secure cookie          | `Lax`                                         |
+| `NEXORA_REGION`                                                 | Optional. Pins every session to one region                         | Unset                                         |
+| `PLATFORM_ADMIN_ACTOR_IDS`                                      | Comma-separated actors allowed to provision tenants. Default empty | `platform-admin`                              |
+| `NEXORA_DEV_HEADERS`                                            | Refused when `true`                                                | `false`                                       |
+| `WEB_ORIGIN`                                                    | Comma-separated browser origins (scheme and host)                  | `http://localhost:3000`                       |
+| `API_BODY_LIMIT_BYTES`                                          | 1 KiB – 50 MiB                                                     | 8388608                                       |
+| `TRUST_PROXY`                                                   | `true` only behind a proxy that sets `X-Forwarded-For`             | `false`                                       |
+| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX` | Tune per deployment                                                | 60000, 600, 20                                |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`                                   | Optional (section 6)                                               | Unset                                         |
+| `API_URL`                                                       | Server-side API URL for the web app                                | `http://localhost:8787`                       |
+| `NEXT_PUBLIC_API_URL`                                           | Browser API URL. Compiled into the web bundle at build time        | `http://localhost:8787`                       |
+| `NEXT_PUBLIC_NEXORA_DEV_HEADERS`                                | `false`. Compiled in at build time                                 | `false`                                       |
 
 Blank values are treated as unset.
 

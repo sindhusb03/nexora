@@ -14,14 +14,20 @@ export interface BasisMapping {
  */
 export function mapReportingBasis(input: {
   readonly basisVersion: string;
-  readonly localBalances: readonly { readonly accountId: string; readonly debitPositiveMinor: string }[];
+  readonly localBalances: readonly {
+    readonly accountId: string;
+    readonly debitPositiveMinor: string;
+  }[];
   readonly mappings: readonly BasisMapping[];
 }): {
   readonly engineVersion: string;
   readonly localHash: string;
   readonly groupHash: string;
   readonly basisVersion: string;
-  readonly groupBalances: readonly { readonly accountId: string; readonly debitPositiveMinor: string }[];
+  readonly groupBalances: readonly {
+    readonly accountId: string;
+    readonly debitPositiveMinor: string;
+  }[];
 } {
   if (input.basisVersion.length === 0) {
     throw new KernelError("FIN_NOT_FOUND", "Reporting basis version is required");

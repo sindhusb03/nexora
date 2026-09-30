@@ -59,16 +59,21 @@ Next, and currently stubbed:
 
 ## How we work
 
-- [SDLC](docs/sdlc.md) — risk classes R0–R3, test-first kernel changes, definition of done
-- [GitHub workflow](docs/github-workflow.md) — `main` via pull request, CI, branch protection
-- [Review workflow](docs/review-workflow.md) — financial, API, and UI checklists
+Changes land on `main` through a pull request. Do not commit to `main` directly.
 
-Pull requests run typecheck, tests, and the web build. A diff in `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows` must check the financial review attestation.
+- [SDLC](docs/sdlc.md) — risk classes R0–R3, hooks, CI, Origin rules, releases, environments
+- [Integration workflow](docs/github-workflow.md) — branches, Conventional Commits, CI jobs
+- [Review workflow](docs/review-workflow.md) — financial, API, and UI checklists
+- [Contributing](CONTRIBUTING.md) — local setup and the pull request path
+- [Architecture decisions](docs/adr/README.md)
+
+`pnpm install` enables commitlint and lint-staged. Pull requests run lint, typecheck, tests (kernel line coverage at least 90%), the web build, Playwright, `pnpm audit --prod`, and gitleaks. A diff in `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows` must check the financial review attestation. Origin does not execute the GitHub Actions file until a CI app is connected; the gap is recorded in `docs/sdlc.md`.
 
 ## Run
 
 ```bash
 pnpm install
+pnpm lint
 pnpm test
 pnpm typecheck
 pnpm build
@@ -84,20 +89,20 @@ Apply `packages/db/migrations/0001_kernel_foundation.sql` through `0004_workspac
 
 ### Environment
 
-| Variable | Role |
-| --- | --- |
-| `DATABASE_URL` | Postgres connection. Unset uses in-memory PGlite and the demo seed. |
-| `AUTH_SECRET` | Session signing secret, at least 32 characters. Ephemeral in local dev when unset. |
-| `WEB_ORIGIN` | Comma-separated browser origins allowed to call the API. Defaults include `http://127.0.0.1:4317`. |
-| `NEXORA_DEV_HEADERS` | `true` trusts identity headers. Local only. Refused in production. |
-| `NEXORA_SEED_DEMO` | `false` skips the Nazareno seed. |
-| `NEXORA_DEMO_PASSWORD` | Demo password. Default `nexora-demo-2026`. |
-| `PLATFORM_ADMIN_ACTOR_IDS` | Platform operators. Default includes `platform-admin` outside production. |
-| `AI_API_KEY` or `OPENAI_API_KEY` | Live copilot. Unset uses a labeled mock answer. |
-| `AI_MODEL` | Chat model. Default `gpt-4o-mini`. |
-| `AI_BASE_URL` | Optional OpenAI-compatible base URL. |
-| `NEXT_PUBLIC_API_URL` | Browser API origin. Default `http://127.0.0.1:8787`. |
-| `API_URL` | Server-side health fetch for `/classic`. Default `http://127.0.0.1:8787`. |
+| Variable                         | Role                                                                                               |
+| -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                   | Postgres connection. Unset uses in-memory PGlite and the demo seed.                                |
+| `AUTH_SECRET`                    | Session signing secret, at least 32 characters. Ephemeral in local dev when unset.                 |
+| `WEB_ORIGIN`                     | Comma-separated browser origins allowed to call the API. Defaults include `http://127.0.0.1:4317`. |
+| `NEXORA_DEV_HEADERS`             | `true` trusts identity headers. Local only. Refused in production.                                 |
+| `NEXORA_SEED_DEMO`               | `false` skips the Nazareno seed.                                                                   |
+| `NEXORA_DEMO_PASSWORD`           | Demo password. Default `nexora-demo-2026`.                                                         |
+| `PLATFORM_ADMIN_ACTOR_IDS`       | Platform operators. Default includes `platform-admin` outside production.                          |
+| `AI_API_KEY` or `OPENAI_API_KEY` | Live copilot. Unset uses a labeled mock answer.                                                    |
+| `AI_MODEL`                       | Chat model. Default `gpt-4o-mini`.                                                                 |
+| `AI_BASE_URL`                    | Optional OpenAI-compatible base URL.                                                               |
+| `NEXT_PUBLIC_API_URL`            | Browser API origin. Default `http://127.0.0.1:8787`.                                               |
+| `API_URL`                        | Server-side health fetch for `/classic`. Default `http://127.0.0.1:8787`.                          |
 
 ## API sketch
 

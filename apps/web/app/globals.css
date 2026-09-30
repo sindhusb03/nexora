@@ -57,7 +57,9 @@
   --appbar-height: 3.25rem;
   --ctxbar-height: 3.1rem;
 
-  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-sans:
+    "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue",
+    sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
 
   color: var(--text);
@@ -1713,7 +1715,8 @@ input.input-figure {
   body {
     @apply bg-background text-foreground;
   }
-  button:not(:disabled), [role="button"]:not(:disabled) {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
     cursor: pointer;
   }
   html {

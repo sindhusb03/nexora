@@ -52,7 +52,9 @@ export function readActor(c: AppContext): ActorContext {
     throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
   }
   const correlationHeader = c.req.header("x-correlation-id")?.trim() ?? "";
-  const correlationId = CORRELATION_ID.test(correlationHeader) ? correlationHeader : c.get("requestId");
+  const correlationId = CORRELATION_ID.test(correlationHeader)
+    ? correlationHeader
+    : c.get("requestId");
   const idempotencyKey = c.req.header("idempotency-key")?.trim() || null;
   const expectedHeader = c.req.header("expected-version")?.trim();
   const expectedVersion = expectedHeader ? Number(expectedHeader) : null;

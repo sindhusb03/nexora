@@ -24,7 +24,8 @@ export function resolveOwnership(input: {
     throw new KernelError("FIN_INVALID_PERIOD", "Ownership as-of date is invalid");
   }
   const matches = input.edges.filter(
-    (edge) => edge.parentEntityId === input.parentEntityId && edge.childEntityId === input.childEntityId,
+    (edge) =>
+      edge.parentEntityId === input.parentEntityId && edge.childEntityId === input.childEntityId,
   );
   const active = matches.filter((edge) => covers(edge, input.asOf));
   active.sort((left, right) => (left.effectiveFrom < right.effectiveFrom ? 1 : -1));
@@ -56,7 +57,10 @@ export function attributeNonControllingInterest(input: {
   const equity = parseMinor(input.subsidiaryEquityMinor);
   const percent = new AnalyticalDecimal(assertPercent(input.ownershipPercent));
   const parent = BigInt(
-    new AnalyticalDecimal(equity.toString()).mul(percent).toDecimalPlaces(0, AnalyticalDecimal.ROUND_HALF_EVEN).toFixed(0),
+    new AnalyticalDecimal(equity.toString())
+      .mul(percent)
+      .toDecimalPlaces(0, AnalyticalDecimal.ROUND_HALF_EVEN)
+      .toFixed(0),
   );
   return {
     parentEquityMinor: parent.toString(),
@@ -67,7 +71,10 @@ export function attributeNonControllingInterest(input: {
 }
 
 function covers(edge: OwnershipEdge, asOf: string): boolean {
-  if (!DATE.test(edge.effectiveFrom) || (edge.effectiveTo !== null && !DATE.test(edge.effectiveTo))) {
+  if (
+    !DATE.test(edge.effectiveFrom) ||
+    (edge.effectiveTo !== null && !DATE.test(edge.effectiveTo))
+  ) {
     throw new KernelError("FIN_INVALID_PERIOD", "Ownership effective dates are invalid");
   }
   if (edge.effectiveTo !== null && edge.effectiveTo < edge.effectiveFrom) {
@@ -82,7 +89,10 @@ function assertPercent(value: string): string {
   }
   const percent = new AnalyticalDecimal(value);
   if (percent.lt(0) || percent.gt(1)) {
-    throw new KernelError("VALUATION_INVALID_ASSUMPTION", "Ownership percent must be between 0 and 1");
+    throw new KernelError(
+      "VALUATION_INVALID_ASSUMPTION",
+      "Ownership percent must be between 0 and 1",
+    );
   }
   return percent.toFixed(ANALYTICAL_SCALE);
 }

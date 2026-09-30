@@ -67,7 +67,12 @@ export function createProgramStore(db: AppDatabase) {
         const rows = await tx
           .select()
           .from(financialState)
-          .where(and(eq(financialState.tenantId, tenantId), eq(financialState.financialStateId, financialStateId)))
+          .where(
+            and(
+              eq(financialState.tenantId, tenantId),
+              eq(financialState.financialStateId, financialStateId),
+            ),
+          )
           .limit(1);
         const row = rows[0];
         return row
@@ -112,12 +117,22 @@ export function createProgramStore(db: AppDatabase) {
         });
       });
     },
-    listLineage(tenantId: string, fromType: string, fromId: string): Promise<readonly LineageRow[]> {
+    listLineage(
+      tenantId: string,
+      fromType: string,
+      fromId: string,
+    ): Promise<readonly LineageRow[]> {
       return tenantTx(db, tenantId, async (tx) => {
         const rows = await tx
           .select()
           .from(lineageEdge)
-          .where(and(eq(lineageEdge.tenantId, tenantId), eq(lineageEdge.fromType, fromType), eq(lineageEdge.fromId, fromId)));
+          .where(
+            and(
+              eq(lineageEdge.tenantId, tenantId),
+              eq(lineageEdge.fromType, fromType),
+              eq(lineageEdge.fromId, fromId),
+            ),
+          );
         return rows.map((row) => ({
           fromType: row.fromType,
           fromId: row.fromId,
@@ -168,7 +183,10 @@ export function createProgramStore(db: AppDatabase) {
     },
     listOwnershipEdges(tenantId: string): Promise<readonly OwnershipRow[]> {
       return tenantTx(db, tenantId, async (tx) => {
-        const rows = await tx.select().from(ownershipEdge).where(eq(ownershipEdge.tenantId, tenantId));
+        const rows = await tx
+          .select()
+          .from(ownershipEdge)
+          .where(eq(ownershipEdge.tenantId, tenantId));
         return rows.map((row) => ({
           parentEntityId: row.parentEntityId,
           childEntityId: row.childEntityId,
@@ -245,10 +263,22 @@ export function createProgramStore(db: AppDatabase) {
         const rows = await tx
           .select()
           .from(modelVersion)
-          .where(and(eq(modelVersion.tenantId, tenantId), eq(modelVersion.modelVersionId, modelVersionId)))
+          .where(
+            and(
+              eq(modelVersion.tenantId, tenantId),
+              eq(modelVersion.modelVersionId, modelVersionId),
+            ),
+          )
           .limit(1);
         const row = rows[0];
-        return row ? { id: row.modelVersionId, status: row.status, stateHash: row.inputHash, payload: row.payload } : null;
+        return row
+          ? {
+              id: row.modelVersionId,
+              status: row.status,
+              stateHash: row.inputHash,
+              payload: row.payload,
+            }
+          : null;
       });
     },
     insertScenario(input: ScenarioWrite) {
@@ -328,10 +358,24 @@ export function createProgramStore(db: AppDatabase) {
           .where(and(eq(reportPack.tenantId, tenantId), eq(reportPack.reportPackId, reportPackId)))
           .limit(1);
         const row = rows[0];
-        return row ? { id: row.reportPackId, status: row.status, stateHash: row.stateHash, payload: row.payload } : null;
+        return row
+          ? {
+              id: row.reportPackId,
+              status: row.status,
+              stateHash: row.stateHash,
+              payload: row.payload,
+            }
+          : null;
       });
     },
-    insertInstrument(input: { tenantId: string; instrumentId: string; entityId: string; name: string; kind: "debt" | "equity"; createdAt: string }) {
+    insertInstrument(input: {
+      tenantId: string;
+      instrumentId: string;
+      entityId: string;
+      name: string;
+      kind: "debt" | "equity";
+      createdAt: string;
+    }) {
       return tenantTx(db, input.tenantId, async (tx) => {
         await tx.insert(instrument).values(input);
       });
@@ -379,10 +423,19 @@ export function createProgramStore(db: AppDatabase) {
         const rows = await tx
           .select()
           .from(importBatch)
-          .where(and(eq(importBatch.tenantId, tenantId), eq(importBatch.idempotencyKey, idempotencyKey)))
+          .where(
+            and(eq(importBatch.tenantId, tenantId), eq(importBatch.idempotencyKey, idempotencyKey)),
+          )
           .limit(1);
         const row = rows[0];
-        return row ? { id: row.importBatchId, status: "imported", stateHash: row.fileHash, payload: row.payload } : null;
+        return row
+          ? {
+              id: row.importBatchId,
+              status: "imported",
+              stateHash: row.fileHash,
+              payload: row.payload,
+            }
+          : null;
       });
     },
     insertImportBatch(input: ImportBatchWrite) {
@@ -491,7 +544,11 @@ async function writeAudit(tx: AppDatabase, tenantId: string, audit: AuditWrite):
   });
 }
 
-async function tenantTx<T>(db: AppDatabase, tenantId: string, fn: (tx: AppDatabase) => Promise<T>): Promise<T> {
+async function tenantTx<T>(
+  db: AppDatabase,
+  tenantId: string,
+  fn: (tx: AppDatabase) => Promise<T>,
+): Promise<T> {
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));

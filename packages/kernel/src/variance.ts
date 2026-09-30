@@ -31,7 +31,9 @@ export interface VarianceResult {
 }
 
 /** Actual minus plan. Revenue and profit are favorable when actual is higher. Expense is favorable when actual is lower. */
-export function explainVariance(input: { readonly lines: readonly VarianceLineInput[] }): VarianceResult {
+export function explainVariance(input: {
+  readonly lines: readonly VarianceLineInput[];
+}): VarianceResult {
   const lines = input.lines.map((line) => {
     const actual = minor(line.actualMinor, line.key);
     const plan = minor(line.planMinor, line.key);

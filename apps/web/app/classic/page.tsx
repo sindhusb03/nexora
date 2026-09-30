@@ -29,5 +29,9 @@ async function loadKernelHealth(): Promise<KernelHealth | null> {
 function isHealth(value: unknown): value is KernelHealth {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.status === "string" && typeof record.service === "string" && typeof record.engineVersion === "string";
+  return (
+    typeof record.status === "string" &&
+    typeof record.service === "string" &&
+    typeof record.engineVersion === "string"
+  );
 }

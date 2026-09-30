@@ -32,7 +32,11 @@ export type SessionLookup =
   | { readonly status: "active"; readonly identity: Identity & { readonly sessionId: string } };
 
 /** Reads the session cookie. A present but forged, expired, or revoked cookie is "invalid", never a fallback to headers. */
-export async function lookupSession(c: AppContext, store: IdentityStore, auth: AuthConfig): Promise<SessionLookup> {
+export async function lookupSession(
+  c: AppContext,
+  store: IdentityStore,
+  auth: AuthConfig,
+): Promise<SessionLookup> {
   const cookie = getCookie(c, sessionCookieName(auth));
   if (!cookie) return { status: "none" };
   const sessionId = readSignedSessionId(auth.secret, cookie);
@@ -52,7 +56,12 @@ export async function lookupSession(c: AppContext, store: IdentityStore, auth: A
 }
 
 /** Cookie-authenticated writes must echo the session's CSRF token and, when the browser sends one, an allowed Origin. */
-export function assertCsrf(c: AppContext, auth: AuthConfig, webOrigins: readonly string[], sessionId: string): void {
+export function assertCsrf(
+  c: AppContext,
+  auth: AuthConfig,
+  webOrigins: readonly string[],
+  sessionId: string,
+): void {
   if (SAFE_METHODS.has(c.req.method)) return;
   const origin = c.req.header("origin");
   if (origin && !webOrigins.includes(origin)) {
@@ -60,7 +69,11 @@ export function assertCsrf(c: AppContext, auth: AuthConfig, webOrigins: readonly
   }
   const token = c.req.header("x-csrf-token")?.trim() ?? "";
   if (token.length === 0 || !csrfTokenMatches(auth.secret, sessionId, token)) {
-    throw new ApiError(403, "AUTH_CSRF_FAILED", "Missing or invalid x-csrf-token for a cookie-authenticated write");
+    throw new ApiError(
+      403,
+      "AUTH_CSRF_FAILED",
+      "Missing or invalid x-csrf-token for a cookie-authenticated write",
+    );
   }
 }
 
@@ -91,7 +104,11 @@ export function requireIdentity(deps: {
     const session = await lookupSession(c, deps.store, deps.auth);
     if (session.status === "invalid") {
       clearSessionCookie(c, deps.auth);
-      throw new ApiError(401, "AUTH_SESSION_INVALID", "The session is expired, revoked, or not recognised; sign in again");
+      throw new ApiError(
+        401,
+        "AUTH_SESSION_INVALID",
+        "The session is expired, revoked, or not recognised; sign in again",
+      );
     }
     let identity: Identity | null = null;
     if (session.status === "active") {

@@ -43,7 +43,13 @@ type HealthState =
   | { readonly status: "ok"; readonly health: KernelHealth }
   | { readonly status: "down" };
 
-const AREAS: readonly { readonly id: Area; readonly label: string; readonly href: string; readonly icon: IconName; readonly rail: boolean }[] = [
+const AREAS: readonly {
+  readonly id: Area;
+  readonly label: string;
+  readonly href: string;
+  readonly icon: IconName;
+  readonly rail: boolean;
+}[] = [
   { id: "home", label: "Insights", href: "/", icon: "home", rail: true },
   { id: "books", label: "Books", href: "/books", icon: "books", rail: false },
   { id: "program", label: "Program", href: "/program", icon: "program", rail: false },
@@ -168,7 +174,11 @@ export function AppShell({
                   return (
                     <li key={item.id}>
                       {item.href && !locked ? (
-                        <Link href={item.href} className={className} aria-current={active ? "page" : undefined}>
+                        <Link
+                          href={item.href}
+                          className={className}
+                          aria-current={active ? "page" : undefined}
+                        >
                           <span className="rail-item-label">{item.label}</span>
                           {meta}
                         </Link>
@@ -207,7 +217,11 @@ export function AppShell({
                 <span className="crumbs-sep" aria-hidden="true">
                   /
                 </span>
-                {section ? <Link href={areaInfo.href}>{areaInfo.label}</Link> : <span className="crumbs-current">{areaInfo.label}</span>}
+                {section ? (
+                  <Link href={areaInfo.href}>{areaInfo.label}</Link>
+                ) : (
+                  <span className="crumbs-current">{areaInfo.label}</span>
+                )}
               </>
             ) : null}
             {section ? (
@@ -254,7 +268,15 @@ export function AppShell({
   );
 }
 
-export function InspectorSection({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+export function InspectorSection({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="inspector-section">
       <h3>
@@ -279,7 +301,11 @@ export function identityContext(session: Session): readonly ContextItem[] {
     {
       label: "Tenant",
       title: session.tenantId || undefined,
-      value: session.tenantId ? <code>{session.tenantId.slice(0, 8)}…</code> : <span className="ctx-empty">Not provisioned</span>,
+      value: session.tenantId ? (
+        <code>{session.tenantId.slice(0, 8)}…</code>
+      ) : (
+        <span className="ctx-empty">Not provisioned</span>
+      ),
     },
     {
       label: "Actor · Region",
@@ -293,7 +319,13 @@ export function identityContext(session: Session): readonly ContextItem[] {
   ];
 }
 
-export function IdentityForm({ session, onApply }: { session: Session; onApply: (next: Session) => void }) {
+export function IdentityForm({
+  session,
+  onApply,
+}: {
+  session: Session;
+  onApply: (next: Session) => void;
+}) {
   const [actorId, setActorId] = useState(session.actorId);
   const [tenantId, setTenantId] = useState(session.tenantId);
   const [region, setRegion] = useState(session.region);
@@ -303,7 +335,8 @@ export function IdentityForm({ session, onApply }: { session: Session; onApply: 
     onApply({ actorId: actorId.trim(), tenantId: tenantId.trim(), region: region.trim() });
   }
 
-  const dirty = actorId !== session.actorId || tenantId !== session.tenantId || region !== session.region;
+  const dirty =
+    actorId !== session.actorId || tenantId !== session.tenantId || region !== session.region;
 
   return (
     <form className="session-bar" onSubmit={submit} aria-label="Development identity">
@@ -320,18 +353,27 @@ export function IdentityForm({ session, onApply }: { session: Session; onApply: 
         />
       </Field>
       <Field label="Region">
-        <Input value={region} onChange={(event) => setRegion(event.target.value)} className="input-medium" />
+        <Input
+          value={region}
+          onChange={(event) => setRegion(event.target.value)}
+          className="input-medium"
+        />
       </Field>
       <Button type="submit" disabled={!dirty}>
         Apply
       </Button>
       {session.tenantId.length > 0 ? (
-        <Button type="button" variant="outline" onClick={() => onApply({ ...session, tenantId: "" })}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onApply({ ...session, tenantId: "" })}
+        >
           Clear tenant
         </Button>
       ) : null}
       <span className="muted small">
-        NEXORA_DEV_HEADERS is on: x-actor-id, x-tenant-id, and x-region are sent with every kernel call. Local development only.
+        NEXORA_DEV_HEADERS is on: x-actor-id, x-tenant-id, and x-region are sent with every kernel
+        call. Local development only.
       </span>
     </form>
   );
@@ -410,5 +452,9 @@ function Icon({ name, className }: { name: IconName; className?: string }) {
 function isHealth(value: unknown): value is KernelHealth {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.status === "string" && typeof record.service === "string" && typeof record.engineVersion === "string";
+  return (
+    typeof record.status === "string" &&
+    typeof record.service === "string" &&
+    typeof record.engineVersion === "string"
+  );
 }

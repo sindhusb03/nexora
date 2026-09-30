@@ -45,7 +45,10 @@ export interface DcfResult {
 export function valueDcf(input: DcfInput): DcfResult {
   const currency = assertCurrency(input.currency);
   if (input.freeCashFlows.length === 0) {
-    throw new KernelError("VALUATION_INVALID_ASSUMPTION", "DCF requires at least one free cash flow");
+    throw new KernelError(
+      "VALUATION_INVALID_ASSUMPTION",
+      "DCF requires at least one free cash flow",
+    );
   }
 
   const wacc = decimal(input.wacc, "wacc");
@@ -70,7 +73,10 @@ export function valueDcf(input: DcfInput): DcfResult {
   );
   const last = cashFlows[cashFlows.length - 1];
   if (!last) {
-    throw new KernelError("VALUATION_INVALID_ASSUMPTION", "DCF requires at least one free cash flow");
+    throw new KernelError(
+      "VALUATION_INVALID_ASSUMPTION",
+      "DCF requires at least one free cash flow",
+    );
   }
 
   const periods = cashFlows.length;

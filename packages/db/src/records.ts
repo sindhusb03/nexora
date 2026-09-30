@@ -126,7 +126,11 @@ export interface AuthSessionRecord {
 
 /** Users and sessions. Runs as nexora_app with no tenant set; tenant data is never read here. */
 export interface IdentityStore {
-  createUser(input: { actorId: string; passwordHash: string; createdAt: string }): Promise<"created" | "exists">;
+  createUser(input: {
+    actorId: string;
+    passwordHash: string;
+    createdAt: string;
+  }): Promise<"created" | "exists">;
   findUser(actorId: string): Promise<AuthUserRecord | null>;
   createSession(input: {
     sessionId: string;
@@ -159,10 +163,7 @@ export interface LedgerStore extends IdentityStore {
   }): Promise<void>;
   getTenant(tenantId: string): Promise<TenantRecord | null>;
   listRoles(tenantId: string, actorId: string): Promise<readonly Role[]>;
-  createEntity(input: {
-    entity: EntityRecord;
-    audit: AuditWrite;
-  }): Promise<EntityRecord>;
+  createEntity(input: { entity: EntityRecord; audit: AuditWrite }): Promise<EntityRecord>;
   getEntity(tenantId: string, entityId: string): Promise<EntityRecord | null>;
   listEntities(tenantId: string): Promise<readonly EntityRecord[]>;
   createAccount(input: {
@@ -182,7 +183,11 @@ export interface LedgerStore extends IdentityStore {
   findJournalByIdempotency(tenantId: string, idempotencyKey: string): Promise<JournalRecord | null>;
   findReversal(tenantId: string, journalId: string): Promise<JournalRecord | null>;
   getJournal(tenantId: string, journalId: string): Promise<JournalRecord | null>;
-  listJournals(tenantId: string, entityId: string, periodId: string | null): Promise<readonly JournalRecord[]>;
+  listJournals(
+    tenantId: string,
+    entityId: string,
+    periodId: string | null,
+  ): Promise<readonly JournalRecord[]>;
   insertPostedJournal(input: {
     journal: Omit<JournalRecord, "lines" | "postedAt"> & { postedAt: string };
     lines: readonly (StoredJournalLine & { lineId: string })[];
@@ -195,9 +200,15 @@ export interface LedgerStore extends IdentityStore {
     run: CalculationRunRecord;
     audit: AuditWrite;
   }): Promise<CalculationRunRecord>;
-  getCalculationRun(tenantId: string, calculationRunId: string): Promise<CalculationRunRecord | null>;
+  getCalculationRun(
+    tenantId: string,
+    calculationRunId: string,
+  ): Promise<CalculationRunRecord | null>;
   insertFinancialState(input: VersionWrite): Promise<{ readonly id: string }>;
-  getFinancialState(tenantId: string, financialStateId: string): Promise<PublishableVersionRow | null>;
+  getFinancialState(
+    tenantId: string,
+    financialStateId: string,
+  ): Promise<PublishableVersionRow | null>;
   insertApproval(input: ApprovalWrite): Promise<void>;
   insertLineage(input: LineageWrite): Promise<void>;
   listLineage(tenantId: string, fromType: string, fromId: string): Promise<readonly LineageRow[]>;
@@ -206,7 +217,12 @@ export interface LedgerStore extends IdentityStore {
   listOwnershipEdges(tenantId: string): Promise<readonly OwnershipRow[]>;
   insertConsolidationGroup(input: NamedWrite): Promise<{ readonly id: string }>;
   insertElimination(input: EliminationWrite): Promise<void>;
-  insertModel(input: { tenantId: string; modelId: string; name: string; createdAt: string }): Promise<void>;
+  insertModel(input: {
+    tenantId: string;
+    modelId: string;
+    name: string;
+    createdAt: string;
+  }): Promise<void>;
   insertModelVersion(input: ModelVersionWrite): Promise<void>;
   getModelVersion(tenantId: string, modelVersionId: string): Promise<VersionRow | null>;
   insertScenario(input: ScenarioWrite): Promise<{ readonly id: string }>;
@@ -225,8 +241,16 @@ export interface LedgerStore extends IdentityStore {
   insertWorkspaceRecord(input: WorkspaceWrite): Promise<{ readonly id: string }>;
   listWorkspaceRecords(tenantId: string, kind: string): Promise<readonly WorkspaceRow[]>;
   updateWorkspaceRecord(input: WorkspaceUpdate): Promise<void>;
-  setTenantStatus(input: { tenantId: string; status: "active" | "suspended"; audit: AuditWrite }): Promise<void>;
-  deleteMembership(input: { tenantId: string; membershipId: string; audit: AuditWrite }): Promise<void>;
+  setTenantStatus(input: {
+    tenantId: string;
+    status: "active" | "suspended";
+    audit: AuditWrite;
+  }): Promise<void>;
+  deleteMembership(input: {
+    tenantId: string;
+    membershipId: string;
+    audit: AuditWrite;
+  }): Promise<void>;
 }
 
 export interface VersionWrite {
@@ -297,7 +321,13 @@ export interface FxRateSetWrite {
   readonly tenantId: string;
   readonly fxRateSetId: string;
   readonly label: string;
-  readonly rates: readonly { readonly id: string; readonly base: string; readonly quote: string; readonly rateType: string; readonly rate: string }[];
+  readonly rates: readonly {
+    readonly id: string;
+    readonly base: string;
+    readonly quote: string;
+    readonly rateType: string;
+    readonly rate: string;
+  }[];
   readonly createdAt: string;
   readonly audit: AuditWrite;
 }
@@ -349,7 +379,11 @@ export interface ModelVersionWrite {
   readonly status: string;
   readonly inputHash: string;
   readonly engineVersion: string;
-  readonly nodes: readonly { readonly id: string; readonly nodeKey: string; readonly payload: Record<string, unknown> }[];
+  readonly nodes: readonly {
+    readonly id: string;
+    readonly nodeKey: string;
+    readonly payload: Record<string, unknown>;
+  }[];
   readonly payload: Record<string, unknown>;
   readonly createdAt: string;
   readonly audit: AuditWrite;
@@ -419,7 +453,11 @@ export interface ImportBatchWrite {
   readonly idempotencyKey: string;
   readonly fileHash: string;
   readonly payload: Record<string, unknown>;
-  readonly rows: readonly { readonly id: string; readonly rowNo: number; readonly payload: Record<string, unknown> }[];
+  readonly rows: readonly {
+    readonly id: string;
+    readonly rowNo: number;
+    readonly payload: Record<string, unknown>;
+  }[];
   readonly createdAt: string;
   readonly audit: AuditWrite;
 }

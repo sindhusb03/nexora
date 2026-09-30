@@ -23,7 +23,10 @@ export function csrfHeaders(): Record<string, string> {
   return csrfToken ? { "x-csrf-token": csrfToken } : {};
 }
 
-export function identityHeaders(session: Session, overrides: IdentityOverrides = {}): Record<string, string> {
+export function identityHeaders(
+  session: Session,
+  overrides: IdentityOverrides = {},
+): Record<string, string> {
   const headers = csrfHeaders();
   if (DEV_HEADERS) {
     headers["x-actor-id"] = overrides.actorId ?? session.actorId;
@@ -173,7 +176,13 @@ async function request<T>(session: Session, options: RequestOptions<T>): Promise
   if (options.idempotencyKey) {
     headers["idempotency-key"] = options.idempotencyKey;
   }
-  return apiRequest({ method: options.method, path: options.path, decode: options.decode, body: options.body, headers });
+  return apiRequest({
+    method: options.method,
+    path: options.path,
+    decode: options.decode,
+    body: options.body,
+    headers,
+  });
 }
 
 /** One fetch to the kernel API with the session cookie attached. Every error comes back as a typed result. */
@@ -202,11 +211,14 @@ export async function apiRequest<T>(options: {
     return {
       ok: false,
       status: 0,
-      error: { code: "NETWORK_UNREACHABLE", message: `Could not reach the kernel API at ${API_URL}` },
+      error: {
+        code: "NETWORK_UNREACHABLE",
+        message: `Could not reach the kernel API at ${API_URL}`,
+      },
     };
   }
 
-  let payload: unknown = null;
+  let payload: unknown;
   try {
     payload = await response.json();
   } catch {
@@ -221,7 +233,10 @@ export async function apiRequest<T>(options: {
     return {
       ok: false,
       status: response.status,
-      error: { code: "UNEXPECTED_RESPONSE", message: "The kernel API returned a response this screen does not recognise" },
+      error: {
+        code: "UNEXPECTED_RESPONSE",
+        message: "The kernel API returned a response this screen does not recognise",
+      },
     };
   }
   return { ok: true, status: response.status, data };
@@ -238,7 +253,11 @@ export function provisionTenant(
     actorId: PLATFORM_ADMIN_ACTOR,
     region: input.homeRegion,
     omitTenant: true,
-    body: { name: input.name, homeRegion: input.homeRegion, ownerActorId: input.ownerActorId ?? session.actorId },
+    body: {
+      name: input.name,
+      homeRegion: input.homeRegion,
+      ownerActorId: input.ownerActorId ?? session.actorId,
+    },
     decode: decodeTenant,
   });
 }
@@ -258,7 +277,10 @@ export function createEntity(
   return request(session, { method: "POST", path: "/v1/entities", body: input, decode: acceptAny });
 }
 
-export function listAccounts(session: Session, entityId: string): Promise<ApiResult<readonly Account[]>> {
+export function listAccounts(
+  session: Session,
+  entityId: string,
+): Promise<ApiResult<readonly Account[]>> {
   return request(session, {
     method: "GET",
     path: `/v1/entities/${encodeURIComponent(entityId)}/accounts`,
@@ -280,7 +302,10 @@ export function createAccount(
   return request(session, { method: "POST", path: "/v1/accounts", body: input, decode: acceptAny });
 }
 
-export function listPeriods(session: Session, entityId: string): Promise<ApiResult<readonly Period[]>> {
+export function listPeriods(
+  session: Session,
+  entityId: string,
+): Promise<ApiResult<readonly Period[]>> {
   return request(session, {
     method: "GET",
     path: `/v1/entities/${encodeURIComponent(entityId)}/periods`,
@@ -317,7 +342,12 @@ export function listJournals(
 
 export function postJournal(
   session: Session,
-  input: { entityId: string; periodId: string; currency: string; lines: readonly JournalLineInput[] },
+  input: {
+    entityId: string;
+    periodId: string;
+    currency: string;
+    lines: readonly JournalLineInput[];
+  },
   idempotencyKey: string,
 ): Promise<ApiResult<Journal>> {
   return request(session, {
@@ -358,7 +388,10 @@ function decodeError(payload: unknown, status: number): ApiError {
       return { code, message };
     }
   }
-  return { code: `HTTP_${status}`, message: "The kernel API rejected the request without an error body" };
+  return {
+    code: `HTTP_${status}`,
+    message: "The kernel API rejected the request without an error body",
+  };
 }
 
 export function acceptAny(value: unknown): unknown {
@@ -458,7 +491,12 @@ function decodeJournalLine(value: unknown): JournalLine | null {
   const accountId = str(value, "accountId");
   const debitMinor = str(value, "debitMinor");
   const creditMinor = str(value, "creditMinor");
-  if (accountId === null || debitMinor === null || creditMinor === null || typeof value.lineNo !== "number") {
+  if (
+    accountId === null ||
+    debitMinor === null ||
+    creditMinor === null ||
+    typeof value.lineNo !== "number"
+  ) {
     return null;
   }
   return { accountId, lineNo: value.lineNo, debitMinor, creditMinor };
@@ -514,7 +552,10 @@ function decodeAmount(value: unknown): Amount | null {
   return { minor, amount, currency };
 }
 
-function decodeAmounts<K extends string>(value: unknown, keys: readonly K[]): Record<K, Amount> | null {
+function decodeAmounts<K extends string>(
+  value: unknown,
+  keys: readonly K[],
+): Record<K, Amount> | null {
   if (!isRecord(value)) return null;
   const out: Partial<Record<K, Amount>> = {};
   for (const key of keys) {
@@ -531,12 +572,37 @@ function decodeStatements(value: unknown): Statements | null {
   const inputHash = str(value, "inputHash");
   const currency = str(value, "currency");
   if (engineVersion === null || inputHash === null || currency === null) return null;
-  const incomeStatement = decodeAmounts(value.incomeStatement, ["revenue", "expenses", "netIncome"] as const);
-  const balanceSheet = decodeAmounts(value.balanceSheet, ["assets", "liabilities", "equity"] as const);
-  const cashFlow = decodeAmounts(value.cashFlow, ["beginningCash", "cfo", "cfi", "cff", "endingCash"] as const);
-  const retained = decodeAmounts(value.retainedEarnings, ["opening", "netIncome", "distributions", "ending"] as const);
+  const incomeStatement = decodeAmounts(value.incomeStatement, [
+    "revenue",
+    "expenses",
+    "netIncome",
+  ] as const);
+  const balanceSheet = decodeAmounts(value.balanceSheet, [
+    "assets",
+    "liabilities",
+    "equity",
+  ] as const);
+  const cashFlow = decodeAmounts(value.cashFlow, [
+    "beginningCash",
+    "cfo",
+    "cfi",
+    "cff",
+    "endingCash",
+  ] as const);
+  const retained = decodeAmounts(value.retainedEarnings, [
+    "opening",
+    "netIncome",
+    "distributions",
+    "ending",
+  ] as const);
   const close = isRecord(value.retainedEarnings) ? str(value.retainedEarnings, "close") : null;
-  if (incomeStatement === null || balanceSheet === null || cashFlow === null || retained === null || close === null) {
+  if (
+    incomeStatement === null ||
+    balanceSheet === null ||
+    cashFlow === null ||
+    retained === null ||
+    close === null
+  ) {
     return null;
   }
   return {

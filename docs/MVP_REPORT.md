@@ -26,11 +26,11 @@ The studio is the governed finance workspace for Nazareno Services LLC. Sign in 
 
 ## Tests
 
-| Command | Result |
-| --- | --- |
-| `pnpm test` | Passed. Kernel 40, database 7, API 45 passed and 1 skipped, web 3. |
-| `pnpm typecheck` | Passed. |
-| `pnpm build` | Passed. Next.js 15 production build. |
+| Command                              | Result                                                                                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test`                          | Passed. Kernel 40, database 7, API 45 passed and 1 skipped, web 3.                                                                      |
+| `pnpm typecheck`                     | Passed.                                                                                                                                 |
+| `pnpm build`                         | Passed. Next.js 15 production build.                                                                                                    |
 | `pnpm --filter @nexora/web test:e2e` | Passed. Owner workspace and mock copilot, viewer cannot accept, platform admin sees Tally and the Excel flag, plus the screenshot pass. |
 
 ## Screenshots

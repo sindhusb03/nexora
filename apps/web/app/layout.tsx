@@ -11,7 +11,8 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "Nexora",
-  description: "The governed AI finance analyst that keeps growing companies board-ready and deal-ready.",
+  description:
+    "The governed AI finance analyst that keeps growing companies board-ready and deal-ready.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

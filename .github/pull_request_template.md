@@ -1,6 +1,6 @@
 ## Risk class
 
-See `docs/sdlc.md`. Check one.
+See `docs/sdlc.md`. Check one. The highest class touched wins. Editing CI gates is R3.
 
 - [ ] R0 Docs or chore
 - [ ] R1 Presentation only (`apps/web`)
@@ -11,16 +11,30 @@ See `docs/sdlc.md`. Check one.
 
 What changed and why.
 
+## Linked issue
+
+Closes #. Write "None" when there is no issue.
+
 ## Invariants
 
 Name the financial rules this PR must keep true. Write "None" only for R0.
 
-## Tests
+## Test evidence
 
+- [ ] `pnpm lint` and `pnpm format:check`
 - [ ] `pnpm typecheck`, `pnpm test`, and `pnpm build` were run locally, or CI is the first run and this box stays open until it is green
 - [ ] Golden tests cover any formula, journal rule, or schema invariant this PR changes
+- [ ] Playwright (`pnpm --filter @nexora/web test:e2e`) when `apps/web` behavior changes
 
-List the golden test files when the class is R3:
+List the commands you ran and the result. List the golden test files when the class is R3:
+
+## Screenshots
+
+Required for a user-visible UI change. Write "None" when the diff does not change the UI.
+
+## Rollback plan
+
+How to revert this change without rewriting posted journals. For a migration, say whether the owner role must apply a follow-up migration.
 
 ## Financial review attestation
 

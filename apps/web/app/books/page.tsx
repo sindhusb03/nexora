@@ -8,9 +8,21 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { readDataSource, type DataSourceKind } from "../data-source";
 import { productSections } from "../product-nav";
-import { IDENTITY_TOGGLE_LABEL, IdentityDrawer, IdentityGate, useIdentity, type SignedSession } from "../identity";
+import {
+  IDENTITY_TOGGLE_LABEL,
+  IdentityDrawer,
+  IdentityGate,
+  useIdentity,
+  type SignedSession,
+} from "../identity";
 import { OpenCompany } from "../open-company";
-import { AppShell, EngineLine, identityContext, InspectorSection, type ContextItem } from "../shell";
+import {
+  AppShell,
+  EngineLine,
+  identityContext,
+  InspectorSection,
+  type ContextItem,
+} from "../shell";
 import {
   PLATFORM_ADMIN_ACTOR,
   listAccounts,
@@ -73,7 +85,12 @@ export default function BooksPage() {
     <IdentityGate area="books" identity={identity}>
       {(session, signed) => {
         const identityToggle = (
-          <Button type="button" variant="ghost" aria-expanded={identityOpen} onClick={() => setIdentityOpen((open) => !open)}>
+          <Button
+            type="button"
+            variant="ghost"
+            aria-expanded={identityOpen}
+            onClick={() => setIdentityOpen((open) => !open)}
+          >
             {identityOpen ? "Hide identity" : IDENTITY_TOGGLE_LABEL}
           </Button>
         );
@@ -84,7 +101,12 @@ export default function BooksPage() {
 
         if (session.tenantId.length === 0) {
           return (
-            <AppShell area="books" section="Open company" context={identityContext(session)} drawer={drawer}>
+            <AppShell
+              area="books"
+              section="Open company"
+              context={identityContext(session)}
+              drawer={drawer}
+            >
               {signed && !signed.platformAdmin ? (
                 <OpenCompany session={session} selectTenant={identity.selectTenant} />
               ) : (
@@ -140,7 +162,11 @@ function ProvisionPanel({
     }
     setFormError(null);
     const tenant = await action.run(() =>
-      provisionTenant(session, { name: name.trim(), homeRegion: homeRegion.trim(), ownerActorId: owner }),
+      provisionTenant(session, {
+        name: name.trim(),
+        homeRegion: homeRegion.trim(),
+        ownerActorId: owner,
+      }),
     );
     if (tenant === null) return;
     if (owner === session.actorId) {
@@ -158,13 +184,15 @@ function ProvisionPanel({
           <p>
             {sessionMode ? (
               <>
-                You are a platform administrator. The kernel provisions the tenant in <code>{session.region}</code> and makes the
-                named actor its owner; that actor must already be registered.
+                You are a platform administrator. The kernel provisions the tenant in{" "}
+                <code>{session.region}</code> and makes the named actor its owner; that actor must
+                already be registered.
               </>
             ) : (
               <>
-                No tenant is set for this session. Provisioning runs as <code>{PLATFORM_ADMIN_ACTOR}</code> through dev headers
-                and makes the named actor the owner.
+                No tenant is set for this session. Provisioning runs as{" "}
+                <code>{PLATFORM_ADMIN_ACTOR}</code> through dev headers and makes the named actor
+                the owner.
               </>
             )}
           </p>
@@ -176,7 +204,11 @@ function ProvisionPanel({
             <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
           </Field>
           <Field label="Owner actor">
-            <Input value={ownerActorId} onChange={(event) => setOwnerActorId(event.target.value)} className="input-medium" />
+            <Input
+              value={ownerActorId}
+              onChange={(event) => setOwnerActorId(event.target.value)}
+              className="input-medium"
+            />
           </Field>
           <Field label="Home region">
             <Input
@@ -191,11 +223,13 @@ function ProvisionPanel({
           </Button>
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
         {provisioned ? (
           <p className="notice notice-info" role="status">
-            Provisioned <code>{provisioned.tenantId}</code> for <code>{ownerActorId.trim()}</code>. The owner signs in and opens
-            it by ID.
+            Provisioned <code>{provisioned.tenantId}</code> for <code>{ownerActorId.trim()}</code>.
+            The owner signs in and opens it by ID.
           </p>
         ) : null}
       </form>
@@ -216,8 +250,12 @@ function Workspace({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [sourceKind, setSourceKind] = useState<DataSourceKind | null>(null);
-  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(() => readStoredSelection(session.tenantId).entityId);
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(() => readStoredSelection(session.tenantId).periodId);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(
+    () => readStoredSelection(session.tenantId).entityId,
+  );
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(
+    () => readStoredSelection(session.tenantId).periodId,
+  );
   const base = sessionKey(session);
 
   useEffect(() => {
@@ -225,7 +263,10 @@ function Workspace({
   }, []);
 
   useEffect(() => {
-    writeStoredSelection(session.tenantId, { entityId: selectedEntityId, periodId: selectedPeriodId });
+    writeStoredSelection(session.tenantId, {
+      entityId: selectedEntityId,
+      periodId: selectedPeriodId,
+    });
   }, [session.tenantId, selectedEntityId, selectedPeriodId]);
 
   const entities = useResource(`${base}|entities`, () => listEntities(session));
@@ -253,7 +294,8 @@ function Workspace({
 
   const activeTab = TABS.find((candidate) => candidate.id === tab);
   const effectiveTab: Tab = activeTab && enabled(activeTab.needs) ? tab : "entities";
-  const effectiveLabel = TABS.find((candidate) => candidate.id === effectiveTab)?.label ?? "Entities";
+  const effectiveLabel =
+    TABS.find((candidate) => candidate.id === effectiveTab)?.label ?? "Entities";
 
   function selectTab(next: string) {
     if (!isTab(next)) return;
@@ -290,7 +332,10 @@ function Workspace({
       ),
       title: period?.periodId,
     },
-    { label: "Currency", value: entity ? entity.functionalCurrency : <span className="ctx-empty">—</span> },
+    {
+      label: "Currency",
+      value: entity ? entity.functionalCurrency : <span className="ctx-empty">—</span>,
+    },
     ...identityContext(session),
   ];
 
@@ -312,7 +357,10 @@ function Workspace({
                 : candidate.needs === "entity"
                   ? "Select an entity first"
                   : "Select an entity and a period first",
-              meta: typeof count === "number" ? <span className="muted small figure">{count}</span> : undefined,
+              meta:
+                typeof count === "number" ? (
+                  <span className="muted small figure">{count}</span>
+                ) : undefined,
             };
           }),
         },
@@ -403,13 +451,24 @@ function BooksInspector({
   onOpen: (tab: Tab) => void;
 }) {
   const steps: readonly { readonly label: string; readonly done: boolean; readonly tab: Tab }[] = [
-    { label: entity ? `Entity: ${entity.legalName}` : "Select or create an entity", done: entity !== null, tab: "entities" },
     {
-      label: accountCount && accountCount > 0 ? `${accountCount} accounts in the chart` : "Add accounts to the chart",
+      label: entity ? `Entity: ${entity.legalName}` : "Select or create an entity",
+      done: entity !== null,
+      tab: "entities",
+    },
+    {
+      label:
+        accountCount && accountCount > 0
+          ? `${accountCount} accounts in the chart`
+          : "Add accounts to the chart",
       done: accountCount !== null && accountCount > 0,
       tab: "accounts",
     },
-    { label: period ? `Period ${period.startDate} → ${period.endDate}` : "Select or open a period", done: period !== null, tab: "periods" },
+    {
+      label: period ? `Period ${period.startDate} → ${period.endDate}` : "Select or open a period",
+      done: period !== null,
+      tab: "periods",
+    },
   ];
 
   return (
@@ -445,11 +504,25 @@ function BooksInspector({
             <code className="hash-wrap">{session.tenantId}</code>
           </dd>
           <dt>Entity ID</dt>
-          <dd>{entity ? <code className="hash-wrap">{entity.entityId}</code> : <span className="muted">—</span>}</dd>
+          <dd>
+            {entity ? (
+              <code className="hash-wrap">{entity.entityId}</code>
+            ) : (
+              <span className="muted">—</span>
+            )}
+          </dd>
           <dt>Period ID</dt>
-          <dd>{period ? <code className="hash-wrap">{period.periodId}</code> : <span className="muted">—</span>}</dd>
+          <dd>
+            {period ? (
+              <code className="hash-wrap">{period.periodId}</code>
+            ) : (
+              <span className="muted">—</span>
+            )}
+          </dd>
           <dt>Period status</dt>
-          <dd>{period ? <StatusBadge status={period.status} /> : <span className="muted">—</span>}</dd>
+          <dd>
+            {period ? <StatusBadge status={period.status} /> : <span className="muted">—</span>}
+          </dd>
         </dl>
       </InspectorSection>
 
@@ -461,7 +534,8 @@ function BooksInspector({
           </dd>
         </dl>
         <p className="inspector-note">
-          Totals, balances, and statements come from the kernel. Each statement run shows its input hash beside the figures.
+          Totals, balances, and statements come from the kernel. Each statement run shows its input
+          hash beside the figures.
         </p>
       </InspectorSection>
 

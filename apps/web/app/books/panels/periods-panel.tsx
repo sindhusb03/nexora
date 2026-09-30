@@ -1,7 +1,14 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
 import { useState, type FormEvent } from "react";
@@ -69,7 +76,9 @@ export function PeriodsPanel({
       <ResourceView resource={periods} label="periods">
         {(rows) =>
           rows.length === 0 ? (
-            <p className="empty">No periods yet. Create an open period to start posting journals.</p>
+            <p className="empty">
+              No periods yet. Create an open period to start posting journals.
+            </p>
           ) : (
             <table className="grid">
               <thead>
@@ -125,32 +134,47 @@ export function PeriodsPanel({
         }
       </ResourceView>
 
-      <Dialog open={confirming !== null} onOpenChange={(open) => { if (!open) setConfirming(null); }}>
+      <Dialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+      >
         <DialogContent showCloseButton={false} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
               Close period {confirming?.startDate} to {confirming?.endDate}?
             </DialogTitle>
             <DialogDescription>
-              Closing is permanent. This period cannot be reopened. Every later posting, reversal, or recurring entry into
-              it will be rejected by the kernel.
+              Closing is permanent. This period cannot be reopened. Every later posting, reversal,
+              or recurring entry into it will be rejected by the kernel.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirming(null)} disabled={closeAction.state.pending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirming(null)}
+              disabled={closeAction.state.pending}
+            >
               Cancel
             </Button>
             <Button
               type="button"
               variant="danger"
-              onClick={() => { if (confirming) void confirmClose(confirming); }}
+              onClick={() => {
+                if (confirming) void confirmClose(confirming);
+              }}
               disabled={closeAction.state.pending || confirming === null}
             >
               {closeAction.state.pending ? "Closing…" : "Close period permanently"}
             </Button>
           </DialogFooter>
           {closeAction.state.error ? (
-            <ErrorNotice error={closeAction.state.error} httpStatus={closeAction.state.httpStatus} />
+            <ErrorNotice
+              error={closeAction.state.error}
+              httpStatus={closeAction.state.httpStatus}
+            />
           ) : null}
         </DialogContent>
       </Dialog>
@@ -159,10 +183,18 @@ export function PeriodsPanel({
         <h3>New period</h3>
         <div className="form-row">
           <Field label="Start date">
-            <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            <Input
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
           </Field>
           <Field label="End date">
-            <Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+            <Input
+              type="date"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+            />
           </Field>
           <Button type="submit" disabled={createAction.state.pending}>
             {createAction.state.pending ? "Creating…" : "Create period"}
@@ -170,7 +202,10 @@ export function PeriodsPanel({
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
         {createAction.state.error ? (
-          <ErrorNotice error={createAction.state.error} httpStatus={createAction.state.httpStatus} />
+          <ErrorNotice
+            error={createAction.state.error}
+            httpStatus={createAction.state.httpStatus}
+          />
         ) : null}
       </form>
     </section>

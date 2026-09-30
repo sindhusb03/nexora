@@ -34,16 +34,16 @@ import type { ActorContext } from "./http.js";
 
 export function createLedgerService(store: LedgerStore, platformAdminActorIds: readonly string[]) {
   return {
-    provisionTenant: (actor: ActorContext, input: { name: string; homeRegion: string; ownerActorId: string }) =>
-      provisionTenant(store, platformAdminActorIds, actor, input),
+    provisionTenant: (
+      actor: ActorContext,
+      input: { name: string; homeRegion: string; ownerActorId: string },
+    ) => provisionTenant(store, platformAdminActorIds, actor, input),
     grantMembership: (
       actor: ActorContext,
       input: { actorId: string; role: Exclude<Role, "platform_admin"> },
     ) => grantMembership(store, actor, input),
-    createEntity: (
-      actor: ActorContext,
-      input: { legalName: string; functionalCurrency: string },
-    ) => createEntity(store, actor, input),
+    createEntity: (actor: ActorContext, input: { legalName: string; functionalCurrency: string }) =>
+      createEntity(store, actor, input),
     listEntities: (actor: ActorContext) => listEntities(store, actor),
     createAccount: (
       actor: ActorContext,
@@ -128,7 +128,9 @@ async function provisionTenant(
     },
     ownerActorId: input.ownerActorId,
     membershipId: crypto.randomUUID(),
-    audit: audit(actor, "TenantProvisioned", "tenant", tenantId, now, { homeRegion: input.homeRegion }),
+    audit: audit(actor, "TenantProvisioned", "tenant", tenantId, now, {
+      homeRegion: input.homeRegion,
+    }),
   });
   return { tenantId: tenant.tenantId, homeRegion: tenant.homeRegion, name: tenant.name };
 }
@@ -233,7 +235,10 @@ async function createAccount(
   const tenant = await scope(store, actor, "account.write");
   const entity = await requiredEntity(store, tenant.tenantId, input.entityId);
   if (input.retainedEarnings && input.report !== "equity") {
-    throw new KernelError("FIN_INVALID_JOURNAL_LINE", "Retained earnings must be an equity account");
+    throw new KernelError(
+      "FIN_INVALID_JOURNAL_LINE",
+      "Retained earnings must be an equity account",
+    );
   }
   const now = new Date().toISOString();
   const accountId = crypto.randomUUID();
@@ -288,7 +293,12 @@ async function createPeriod(
       endDate: input.endDate,
     }),
   });
-  return { periodId: period.periodId, status: period.status, startDate: period.startDate, endDate: period.endDate };
+  return {
+    periodId: period.periodId,
+    status: period.status,
+    startDate: period.startDate,
+    endDate: period.endDate,
+  };
 }
 
 async function listPeriods(store: LedgerStore, actor: ActorContext, entityId: string) {
@@ -335,7 +345,10 @@ async function postJournal(
   }
   const entity = await requiredEntity(store, tenant.tenantId, input.entityId);
   if (input.currency !== entity.functionalCurrency) {
-    throw new KernelError("FIN_CURRENCY_MISMATCH", "Journal currency must match the entity functional currency");
+    throw new KernelError(
+      "FIN_CURRENCY_MISMATCH",
+      "Journal currency must match the entity functional currency",
+    );
   }
   const period = await requiredPeriod(store, tenant.tenantId, input.periodId);
   if (period.entityId !== entity.entityId) {
@@ -353,7 +366,10 @@ async function postJournal(
         throw new KernelError("FIN_NOT_FOUND", "Account is not available for posting");
       }
       if (account.currency !== input.currency) {
-        throw new KernelError("FIN_CURRENCY_MISMATCH", "Account currency does not match the journal");
+        throw new KernelError(
+          "FIN_CURRENCY_MISMATCH",
+          "Account currency does not match the journal",
+        );
       }
       return {
         accountId: line.accountId,
@@ -366,7 +382,10 @@ async function postJournal(
   const existing = await store.findJournalByIdempotency(tenant.tenantId, actor.idempotencyKey);
   if (existing) {
     if (existing.payloadHash !== balanced.payloadHash) {
-      throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "Idempotency key was reused with a different payload");
+      throw new KernelError(
+        "FIN_IDEMPOTENCY_MISMATCH",
+        "Idempotency key was reused with a different payload",
+      );
     }
     return presentJournal(existing, true);
   }
@@ -411,7 +430,10 @@ async function postJournal(
     }
     const raced = await store.findJournalByIdempotency(tenant.tenantId, actor.idempotencyKey);
     if (!raced || raced.payloadHash !== balanced.payloadHash) {
-      throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "Idempotency key was reused with a different payload");
+      throw new KernelError(
+        "FIN_IDEMPOTENCY_MISMATCH",
+        "Idempotency key was reused with a different payload",
+      );
     }
     return presentJournal(raced, true);
   }
@@ -428,7 +450,10 @@ async function reverseJournal(
     throw new KernelError("FIN_INVALID_JOURNAL_LINE", "Idempotency-Key is required");
   }
   if (actor.expectedVersion === null) {
-    throw new KernelError("FIN_VERSION_CONFLICT", "Expected-Version is required to reverse a journal");
+    throw new KernelError(
+      "FIN_VERSION_CONFLICT",
+      "Expected-Version is required to reverse a journal",
+    );
   }
   const original = await store.getJournal(tenant.tenantId, journalId);
   if (!original) {
@@ -523,7 +548,12 @@ async function listJournals(
   return { journals: journals.map((journal) => presentJournal(journal, false)) };
 }
 
-async function statements(store: LedgerStore, actor: ActorContext, entityId: string, periodId: string) {
+async function statements(
+  store: LedgerStore,
+  actor: ActorContext,
+  entityId: string,
+  periodId: string,
+) {
   const tenant = await scope(store, actor, "statement.read");
   const entity = await requiredEntity(store, tenant.tenantId, entityId);
   if (!entity.retainedEarningsAccountId) {
@@ -660,7 +690,10 @@ function classifyPeriod(
   if (line.periodEnd < periodStart) {
     return "opening";
   }
-  throw new KernelError("FIN_OVERLAPPING_PERIOD", "Posted activity falls outside the statement period");
+  throw new KernelError(
+    "FIN_OVERLAPPING_PERIOD",
+    "Posted activity falls outside the statement period",
+  );
 }
 
 async function scope(store: LedgerStore, actor: ActorContext, action: Action) {
@@ -683,7 +716,11 @@ async function scope(store: LedgerStore, actor: ActorContext, action: Action) {
  * Under signed sessions a membership can only name a registered, enabled user, so a handle
  * cannot be claimed at sign-up after access was granted to it.
  */
-async function requireRegistered(store: LedgerStore, actor: ActorContext, targetActorId: string): Promise<void> {
+async function requireRegistered(
+  store: LedgerStore,
+  actor: ActorContext,
+  targetActorId: string,
+): Promise<void> {
   if (!actor.verified) {
     return;
   }

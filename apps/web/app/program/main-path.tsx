@@ -1,7 +1,14 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
 import Link from "next/link";
@@ -35,7 +42,11 @@ function shortId(value: string): string {
 function LifecycleTrack({ status }: { status: string }) {
   const index = FLOW.indexOf(status as (typeof FLOW)[number]);
   return (
-    <ol className="row-actions" aria-label="Lifecycle" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+    <ol
+      className="row-actions"
+      aria-label="Lifecycle"
+      style={{ listStyle: "none", margin: 0, padding: 0 }}
+    >
       {FLOW.map((step, position) => (
         <li key={step} style={{ opacity: position <= index ? 1 : 0.45 }}>
           <StatusBadge status={step} />
@@ -58,7 +69,11 @@ function LifecycleControls({
 }) {
   const next = nextStatus(status);
   if (next === null) {
-    return <p className="muted small" style={{ margin: 0 }}>This version is published and immutable. Corrections need a new version.</p>;
+    return (
+      <p className="muted small" style={{ margin: 0 }}>
+        This version is published and immutable. Corrections need a new version.
+      </p>
+    );
   }
   return (
     <div className="row-actions">
@@ -93,26 +108,36 @@ function PublishConfirm({
 }) {
   const sameActor = checkerId.trim() === makerId.trim();
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent showCloseButton={false} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Publish this {subject}?</DialogTitle>
           <DialogDescription>
-            Publishing appends an immutable version signed by checker {checkerId || "—"}. The approved version stays in
-            history, and corrections need a new version.
+            Publishing appends an immutable version signed by checker {checkerId || "—"}. The
+            approved version stays in history, and corrections need a new version.
           </DialogDescription>
         </DialogHeader>
         {sameActor ? (
           <p className="notice notice-info">
-            The checker matches the maker ({makerId}). The kernel refuses maker-checker violations; a different actor must
-            publish.
+            The checker matches the maker ({makerId}). The kernel refuses maker-checker violations;
+            a different actor must publish.
           </p>
         ) : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
             Cancel
           </Button>
-          <Button type="button" variant="danger" onClick={onConfirm} disabled={pending || checkerId.trim().length === 0}>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={onConfirm}
+            disabled={pending || checkerId.trim().length === 0}
+          >
             {pending ? "Publishing…" : `Publish as ${checkerId || "checker"}`}
           </Button>
         </DialogFooter>
@@ -173,7 +198,9 @@ export function PublishPanel({
         note="The same inputs always produce one state hash. The maker drafts; a different actor publishes."
       />
       {!canDraft ? (
-        <p className="notice notice-quiet">Choose an entity and a period in the context bar to draft a state for them.</p>
+        <p className="notice notice-quiet">
+          Choose an entity and a period in the context bar to draft a state for them.
+        </p>
       ) : null}
 
       <form className="card" onSubmit={submit}>
@@ -208,7 +235,9 @@ export function PublishPanel({
           <div className="result-head">
             <StatusBadge status={stateVersion.status} />
             <strong>Version {shortId(stateVersion.financialStateId)}</strong>
-            <span className="muted small">{published ? "Published and immutable" : "Unpublished working version"}</span>
+            <span className="muted small">
+              {published ? "Published and immutable" : "Unpublished working version"}
+            </span>
           </div>
           <dl className="kv">
             <dt>State hash</dt>
@@ -216,15 +245,29 @@ export function PublishPanel({
               <code className="hash-wrap">{stateVersion.stateHash}</code>
             </dd>
             <dt>Engine version</dt>
-            <dd>{stateVersion.engineVersion ? <code>{stateVersion.engineVersion}</code> : <span className="muted">—</span>}</dd>
+            <dd>
+              {stateVersion.engineVersion ? (
+                <code>{stateVersion.engineVersion}</code>
+              ) : (
+                <span className="muted">—</span>
+              )}
+            </dd>
             <dt>Version ID</dt>
             <dd>
               <code className="hash">{stateVersion.financialStateId}</code>
             </dd>
             <dt>Supersedes</dt>
-            <dd>{stateVersion.supersedesId ? <code className="hash">{stateVersion.supersedesId}</code> : <span className="muted">First version</span>}</dd>
+            <dd>
+              {stateVersion.supersedesId ? (
+                <code className="hash">{stateVersion.supersedesId}</code>
+              ) : (
+                <span className="muted">First version</span>
+              )}
+            </dd>
           </dl>
-          <div style={{ marginTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          <div
+            style={{ marginTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}
+          >
             <LifecycleTrack status={stateVersion.status} />
             <div className="row-actions">
               <LifecycleControls
@@ -233,7 +276,12 @@ export function PublishPanel({
                 onTransition={(to) => void onTransition(to)}
                 onPublishRequest={() => setConfirming(true)}
               />
-              <Button type="button" variant="outline" disabled={disabled} onClick={() => void onLineage()}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => void onLineage()}
+              >
                 Show lineage
               </Button>
             </div>
@@ -266,10 +314,17 @@ export function PublishPanel({
           <dd>{checkerId || <span className="muted">Set in the context bar</span>}</dd>
         </dl>
         <div className="row-actions" style={{ marginTop: "0.75rem" }}>
-          <Button type="button" variant="outline" disabled={disabled || grantActorId.trim().length === 0} onClick={() => void onGrantChecker()}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled || grantActorId.trim().length === 0}
+            onClick={() => void onGrantChecker()}
+          >
             Grant controller role to {grantActorId || "checker"}
           </Button>
-          <span className="muted small">Needed once per tenant before the checker can publish.</span>
+          <span className="muted small">
+            Needed once per tenant before the checker can publish.
+          </span>
         </div>
       </div>
     </section>
@@ -297,13 +352,20 @@ export const GOLDEN_ASSUMPTIONS: DcfAssumptions = {
 };
 
 /** Shapes the typed assumptions into the kernel request. Every value stays a decimal string. */
-export function toDcfRequest(assumptions: DcfAssumptions): { readonly ok: true; readonly body: Record<string, unknown> } | { readonly ok: false; readonly message: string } {
+export function toDcfRequest(
+  assumptions: DcfAssumptions,
+):
+  | { readonly ok: true; readonly body: Record<string, unknown> }
+  | { readonly ok: false; readonly message: string } {
   const freeCashFlows = assumptions.freeCashFlows
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
   if (freeCashFlows.length === 0 || !freeCashFlows.every((value) => DECIMAL_PATTERN.test(value))) {
-    return { ok: false, message: "Free cash flows must be decimals separated by commas, for example 100, 110." };
+    return {
+      ok: false,
+      message: "Free cash flows must be decimals separated by commas, for example 100, 110.",
+    };
   }
   const scalars = {
     wacc: assumptions.wacc.trim(),
@@ -369,8 +431,11 @@ export function ValuationPanel({
   const status = version?.status ?? "draft";
   const basis = run ? (
     <>
-      Run <code title={run.calculationRunId ?? undefined}>{run.calculationRunId ? shortId(run.calculationRunId) : "—"}</code> ·{" "}
-      <code>{run.engineVersion ?? "—"}</code>
+      Run{" "}
+      <code title={run.calculationRunId ?? undefined}>
+        {run.calculationRunId ? shortId(run.calculationRunId) : "—"}
+      </code>{" "}
+      · <code>{run.engineVersion ?? "—"}</code>
     </>
   ) : null;
 
@@ -381,7 +446,8 @@ export function ValuationPanel({
         note="The DCF runs in the kernel. Enterprise value and equity value are read from the calculation run; a failed run stays unpublished. LBO is under Capital. Comparables and precedent transactions are not calculated."
       />
       <p className="muted small">
-        Method: DCF on this screen. <Link href="/program?tab=capital">LBO, debt, and equity</Link> open in Capital access.
+        Method: DCF on this screen. <Link href="/program?tab=capital">LBO, debt, and equity</Link>{" "}
+        open in Capital access.
       </p>
 
       <form className="card" onSubmit={submit}>
@@ -391,32 +457,71 @@ export function ValuationPanel({
         </div>
         <div className="form-row">
           <Field label="Free cash flows">
-            <Input value={assumptions.freeCashFlows} onChange={(event) => update("freeCashFlows", event.target.value)} className="input-medium" />
+            <Input
+              value={assumptions.freeCashFlows}
+              onChange={(event) => update("freeCashFlows", event.target.value)}
+              className="input-medium"
+            />
           </Field>
           <Field label="WACC">
-            <Input value={assumptions.wacc} onChange={(event) => update("wacc", event.target.value)} className="input-short" inputMode="decimal" />
+            <Input
+              value={assumptions.wacc}
+              onChange={(event) => update("wacc", event.target.value)}
+              className="input-short"
+              inputMode="decimal"
+            />
           </Field>
           <Field label="Terminal growth">
-            <Input value={assumptions.terminalGrowth} onChange={(event) => update("terminalGrowth", event.target.value)} className="input-short" inputMode="decimal" />
+            <Input
+              value={assumptions.terminalGrowth}
+              onChange={(event) => update("terminalGrowth", event.target.value)}
+              className="input-short"
+              inputMode="decimal"
+            />
           </Field>
           <Field label="Net debt">
-            <Input value={assumptions.netDebt} onChange={(event) => update("netDebt", event.target.value)} className="input-short" inputMode="decimal" />
+            <Input
+              value={assumptions.netDebt}
+              onChange={(event) => update("netDebt", event.target.value)}
+              className="input-short"
+              inputMode="decimal"
+            />
           </Field>
           <Field label="Non-op assets">
-            <Input value={assumptions.nonOperatingAssets} onChange={(event) => update("nonOperatingAssets", event.target.value)} className="input-short" inputMode="decimal" />
+            <Input
+              value={assumptions.nonOperatingAssets}
+              onChange={(event) => update("nonOperatingAssets", event.target.value)}
+              className="input-short"
+              inputMode="decimal"
+            />
           </Field>
           <Field label="Other claims">
-            <Input value={assumptions.otherClaims} onChange={(event) => update("otherClaims", event.target.value)} className="input-short" inputMode="decimal" />
+            <Input
+              value={assumptions.otherClaims}
+              onChange={(event) => update("otherClaims", event.target.value)}
+              className="input-short"
+              inputMode="decimal"
+            />
           </Field>
           <Field label="Currency">
-            <Input value={assumptions.currency} onChange={(event) => update("currency", event.target.value.toUpperCase())} className="input-short" maxLength={3} />
+            <Input
+              value={assumptions.currency}
+              onChange={(event) => update("currency", event.target.value.toUpperCase())}
+              className="input-short"
+              maxLength={3}
+            />
           </Field>
         </div>
         <div className="row-actions">
           <Button type="submit" disabled={disabled}>
             Run DCF on the kernel
           </Button>
-          <Button type="button" variant="ghost" disabled={disabled} onClick={() => setAssumptions(GOLDEN_ASSUMPTIONS)}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={disabled}
+            onClick={() => setAssumptions(GOLDEN_ASSUMPTIONS)}
+          >
             Reset to golden case
           </Button>
           <Button
@@ -466,19 +571,51 @@ export function ValuationPanel({
       {run && succeeded ? (
         <>
           <div className="metrics">
-            <MetricTile label="Enterprise value" value={run.enterpriseValue} unit={run.currency ?? undefined} basis={basis} status={<StatusBadge status={status} />} />
-            <MetricTile label="Equity value" value={run.equityValue} unit={run.currency ?? undefined} basis={basis} status={<StatusBadge status={status} />} />
-            <MetricTile label="Terminal value" value={run.terminalValue} unit={run.currency ?? undefined} small basis="Undiscounted, from the kernel" />
-            <MetricTile label="PV of terminal value" value={run.presentValueOfTerminalValue} unit={run.currency ?? undefined} small basis="Discounted, from the kernel" />
+            <MetricTile
+              label="Enterprise value"
+              value={run.enterpriseValue}
+              unit={run.currency ?? undefined}
+              basis={basis}
+              status={<StatusBadge status={status} />}
+            />
+            <MetricTile
+              label="Equity value"
+              value={run.equityValue}
+              unit={run.currency ?? undefined}
+              basis={basis}
+              status={<StatusBadge status={status} />}
+            />
+            <MetricTile
+              label="Terminal value"
+              value={run.terminalValue}
+              unit={run.currency ?? undefined}
+              small
+              basis="Undiscounted, from the kernel"
+            />
+            <MetricTile
+              label="PV of terminal value"
+              value={run.presentValueOfTerminalValue}
+              unit={run.currency ?? undefined}
+              small
+              basis="Discounted, from the kernel"
+            />
           </div>
 
           <div className={status === "published" ? "result-card" : "result-card result-card-draft"}>
             <div className="result-head">
               <StatusBadge status={status} />
               <strong>Valuation {version ? shortId(version.id) : shortId(run.valuationId)}</strong>
-              <span className="muted small">{status === "published" ? "Published and immutable" : "Unpublished working version"}</span>
+              <span className="muted small">
+                {status === "published" ? "Published and immutable" : "Unpublished working version"}
+              </span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(16rem, 1fr))", gap: "1rem" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(16rem, 1fr))",
+                gap: "1rem",
+              }}
+            >
               <dl className="kv">
                 <dt>Run ID</dt>
                 <dd>
@@ -514,7 +651,14 @@ export function ValuationPanel({
                 </tbody>
               </table>
             </div>
-            <div style={{ marginTop: "0.9rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+            <div
+              style={{
+                marginTop: "0.9rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.6rem",
+              }}
+            >
               <LifecycleTrack status={status} />
               <LifecycleControls
                 status={status}
@@ -541,7 +685,12 @@ export function ValuationPanel({
           <div className="card">
             <div className="card-head">
               <h3>Sensitivity</h3>
-              <Button type="button" variant="outline" disabled={disabled} onClick={() => void onSensitivity()}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => void onSensitivity()}
+              >
                 Shock WACC to 0.12
               </Button>
             </div>
@@ -570,13 +719,14 @@ export function ValuationPanel({
                   </tbody>
                 </table>
                 <p className="muted small" style={{ margin: "0.5rem 0 0" }}>
-                  Run <code>{sensitivity.calculationRunId ?? "—"}</code> · <code>{sensitivity.engineVersion ?? "—"}</code>. The
-                  base valuation is unchanged.
+                  Run <code>{sensitivity.calculationRunId ?? "—"}</code> ·{" "}
+                  <code>{sensitivity.engineVersion ?? "—"}</code>. The base valuation is unchanged.
                 </p>
               </>
             ) : (
               <p className="muted small" style={{ margin: 0 }}>
-                Sensitivity runs are separate calculation runs and leave the base valuation unchanged.
+                Sensitivity runs are separate calculation runs and leave the base valuation
+                unchanged.
               </p>
             )}
           </div>
@@ -603,43 +753,90 @@ export function BoardPanel({
   const ready = publishedStateId.length > 0 && publishedValuationId.length > 0;
   return (
     <section className="panel">
-      <WorkbenchHead title="Board pack" note="A pack accepts only a published statement and a published valuation. Freezing records a cutoff and a pack hash." />
+      <WorkbenchHead
+        title="Board pack"
+        note="A pack accepts only a published statement and a published valuation. Freezing records a cutoff and a pack hash."
+      />
       <div className="card">
         <div className="card-head">
           <h3>Inputs</h3>
-          {ready ? <span className="badge badge-green">Ready to freeze</span> : <span className="badge badge-amber">Waiting for published inputs</span>}
+          {ready ? (
+            <span className="badge badge-green">Ready to freeze</span>
+          ) : (
+            <span className="badge badge-amber">Waiting for published inputs</span>
+          )}
         </div>
         <table className="grid">
           <tbody>
             <tr>
               <td>Financial state</td>
-              <td>{publishedStateId ? <StatusBadge status="published" /> : <span className="badge badge-neutral">Not published</span>}</td>
-              <td>{publishedStateId ? <code className="hash">{publishedStateId}</code> : <span className="muted">Publish a state first</span>}</td>
+              <td>
+                {publishedStateId ? (
+                  <StatusBadge status="published" />
+                ) : (
+                  <span className="badge badge-neutral">Not published</span>
+                )}
+              </td>
+              <td>
+                {publishedStateId ? (
+                  <code className="hash">{publishedStateId}</code>
+                ) : (
+                  <span className="muted">Publish a state first</span>
+                )}
+              </td>
             </tr>
             <tr>
               <td>Valuation</td>
-              <td>{publishedValuationId ? <StatusBadge status="published" /> : <span className="badge badge-neutral">Not published</span>}</td>
-              <td>{publishedValuationId ? <code className="hash">{publishedValuationId}</code> : <span className="muted">Publish a valuation first</span>}</td>
+              <td>
+                {publishedValuationId ? (
+                  <StatusBadge status="published" />
+                ) : (
+                  <span className="badge badge-neutral">Not published</span>
+                )}
+              </td>
+              <td>
+                {publishedValuationId ? (
+                  <code className="hash">{publishedValuationId}</code>
+                ) : (
+                  <span className="muted">Publish a valuation first</span>
+                )}
+              </td>
             </tr>
           </tbody>
         </table>
         <div className="row-actions" style={{ marginTop: "0.75rem" }}>
-          <Button type="button" variant="danger-quiet" disabled={disabled || !ready} onClick={() => setConfirming(true)}>
+          <Button
+            type="button"
+            variant="danger-quiet"
+            disabled={disabled || !ready}
+            onClick={() => setConfirming(true)}
+          >
             Freeze pack…
           </Button>
         </div>
       </div>
 
-      <Dialog open={confirming} onOpenChange={(open) => { if (!open) setConfirming(false); }}>
+      <Dialog
+        open={confirming}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(false);
+        }}
+      >
         <DialogContent showCloseButton={false} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Freeze the board pack?</DialogTitle>
             <DialogDescription>
-              The pack is published at freeze time with a data cutoff. It cannot be edited afterwards.
+              The pack is published at freeze time with a data cutoff. It cannot be edited
+              afterwards.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirming(false)} disabled={disabled}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirming(false)}
+              disabled={disabled}
+            >
               Cancel
             </Button>
             <Button

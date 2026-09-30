@@ -5,7 +5,15 @@ import { Input } from "@/components/ui/input";
 
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { createAccount, createEntity, createPeriod, listEntities, listPeriods, provisionTenant, type Session } from "../books/api";
+import {
+  createAccount,
+  createEntity,
+  createPeriod,
+  listEntities,
+  listPeriods,
+  provisionTenant,
+  type Session,
+} from "../books/api";
 import {
   readProgramProgress,
   readStoredSelection,
@@ -29,7 +37,13 @@ import {
   type SignedSession,
 } from "../identity";
 import { productSections } from "../product-nav";
-import { AppShell, EngineLine, identityContext, InspectorSection, type ContextItem } from "../shell";
+import {
+  AppShell,
+  EngineLine,
+  identityContext,
+  InspectorSection,
+  type ContextItem,
+} from "../shell";
 import {
   decodeLineage,
   decodeReportPack,
@@ -47,9 +61,28 @@ import {
   type VersionRef,
 } from "./api";
 import { BoardPanel, PublishPanel, ValuationPanel } from "./main-path";
-import { AssistantPanel, BasisPanel, CapitalPanel, DealPanel, GroupPanel, ImportPanel, ModelPanel, type RunCommand } from "./workbench";
+import {
+  AssistantPanel,
+  BasisPanel,
+  CapitalPanel,
+  DealPanel,
+  GroupPanel,
+  ImportPanel,
+  ModelPanel,
+  type RunCommand,
+} from "./workbench";
 
-type Tab = "publish" | "valuation" | "board" | "group" | "model" | "capital" | "import" | "deal" | "basis" | "assistant";
+type Tab =
+  | "publish"
+  | "valuation"
+  | "board"
+  | "group"
+  | "model"
+  | "capital"
+  | "import"
+  | "deal"
+  | "basis"
+  | "assistant";
 
 const TAB_LABELS: Readonly<Record<Tab, string>> = {
   publish: "Financial state",
@@ -144,8 +177,12 @@ function ProgramWorkspace({
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [sourceKind, setSourceKind] = useState<DataSourceKind | null>(null);
-  const [entityId, setEntityId] = useState(() => readStoredSelection(session.tenantId).entityId ?? "");
-  const [periodId, setPeriodId] = useState(() => readStoredSelection(session.tenantId).periodId ?? "");
+  const [entityId, setEntityId] = useState(
+    () => readStoredSelection(session.tenantId).entityId ?? "",
+  );
+  const [periodId, setPeriodId] = useState(
+    () => readStoredSelection(session.tenantId).periodId ?? "",
+  );
   const [checkerId, setCheckerId] = useState("controller-1");
   const [checkerGranted, setCheckerGranted] = useState(false);
   const [stateVersion, setStateVersion] = useState<StateVersion | null>(null);
@@ -153,7 +190,10 @@ function ProgramWorkspace({
   const [valuationRun, setValuationRun] = useState<ValuationRun | null>(null);
   const [valuationVersion, setValuationVersion] = useState<VersionRef | null>(null);
   const [publishedValuationId, setPublishedValuationId] = useState("");
-  const [makers, setMakers] = useState<{ readonly state: string | null; readonly valuation: string | null }>({ state: null, valuation: null });
+  const [makers, setMakers] = useState<{
+    readonly state: string | null;
+    readonly valuation: string | null;
+  }>({ state: null, valuation: null });
   const [restored, setRestored] = useState(false);
   const [sensitivity, setSensitivity] = useState<SensitivityResult | null>(null);
   const [pack, setPack] = useState<ReportPack | null>(null);
@@ -185,7 +225,11 @@ function ProgramWorkspace({
         const run = result.ok ? decodeValuationRun(result.data) : null;
         if (!cancelled && result.ok && run) {
           setValuationRun(run);
-          setValuationVersion({ id: run.valuationId, status: field(result.data, "status") ?? "draft", supersedesId: null });
+          setValuationVersion({
+            id: run.valuationId,
+            status: field(result.data, "status") ?? "draft",
+            supersedesId: null,
+          });
           setMakers((current) => ({ ...current, valuation: field(result.data, "makerActorId") }));
         }
       }
@@ -208,19 +252,41 @@ function ProgramWorkspace({
       valuationId: valuationVersion?.id ?? valuationRun?.valuationId ?? null,
       publishedValuationId: publishedValuationId || null,
     });
-  }, [restored, hasTenant, session.tenantId, stateVersion, publishedStateId, valuationVersion, valuationRun, publishedValuationId]);
+  }, [
+    restored,
+    hasTenant,
+    session.tenantId,
+    stateVersion,
+    publishedStateId,
+    valuationVersion,
+    valuationRun,
+    publishedValuationId,
+  ]);
 
   const entities = useResource(hasTenant ? `entities:${base}` : null, () => listEntities(session));
-  const periods = useResource(hasTenant && entityId.length > 0 ? `periods:${base}:${entityId}` : null, () => listPeriods(session, entityId));
-  const entity = entities.resource.status === "ready" ? (entities.resource.data.find((row) => row.entityId === entityId) ?? null) : null;
-  const period = periods.resource.status === "ready" ? (periods.resource.data.find((row) => row.periodId === periodId) ?? null) : null;
+  const periods = useResource(
+    hasTenant && entityId.length > 0 ? `periods:${base}:${entityId}` : null,
+    () => listPeriods(session, entityId),
+  );
+  const entity =
+    entities.resource.status === "ready"
+      ? (entities.resource.data.find((row) => row.entityId === entityId) ?? null)
+      : null;
+  const period =
+    periods.resource.status === "ready"
+      ? (periods.resource.data.find((row) => row.periodId === periodId) ?? null)
+      : null;
 
   useEffect(() => {
     setSourceKind(readDataSource().kind);
   }, []);
 
   useEffect(() => {
-    if (hasTenant) writeStoredSelection(session.tenantId, { entityId: entityId || null, periodId: periodId || null });
+    if (hasTenant)
+      writeStoredSelection(session.tenantId, {
+        entityId: entityId || null,
+        periodId: periodId || null,
+      });
   }, [hasTenant, session.tenantId, entityId, periodId]);
 
   function selectTab(next: string) {
@@ -229,18 +295,37 @@ function ProgramWorkspace({
     writeTabParam(next);
   }
 
-  async function call(method: "GET" | "POST", path: string, body?: unknown, actorId?: string, idempotencyKey?: string) {
-    const data = await action.run(() => kernelCall(session, method, path, body, { actorId, idempotencyKey }));
-    if (data) setLast({ method, path, actorId: signed ? session.actorId : (actorId ?? session.actorId), data });
+  async function call(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    actorId?: string,
+    idempotencyKey?: string,
+  ) {
+    const data = await action.run(() =>
+      kernelCall(session, method, path, body, { actorId, idempotencyKey }),
+    );
+    if (data)
+      setLast({
+        method,
+        path,
+        actorId: signed ? session.actorId : (actorId ?? session.actorId),
+        data,
+      });
     return data;
   }
 
-  const run: RunCommand = (actorId, path, body, idempotencyKey) => call("POST", path, body, actorId, idempotencyKey);
+  const run: RunCommand = (actorId, path, body, idempotencyKey) =>
+    call("POST", path, body, actorId, idempotencyKey);
   const busy = action.state.pending;
 
   async function transitionState(to: string): Promise<boolean> {
     if (!stateVersion) return false;
-    const data = await run(to === "published" ? publishAs : undefined, `/v1/financial-states/${stateVersion.financialStateId}/transition`, { to });
+    const data = await run(
+      to === "published" ? publishAs : undefined,
+      `/v1/financial-states/${stateVersion.financialStateId}/transition`,
+      { to },
+    );
     const next = data ? decodeStateVersion(data, stateVersion) : null;
     if (!next) return false;
     setStateVersion(next);
@@ -251,7 +336,11 @@ function ProgramWorkspace({
   async function transitionValuation(to: string): Promise<boolean> {
     const currentId = valuationVersion?.id ?? valuationRun?.valuationId;
     if (!currentId) return false;
-    const data = await run(to === "published" ? publishAs : undefined, `/v1/valuations/${currentId}/transition`, { to });
+    const data = await run(
+      to === "published" ? publishAs : undefined,
+      `/v1/valuations/${currentId}/transition`,
+      { to },
+    );
     const next = data ? decodeValuationVersion(data) : null;
     if (!next) return false;
     setValuationVersion(next);
@@ -282,13 +371,23 @@ function ProgramWorkspace({
       tab: "valuation",
       label: "Run valuation",
       done: valuationRun?.calculationStatus === "succeeded",
-      detail: valuationRun ? <StatusBadge status={valuationRun.calculationStatus} /> : "DCF on the kernel",
+      detail: valuationRun ? (
+        <StatusBadge status={valuationRun.calculationStatus} />
+      ) : (
+        "DCF on the kernel"
+      ),
     },
     {
       tab: "valuation",
       label: "Publish valuation",
       done: publishedValuationId.length > 0,
-      detail: publishedValuationId ? <StatusBadge status="published" /> : valuationVersion ? `Now ${valuationVersion.status}` : "Checker signs",
+      detail: publishedValuationId ? (
+        <StatusBadge status="published" />
+      ) : valuationVersion ? (
+        `Now ${valuationVersion.status}`
+      ) : (
+        "Checker signs"
+      ),
     },
     {
       tab: "board",
@@ -351,7 +450,12 @@ function ProgramWorkspace({
       label: "Period",
       value: hasTenant ? (
         <>
-          <select aria-label="Period" value={periodId} onChange={(event) => setPeriodId(event.target.value)} disabled={entityId.length === 0}>
+          <select
+            aria-label="Period"
+            value={periodId}
+            onChange={(event) => setPeriodId(event.target.value)}
+            disabled={entityId.length === 0}
+          >
             <option value="">Select period</option>
             {periods.resource.status === "ready"
               ? periods.resource.data.map((row) => (
@@ -367,16 +471,31 @@ function ProgramWorkspace({
         <span className="ctx-empty">—</span>
       ),
     },
-    { label: "Currency", value: entity ? entity.functionalCurrency : <span className="ctx-empty">—</span> },
+    {
+      label: "Currency",
+      value: entity ? entity.functionalCurrency : <span className="ctx-empty">—</span>,
+    },
     {
       label: signed ? "Grant checker" : "Checker",
-      title: signed ? "The actor to grant the controller role. Publishing always acts as the signed-in actor." : undefined,
-      value: <Input aria-label="Checker actor" value={checkerId} onChange={(event) => setCheckerId(event.target.value)} style={{ width: "8.5rem" }} />,
+      title: signed
+        ? "The actor to grant the controller role. Publishing always acts as the signed-in actor."
+        : undefined,
+      value: (
+        <Input
+          aria-label="Checker actor"
+          value={checkerId}
+          onChange={(event) => setCheckerId(event.target.value)}
+          style={{ width: "8.5rem" }}
+        />
+      ),
     },
     ...identityContext(session),
   ];
 
-  const scopeLabel = entity && period ? `${entity.legalName} · ${period.startDate} → ${period.endDate}` : "No entity and period selected";
+  const scopeLabel =
+    entity && period
+      ? `${entity.legalName} · ${period.startDate} → ${period.endDate}`
+      : "No entity and period selected";
 
   return (
     <AppShell
@@ -388,11 +507,20 @@ function ProgramWorkspace({
       railNote="Books keeps the ledger. These screens send commands to the kernel and display what it returns."
       context={context}
       contextActions={
-        <Button type="button" variant="ghost" aria-expanded={identityOpen} onClick={onToggleIdentity}>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-expanded={identityOpen}
+          onClick={onToggleIdentity}
+        >
           {identityOpen ? "Hide identity" : IDENTITY_TOGGLE_LABEL}
         </Button>
       }
-      drawer={identityOpen || !hasTenant ? <IdentityDrawer key={`identity:${base}`} identity={identity} /> : null}
+      drawer={
+        identityOpen || !hasTenant ? (
+          <IdentityDrawer key={`identity:${base}`} identity={identity} />
+        ) : null
+      }
       inspectorLabel="Kernel result inspector"
       inspector={
         <ProgramInspector
@@ -409,13 +537,18 @@ function ProgramWorkspace({
           session={session}
           signed={signed}
           onReady={async (next, createdEntityId, createdPeriodId) => {
-            writeStoredSelection(next.tenantId, { entityId: createdEntityId, periodId: createdPeriodId });
+            writeStoredSelection(next.tenantId, {
+              entityId: createdEntityId,
+              periodId: createdPeriodId,
+            });
             await identity.selectTenant(next.tenantId, next.region);
           }}
         />
       ) : (
         <>
-          {tab === "publish" || tab === "valuation" || tab === "board" ? <MainPathSteps steps={steps} current={tab} onOpen={selectTab} /> : null}
+          {tab === "publish" || tab === "valuation" || tab === "board" ? (
+            <MainPathSteps steps={steps} current={tab} onOpen={selectTab} />
+          ) : null}
           {action.state.error ? (
             <div style={{ marginBottom: "1rem" }}>
               <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
@@ -456,7 +589,10 @@ function ProgramWorkspace({
                 await call("GET", `/v1/lineage/financial_state/${anchor}`);
               }}
               onGrantChecker={async () => {
-                const data = await run(undefined, "/v1/memberships", { actorId: checkerId, role: "controller" });
+                const data = await run(undefined, "/v1/memberships", {
+                  actorId: checkerId,
+                  role: "controller",
+                });
                 if (data) setCheckerGranted(true);
               }}
             />
@@ -476,14 +612,20 @@ function ProgramWorkspace({
                 if (next) {
                   setValuationRun(next);
                   setMakers((current) => ({ ...current, valuation: session.actorId }));
-                  setValuationVersion({ id: next.valuationId, status: field(data, "status") ?? "draft", supersedesId: null });
+                  setValuationVersion({
+                    id: next.valuationId,
+                    status: field(data, "status") ?? "draft",
+                    supersedesId: null,
+                  });
                   setSensitivity(null);
                 }
               }}
               onSensitivity={async () => {
                 const currentId = valuationVersion?.id ?? valuationRun?.valuationId;
                 if (!currentId) return;
-                const data = await run(undefined, `/v1/valuations/${currentId}/calculate`, { shocks: [{ id: "wacc-up", wacc: "0.12" }] });
+                const data = await run(undefined, `/v1/valuations/${currentId}/calculate`, {
+                  shocks: [{ id: "wacc-up", wacc: "0.12" }],
+                });
                 const next = data ? decodeSensitivity(data) : null;
                 if (next) setSensitivity(next);
               }}
@@ -498,7 +640,10 @@ function ProgramWorkspace({
               publishedValuationId={publishedValuationId}
               pack={pack}
               onFreeze={async () => {
-                const data = await run(undefined, "/v1/report-packs", { statementStateId: publishedStateId, valuationId: publishedValuationId });
+                const data = await run(undefined, "/v1/report-packs", {
+                  statementStateId: publishedStateId,
+                  valuationId: publishedValuationId,
+                });
                 const next = data ? decodeReportPack(data) : null;
                 if (next) setPack(next);
                 return next !== null;
@@ -508,12 +653,21 @@ function ProgramWorkspace({
 
           {tab === "group" ? <GroupPanel disabled={busy} entityId={entityId} run={run} /> : null}
           {tab === "model" ? <ModelPanel disabled={busy} run={run} /> : null}
-          {tab === "capital" ? <CapitalPanel disabled={busy || entityId.length === 0} entityId={entityId} run={run} /> : null}
+          {tab === "capital" ? (
+            <CapitalPanel disabled={busy || entityId.length === 0} entityId={entityId} run={run} />
+          ) : null}
           {tab === "import" ? <ImportPanel disabled={busy} run={run} /> : null}
           {tab === "assistant" ? (
-            <AssistantPanel disabled={busy || entityId.length === 0 || periodId.length === 0} entityId={entityId} periodId={periodId} run={run} />
+            <AssistantPanel
+              disabled={busy || entityId.length === 0 || periodId.length === 0}
+              entityId={entityId}
+              periodId={periodId}
+              run={run}
+            />
           ) : null}
-          {tab === "deal" ? <DealPanel disabled={busy} stateHash={stateVersion?.stateHash ?? ""} run={run} /> : null}
+          {tab === "deal" ? (
+            <DealPanel disabled={busy} stateHash={stateVersion?.stateHash ?? ""} run={run} />
+          ) : null}
           {tab === "basis" ? <BasisPanel disabled={busy} run={run} /> : null}
         </>
       )}
@@ -528,15 +682,35 @@ interface Step {
   readonly detail: ReactNode;
 }
 
-function MainPathSteps({ steps, current, onOpen }: { steps: readonly Step[]; current: Tab; onOpen: (tab: Tab) => void }) {
+function MainPathSteps({
+  steps,
+  current,
+  onOpen,
+}: {
+  steps: readonly Step[];
+  current: Tab;
+  onOpen: (tab: Tab) => void;
+}) {
   const firstOpen = steps.findIndex((step) => !step.done);
   return (
     <ol className="steps" aria-label="Main path">
       {steps.map((step, index) => {
-        const tone = step.done ? "step step-done" : index === firstOpen ? "step step-current" : "step";
+        const tone = step.done
+          ? "step step-done"
+          : index === firstOpen
+            ? "step step-current"
+            : "step";
         return (
-          <li key={step.label} className={tone} aria-current={index === firstOpen ? "step" : undefined}>
-            <button type="button" onClick={() => onOpen(step.tab)} aria-label={`${step.label}: open ${TAB_LABELS[step.tab]}`}>
+          <li
+            key={step.label}
+            className={tone}
+            aria-current={index === firstOpen ? "step" : undefined}
+          >
+            <button
+              type="button"
+              onClick={() => onOpen(step.tab)}
+              aria-label={`${step.label}: open ${TAB_LABELS[step.tab]}`}
+            >
               <span className="step-top">
                 <span className="step-index">{step.done ? "✓" : index + 1}</span>
                 <span style={{ fontWeight: step.tab === current ? 680 : 620 }}>{step.label}</span>
@@ -570,12 +744,18 @@ function ProgramInspector({
       })
     : [];
   const outputs = last?.data.outputs;
-  const out = typeof outputs === "object" && outputs !== null && !Array.isArray(outputs) ? field(outputs as KernelRecord, "out") : null;
+  const out =
+    typeof outputs === "object" && outputs !== null && !Array.isArray(outputs)
+      ? field(outputs as KernelRecord, "out")
+      : null;
   const edges = last ? decodeLineage(last.data) : null;
 
   return (
     <>
-      <InspectorSection title="Financial state" aside={stateVersion ? <StatusBadge status={stateVersion.status} /> : undefined}>
+      <InspectorSection
+        title="Financial state"
+        aside={stateVersion ? <StatusBadge status={stateVersion.status} /> : undefined}
+      >
         {stateVersion ? (
           <dl className="kv kv-stack">
             <dt>State hash</dt>
@@ -596,7 +776,17 @@ function ProgramInspector({
 
       <InspectorSection
         title="Valuation"
-        aside={valuationRun ? <StatusBadge status={valuationRun.calculationStatus === "failed" ? "failed" : (valuationVersion?.status ?? "draft")} /> : undefined}
+        aside={
+          valuationRun ? (
+            <StatusBadge
+              status={
+                valuationRun.calculationStatus === "failed"
+                  ? "failed"
+                  : (valuationVersion?.status ?? "draft")
+              }
+            />
+          ) : undefined
+        }
       >
         {valuationRun ? (
           <dl className="kv kv-stack">
@@ -664,7 +854,13 @@ function ProgramInspector({
                 {figures.map(([key, value]) => (
                   <div key={key}>
                     <dt>{key}</dt>
-                    <dd className="hash-wrap">{key === "status" || key === "calculationStatus" ? <StatusBadge status={value} /> : <code>{value}</code>}</dd>
+                    <dd className="hash-wrap">
+                      {key === "status" || key === "calculationStatus" ? (
+                        <StatusBadge status={value} />
+                      ) : (
+                        <code>{value}</code>
+                      )}
+                    </dd>
                   </div>
                 ))}
                 {out ? (
@@ -679,15 +875,18 @@ function ProgramInspector({
             ) : null}
             {edges ? (
               edges.length === 0 ? (
-                <p className="inspector-note">No outgoing lineage edges for this object yet. Edges appear once a later version or dependent object links from it.</p>
+                <p className="inspector-note">
+                  No outgoing lineage edges for this object yet. Edges appear once a later version
+                  or dependent object links from it.
+                </p>
               ) : (
                 <ul className="edge-list" style={{ marginTop: "0.6rem" }}>
                   {edges.map((edge, index) => (
                     <li key={`${edge.fromId}-${edge.toId}-${index}`}>
                       <strong>{edge.relation}</strong>
                       <div className="muted">
-                        {edge.fromType} <code title={edge.fromId}>{edge.fromId.slice(0, 8)}…</code> → {edge.toType}{" "}
-                        <code title={edge.toId}>{edge.toId.slice(0, 8)}…</code>
+                        {edge.fromType} <code title={edge.fromId}>{edge.fromId.slice(0, 8)}…</code>{" "}
+                        → {edge.toType} <code title={edge.toId}>{edge.toId.slice(0, 8)}…</code>
                       </div>
                     </li>
                   ))}
@@ -696,7 +895,10 @@ function ProgramInspector({
             ) : null}
             <details style={{ marginTop: "0.6rem" }}>
               <summary className="small muted">Raw response</summary>
-              <pre className="small" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: "0.4rem 0 0" }}>
+              <pre
+                className="small"
+                style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", margin: "0.4rem 0 0" }}
+              >
                 {JSON.stringify(last.data, null, 2)}
               </pre>
             </details>
@@ -716,7 +918,8 @@ function ProgramInspector({
           </dd>
         </dl>
         <p className="inspector-note">
-          <SuggestedBadge /> marks assistant proposals. Only kernel responses carry hashes and run ids.
+          <SuggestedBadge /> marks assistant proposals. Only kernel responses carry hashes and run
+          ids.
         </p>
       </InspectorSection>
     </>
@@ -737,17 +940,27 @@ function Setup({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
-    const tenant = await action.run(() => provisionTenant(session, { name, homeRegion: session.region }));
+    const tenant = await action.run(() =>
+      provisionTenant(session, { name, homeRegion: session.region }),
+    );
     if (!tenant) return;
     const next = { ...session, tenantId: tenant.tenantId, region: tenant.homeRegion };
     if (signed) {
       const selected = await action.run(() => selectSessionTenant(tenant.tenantId));
       if (!selected) return;
     }
-    const entity = await action.run(() => createEntity(next, { legalName: `${name} Holdings`, functionalCurrency: "USD" }));
+    const entity = await action.run(() =>
+      createEntity(next, { legalName: `${name} Holdings`, functionalCurrency: "USD" }),
+    );
     const createdEntityId = readId(entity, "entityId");
     if (!createdEntityId) return;
-    const period = await action.run(() => createPeriod(next, { entityId: createdEntityId, startDate: "2024-01-01", endDate: "2024-12-31" }));
+    const period = await action.run(() =>
+      createPeriod(next, {
+        entityId: createdEntityId,
+        startDate: "2024-01-01",
+        endDate: "2024-12-31",
+      }),
+    );
     const createdPeriodId = readId(period, "periodId");
     if (!createdPeriodId) return;
     await createAccount(next, {
@@ -767,8 +980,9 @@ function Setup({
           <div>
             <h1>Open a company</h1>
             <p>
-              You are signed in as <code>{session.actorId}</code> with no tenant selected. Paste a tenant ID you belong to in
-              the session bar above. A platform administrator provisions new tenants.
+              You are signed in as <code>{session.actorId}</code> with no tenant selected. Paste a
+              tenant ID you belong to in the session bar above. A platform administrator provisions
+              new tenants.
             </p>
           </div>
         </header>
@@ -781,8 +995,8 @@ function Setup({
         <div>
           <h1>Open a company</h1>
           <p>
-            The kernel provisions the tenant with <code>{session.actorId}</code> as owner, then a USD entity, a 2024 period, and a
-            cash account.
+            The kernel provisions the tenant with <code>{session.actorId}</code> as owner, then a
+            USD entity, a 2024 period, and a cash account.
           </p>
         </div>
       </header>
@@ -795,7 +1009,9 @@ function Setup({
             {action.state.pending ? "Provisioning…" : "Provision"}
           </Button>
         </div>
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

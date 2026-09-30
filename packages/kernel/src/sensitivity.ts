@@ -21,7 +21,10 @@ export function valueDcfSensitivity(input: {
   readonly runs: readonly { readonly id: string; readonly result: DcfResult }[];
 } {
   if (input.shocks.length === 0) {
-    throw new KernelError("VALUATION_INVALID_ASSUMPTION", "Sensitivity requires at least one shock");
+    throw new KernelError(
+      "VALUATION_INVALID_ASSUMPTION",
+      "Sensitivity requires at least one shock",
+    );
   }
   const seen = new Set<string>();
   const runs = input.shocks.map((shock) => {

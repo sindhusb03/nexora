@@ -1,4 +1,13 @@
-import { char, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  char,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true, mode: "string" }).notNull();
 
@@ -55,14 +64,18 @@ export const fxRate = pgTable(
   {
     fxRateId: uuid("fx_rate_id").primaryKey(),
     tenantId: uuid("tenant_id").notNull(),
-    fxRateSetId: uuid("fx_rate_set_id").notNull().references(() => fxRateSet.fxRateSetId),
+    fxRateSetId: uuid("fx_rate_set_id")
+      .notNull()
+      .references(() => fxRateSet.fxRateSetId),
     baseCurrency: char("base_currency", { length: 3 }).notNull(),
     quoteCurrency: char("quote_currency", { length: 3 }).notNull(),
     rateType: text("rate_type").notNull(),
     rate: text("rate").notNull(),
     createdAt: createdAt(),
   },
-  (table) => [uniqueIndex("fx_rate_set_type").on(table.tenantId, table.fxRateSetId, table.rateType)],
+  (table) => [
+    uniqueIndex("fx_rate_set_type").on(table.tenantId, table.fxRateSetId, table.rateType),
+  ],
 );
 
 export const ownershipEdge = pgTable("ownership_edge", {
@@ -88,7 +101,9 @@ export const consolidationGroup = pgTable("consolidation_group", {
 export const eliminationEntry = pgTable("elimination_entry", {
   eliminationEntryId: uuid("elimination_entry_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  consolidationGroupId: uuid("consolidation_group_id").notNull().references(() => consolidationGroup.consolidationGroupId),
+  consolidationGroupId: uuid("consolidation_group_id")
+    .notNull()
+    .references(() => consolidationGroup.consolidationGroupId),
   evidenceId: text("evidence_id").notNull(),
   inputHash: text("input_hash").notNull(),
   payload: jsonb("payload").notNull(),
@@ -105,7 +120,9 @@ export const model = pgTable("model", {
 export const modelVersion = pgTable("model_version", {
   modelVersionId: uuid("model_version_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  modelId: uuid("model_id").notNull().references(() => model.modelId),
+  modelId: uuid("model_id")
+    .notNull()
+    .references(() => model.modelId),
   status: text("status").notNull(),
   inputHash: text("input_hash").notNull(),
   engineVersion: text("engine_version").notNull(),
@@ -118,17 +135,23 @@ export const modelNode = pgTable(
   {
     modelNodeId: uuid("model_node_id").primaryKey(),
     tenantId: uuid("tenant_id").notNull(),
-    modelVersionId: uuid("model_version_id").notNull().references(() => modelVersion.modelVersionId),
+    modelVersionId: uuid("model_version_id")
+      .notNull()
+      .references(() => modelVersion.modelVersionId),
     nodeKey: text("node_key").notNull(),
     payload: jsonb("payload").notNull(),
   },
-  (table) => [uniqueIndex("model_node_key").on(table.tenantId, table.modelVersionId, table.nodeKey)],
+  (table) => [
+    uniqueIndex("model_node_key").on(table.tenantId, table.modelVersionId, table.nodeKey),
+  ],
 );
 
 export const assumptionSet = pgTable("assumption_set", {
   assumptionSetId: uuid("assumption_set_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  modelVersionId: uuid("model_version_id").notNull().references(() => modelVersion.modelVersionId),
+  modelVersionId: uuid("model_version_id")
+    .notNull()
+    .references(() => modelVersion.modelVersionId),
   payload: jsonb("payload").notNull(),
   createdAt: createdAt(),
 });
@@ -178,7 +201,9 @@ export const instrument = pgTable("instrument", {
 export const debtTerms = pgTable("debt_terms", {
   debtTermsId: uuid("debt_terms_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  instrumentId: uuid("instrument_id").notNull().references(() => instrument.instrumentId),
+  instrumentId: uuid("instrument_id")
+    .notNull()
+    .references(() => instrument.instrumentId),
   inputHash: text("input_hash").notNull(),
   payload: jsonb("payload").notNull(),
   createdAt: createdAt(),
@@ -196,7 +221,9 @@ export const capTableVersion = pgTable("cap_table_version", {
 export const holding = pgTable("holding", {
   holdingId: uuid("holding_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  capTableVersionId: uuid("cap_table_version_id").notNull().references(() => capTableVersion.capTableVersionId),
+  capTableVersionId: uuid("cap_table_version_id")
+    .notNull()
+    .references(() => capTableVersion.capTableVersionId),
   holderId: text("holder_id").notNull(),
   commonShares: text("common_shares").notNull(),
   options: text("options").notNull(),
@@ -221,7 +248,9 @@ export const sourceRow = pgTable(
   {
     sourceRowId: uuid("source_row_id").primaryKey(),
     tenantId: uuid("tenant_id").notNull(),
-    importBatchId: uuid("import_batch_id").notNull().references(() => importBatch.importBatchId),
+    importBatchId: uuid("import_batch_id")
+      .notNull()
+      .references(() => importBatch.importBatchId),
     rowNo: integer("row_no").notNull(),
     payload: jsonb("payload").notNull(),
   },
@@ -231,7 +260,9 @@ export const sourceRow = pgTable(
 export const accountMapping = pgTable("account_mapping", {
   accountMappingId: uuid("account_mapping_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  importBatchId: uuid("import_batch_id").notNull().references(() => importBatch.importBatchId),
+  importBatchId: uuid("import_batch_id")
+    .notNull()
+    .references(() => importBatch.importBatchId),
   sourceAccount: text("source_account").notNull(),
   accountId: uuid("account_id").notNull(),
   createdAt: createdAt(),
@@ -240,7 +271,9 @@ export const accountMapping = pgTable("account_mapping", {
 export const reconciliation = pgTable("reconciliation", {
   reconciliationId: uuid("reconciliation_id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  importBatchId: uuid("import_batch_id").notNull().references(() => importBatch.importBatchId),
+  importBatchId: uuid("import_batch_id")
+    .notNull()
+    .references(() => importBatch.importBatchId),
   status: text("status").notNull(),
   payload: jsonb("payload").notNull(),
   createdAt: createdAt(),
@@ -286,7 +319,9 @@ export const reportingBasis = pgTable(
     payload: jsonb("payload").notNull(),
     createdAt: createdAt(),
   },
-  (table) => [uniqueIndex("reporting_basis_hash").on(table.tenantId, table.basisVersion, table.localHash)],
+  (table) => [
+    uniqueIndex("reporting_basis_hash").on(table.tenantId, table.basisVersion, table.localHash),
+  ],
 );
 
 export const programSchema = {

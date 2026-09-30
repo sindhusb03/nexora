@@ -1,12 +1,6 @@
 import { KernelError } from "./errors.js";
 import { hashMaterial } from "./hash.js";
-import {
-  assertCurrency,
-  assertNonNegativeMinor,
-  money,
-  parseMinor,
-  type Money,
-} from "./money.js";
+import { assertCurrency, assertNonNegativeMinor, money, parseMinor, type Money } from "./money.js";
 import { MAX_JOURNAL_LINES } from "./version.js";
 
 export interface JournalLineInput {
@@ -126,10 +120,7 @@ export function netLinesToZero(
   const nets = new Map<string, bigint>();
   for (const line of [...original, ...reversal]) {
     const current = nets.get(line.accountId) ?? 0n;
-    nets.set(
-      line.accountId,
-      current + parseMinor(line.debitMinor) - parseMinor(line.creditMinor),
-    );
+    nets.set(line.accountId, current + parseMinor(line.debitMinor) - parseMinor(line.creditMinor));
   }
   for (const net of nets.values()) {
     if (net !== 0n) {

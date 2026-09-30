@@ -1,7 +1,12 @@
 import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 
-import { MigrationError, migrationStatus, runMigrations, type SqlExecutor } from "../src/migrate.js";
+import {
+  MigrationError,
+  migrationStatus,
+  runMigrations,
+  type SqlExecutor,
+} from "../src/migrate.js";
 import { loadMigrationSql, MIGRATION_NAMES } from "../src/migration.js";
 
 function executor(db: PGlite): SqlExecutor {
@@ -26,13 +31,19 @@ describe("migration runner", () => {
     const second = await runMigrations(executor(db));
     expect(second.applied).toEqual([]);
     expect(second.skipped).toEqual([...MIGRATION_NAMES]);
-    await expect(migrationStatus(executor(db))).resolves.toEqual({ pending: [], drifted: [], unknown: [] });
+    await expect(migrationStatus(executor(db))).resolves.toEqual({
+      pending: [],
+      drifted: [],
+      unknown: [],
+    });
   });
 
   it("refuses an applied migration whose checksum changed", async () => {
     const db = new PGlite();
     await runMigrations(executor(db));
-    await db.query("UPDATE schema_migrations SET checksum = 'tampered' WHERE name = $1", ["0002_program.sql"]);
+    await db.query("UPDATE schema_migrations SET checksum = 'tampered' WHERE name = $1", [
+      "0002_program.sql",
+    ]);
     await expect(runMigrations(executor(db))).rejects.toThrow(MigrationError);
     const status = await migrationStatus(executor(db));
     expect(status.drifted).toEqual(["0002_program.sql"]);
@@ -41,7 +52,9 @@ describe("migration runner", () => {
   it("refuses a database that is ahead of this build", async () => {
     const db = new PGlite();
     await runMigrations(executor(db));
-    await db.query("INSERT INTO schema_migrations (name, checksum) VALUES ('9999_future.sql', 'x')");
+    await db.query(
+      "INSERT INTO schema_migrations (name, checksum) VALUES ('9999_future.sql', 'x')",
+    );
     await expect(runMigrations(executor(db))).rejects.toThrow(/does not know/);
   });
 
@@ -53,7 +66,10 @@ describe("migration runner", () => {
     const report = await runMigrations(executor(db), { baseline: true });
     expect(report.baselined).toEqual([...MIGRATION_NAMES]);
     expect(report.applied).toEqual([]);
-    await expect(runMigrations(executor(db))).resolves.toMatchObject({ applied: [], baselined: [] });
+    await expect(runMigrations(executor(db))).resolves.toMatchObject({
+      applied: [],
+      baselined: [],
+    });
   });
 });
 
@@ -65,46 +81,78 @@ describe("identity tables", () => {
     const sessionId = "22222222-2222-4222-8222-222222222222";
 
     await asApp(db, tenantId, (query) =>
-      query(`INSERT INTO tenant (tenant_id, name, home_region, status, created_at) VALUES ($1, 'A', 'us-east-1', 'active', now())`, [
-        tenantId,
-      ]),
+      query(
+        `INSERT INTO tenant (tenant_id, name, home_region, status, created_at) VALUES ($1, 'A', 'us-east-1', 'active', now())`,
+        [tenantId],
+      ),
     );
     await asApp(db, null, async (query) => {
-      await query(`INSERT INTO auth_user (actor_id, password_hash, created_at) VALUES ('owner-1', 'scrypt$x', now())`);
+      await query(
+        `INSERT INTO auth_user (actor_id, password_hash, created_at) VALUES ('owner-1', 'scrypt$x', now())`,
+      );
       await query(
         `INSERT INTO auth_session (session_id, actor_id, region, created_at, expires_at)
          VALUES ($1, 'owner-1', 'us-east-1', now(), now() + interval '1 hour')`,
         [sessionId],
       );
-      await query(`UPDATE auth_session SET tenant_id = $1 WHERE session_id = $2`, [tenantId, sessionId]);
+      await query(`UPDATE auth_session SET tenant_id = $1 WHERE session_id = $2`, [
+        tenantId,
+        sessionId,
+      ]);
     });
 
-    await expect(asApp(db, null, (query) => query(`INSERT INTO auth_user (actor_id, password_hash, created_at) VALUES ('Bad Name', 'x', now())`))).rejects.toThrow(
-      /check constraint/,
-    );
-    await expect(asApp(db, null, (query) => query(`UPDATE auth_user SET password_hash = 'swap' WHERE actor_id = 'owner-1'`))).rejects.toThrow(
-      /permission denied/,
-    );
-    await expect(asApp(db, null, (query) => query(`DELETE FROM auth_user WHERE actor_id = 'owner-1'`))).rejects.toThrow(/permission denied/);
     await expect(
-      asApp(db, null, (query) => query(`UPDATE auth_session SET expires_at = now() + interval '30 days' WHERE session_id = $1`, [sessionId])),
+      asApp(db, null, (query) =>
+        query(
+          `INSERT INTO auth_user (actor_id, password_hash, created_at) VALUES ('Bad Name', 'x', now())`,
+        ),
+      ),
+    ).rejects.toThrow(/check constraint/);
+    await expect(
+      asApp(db, null, (query) =>
+        query(`UPDATE auth_user SET password_hash = 'swap' WHERE actor_id = 'owner-1'`),
+      ),
     ).rejects.toThrow(/permission denied/);
-    await expect(asApp(db, null, (query) => query(`DELETE FROM auth_session WHERE session_id = $1`, [sessionId]))).rejects.toThrow(
-      /permission denied/,
-    );
+    await expect(
+      asApp(db, null, (query) => query(`DELETE FROM auth_user WHERE actor_id = 'owner-1'`)),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      asApp(db, null, (query) =>
+        query(
+          `UPDATE auth_session SET expires_at = now() + interval '30 days' WHERE session_id = $1`,
+          [sessionId],
+        ),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    await expect(
+      asApp(db, null, (query) =>
+        query(`DELETE FROM auth_session WHERE session_id = $1`, [sessionId]),
+      ),
+    ).rejects.toThrow(/permission denied/);
 
-    await asApp(db, null, (query) => query(`UPDATE auth_session SET revoked_at = now() WHERE session_id = $1`, [sessionId]));
-    await expect(asApp(db, null, (query) => query(`UPDATE auth_session SET tenant_id = NULL WHERE session_id = $1`, [sessionId]))).rejects.toThrow(
-      /AUTH_SESSION_REVOKED/,
+    await asApp(db, null, (query) =>
+      query(`UPDATE auth_session SET revoked_at = now() WHERE session_id = $1`, [sessionId]),
     );
-    await expect(db.query(`DELETE FROM auth_session WHERE session_id = $1`, [sessionId])).rejects.toThrow(/FIN_IMMUTABLE_RECORD/);
+    await expect(
+      asApp(db, null, (query) =>
+        query(`UPDATE auth_session SET tenant_id = NULL WHERE session_id = $1`, [sessionId]),
+      ),
+    ).rejects.toThrow(/AUTH_SESSION_REVOKED/);
+    await expect(
+      db.query(`DELETE FROM auth_session WHERE session_id = $1`, [sessionId]),
+    ).rejects.toThrow(/FIN_IMMUTABLE_RECORD/);
   });
 });
 
 async function asApp<T>(
   db: PGlite,
   tenantId: string | null,
-  fn: (query: <R extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<{ rows: R[] }>) => Promise<T>,
+  fn: (
+    query: <R extends Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ) => Promise<{ rows: R[] }>,
+  ) => Promise<T>,
 ): Promise<T> {
   await db.exec("BEGIN");
   try {

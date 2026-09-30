@@ -19,16 +19,26 @@ describe("workspace MVP", () => {
     const raw = await workspace.text();
     expect(workspace.status, raw).toBe(200);
     const body = JSON.parse(raw) as {
-      latest: { assetsMinor: string; liabilitiesMinor: string; equityMinor: string; revenueMinor: string };
+      latest: {
+        assetsMinor: string;
+        liabilitiesMinor: string;
+        equityMinor: string;
+        revenueMinor: string;
+      };
       statements: { periods: unknown[]; rows: { key: string }[] };
-      cash: { base: { weeks: unknown[]; alerts: unknown[] }; downside: { alerts: { weekIndex: string }[] } };
+      cash: {
+        base: { weeks: unknown[]; alerts: unknown[] };
+        downside: { alerts: { weekIndex: string }[] };
+      };
       qoe: { reported: string; normalized: string; inputHash: string };
       approvals: { status: string }[];
       onboarding: { certificate: { status: string } };
       engineVersion: string;
     };
     expect(body.engineVersion).toBe("fe-kernel-0.2.0");
-    expect(BigInt(body.latest.assetsMinor)).toBe(BigInt(body.latest.liabilitiesMinor) + BigInt(body.latest.equityMinor));
+    expect(BigInt(body.latest.assetsMinor)).toBe(
+      BigInt(body.latest.liabilitiesMinor) + BigInt(body.latest.equityMinor),
+    );
     expect(body.latest.revenueMinor).toBe("15800000");
     expect(body.statements.periods.length).toBe(21);
     expect(body.statements.rows.map((row) => row.key)).toContain("end");
@@ -39,11 +49,16 @@ describe("workspace MVP", () => {
     expect(body.approvals.some((item) => item.status === "suggested")).toBe(true);
     expect(body.onboarding.certificate.status).toBe("reconciled");
 
-    const viewer = await call(app, "POST", `/v1/workspace/proposals/${body.approvals[0] ? "00000000-0000-4000-8000-000000000000" : ""}/decide`, {
-      actor: "viewer",
-      tenant,
-      body: { decision: "rejected" },
-    });
+    const viewer = await call(
+      app,
+      "POST",
+      `/v1/workspace/proposals/${body.approvals[0] ? "00000000-0000-4000-8000-000000000000" : ""}/decide`,
+      {
+        actor: "viewer",
+        tenant,
+        body: { decision: "rejected" },
+      },
+    );
     expect(viewer.status).toBe(403);
 
     const copilot = await call(app, "POST", "/v1/copilot", {
@@ -52,7 +67,12 @@ describe("workspace MVP", () => {
       body: { message: "Explain revenue and cash.", agent: "general" },
     });
     expect(copilot.status).toBe(200);
-    const answer = (await copilot.json()) as { mode: string; accepted: boolean; text: string; rejectedNumbers: string[] };
+    const answer = (await copilot.json()) as {
+      mode: string;
+      accepted: boolean;
+      text: string;
+      rejectedNumbers: string[];
+    };
     expect(answer.mode).toBe("mock");
     expect(answer.accepted).toBe(true);
     expect(answer.rejectedNumbers).toEqual([]);
@@ -61,7 +81,11 @@ describe("workspace MVP", () => {
 
     const platform = await call(app, "GET", "/v1/admin/platform", { actor: "platform-admin" });
     expect(platform.status).toBe(200);
-    const ops = (await platform.json()) as { tenants: { name: string }[]; flags: unknown[]; connectors: unknown[] };
+    const ops = (await platform.json()) as {
+      tenants: { name: string }[];
+      flags: unknown[];
+      connectors: unknown[];
+    };
     expect(ops.tenants[0]?.name).toBe("Nazareno Services");
     expect(ops.flags.length).toBeGreaterThan(0);
     expect(ops.connectors.length).toBeGreaterThan(0);

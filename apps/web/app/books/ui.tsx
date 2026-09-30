@@ -14,7 +14,9 @@ export function ErrorNotice({ error, httpStatus }: { error: ApiError; httpStatus
         <strong>Sign-in required</strong>
         <span className="notice-code">{error.code}</span>
         <p>{error.message}</p>
-        <p className="muted">The kernel refuses requests without a valid session. Reload the page to sign in again.</p>
+        <p className="muted">
+          The kernel refuses requests without a valid session. Reload the page to sign in again.
+        </p>
       </div>
     );
   }
@@ -25,7 +27,8 @@ export function ErrorNotice({ error, httpStatus }: { error: ApiError; httpStatus
         <span className="notice-code">{error.code}</span>
         <p>{error.message}</p>
         <p className="muted">
-          Your current actor cannot see this data. Nothing is shown rather than an incomplete result.
+          Your current actor cannot see this data. Nothing is shown rather than an incomplete
+          result.
         </p>
       </div>
     );
@@ -84,15 +87,25 @@ const STATUS_CHIPS: Readonly<Record<string, { readonly label: string; readonly t
 /** Lifecycle chip for a status string returned by the kernel. Colour always travels with a label. */
 export function StatusBadge({ status }: { status: string }) {
   const chip = STATUS_CHIPS[status];
-  return <Badge variant="outline" className={`badge ${chip ? chip.tone : "badge-neutral"}`}>{chip ? chip.label : status}</Badge>;
+  return (
+    <Badge variant="outline" className={`badge ${chip ? chip.tone : "badge-neutral"}`}>
+      {chip ? chip.label : status}
+    </Badge>
+  );
 }
 
 export function SuggestedBadge() {
-  return <Badge variant="outline" className="badge badge-violet">Suggested</Badge>;
+  return (
+    <Badge variant="outline" className="badge badge-violet">
+      Suggested
+    </Badge>
+  );
 }
 
 export function Figure({ value }: { value: string }) {
-  return <span className={value.startsWith("-") ? "figure figure-negative" : "figure"}>{value}</span>;
+  return (
+    <span className={value.startsWith("-") ? "figure figure-negative" : "figure"}>{value}</span>
+  );
 }
 
 /** A server figure with the basis that produced it (engine version, run id, hash). */
@@ -143,7 +156,15 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-export function PanelHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+export function PanelHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
   return (
     <header className="panel-header">
       <div>

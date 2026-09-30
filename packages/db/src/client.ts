@@ -3,7 +3,13 @@ import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { drizzle as drizzleNode } from "drizzle-orm/node-postgres";
 import pg from "pg";
 
-import { migrationStatus, runMigrations, type MigrationReport, type MigrationStatus, type SqlExecutor } from "./migrate.js";
+import {
+  migrationStatus,
+  runMigrations,
+  type MigrationReport,
+  type MigrationStatus,
+  type SqlExecutor,
+} from "./migrate.js";
 import type { LedgerStore } from "./records.js";
 import { schema } from "./schema.js";
 import { createLedgerStore } from "./store.js";
@@ -38,7 +44,11 @@ export interface PostgresRuntime {
 
 export function openPostgres(
   databaseUrl: string,
-  options: { readonly max?: number; readonly statementTimeoutMs?: number; readonly onPoolError?: (error: Error) => void } = {},
+  options: {
+    readonly max?: number;
+    readonly statementTimeoutMs?: number;
+    readonly onPoolError?: (error: Error) => void;
+  } = {},
 ): PostgresRuntime {
   const pool = new pg.Pool({
     connectionString: databaseUrl,

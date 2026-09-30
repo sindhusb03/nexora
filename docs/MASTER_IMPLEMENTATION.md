@@ -33,13 +33,13 @@ The interface is a modern institutional workspace: dense, calm, tabular numbers,
 
 This slice is Gate G0. Do not rebuild it.
 
-| Area | What exists |
-|---|---|
-| Kernel | Integer minor-unit money, balanced journals, reversal lines, three-statement derivation, year-end Gordon DCF, half-even FX translation, acyclic formula graph, intercompany elimination identity, publication transitions, scenario projection, fail-closed authorization |
+| Area        | What exists                                                                                                                                                                                                                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Kernel      | Integer minor-unit money, balanced journals, reversal lines, three-statement derivation, year-end Gordon DCF, half-even FX translation, acyclic formula graph, intercompany elimination identity, publication transitions, scenario projection, fail-closed authorization                                                                                    |
 | Persistence | `packages/db/migrations/0001_kernel_foundation.sql`: tenant, membership, legal entity, account, period, journal, journal line, audit event, calculation run, domain event. Triggers freeze posted journals, closed periods, and append-only tables. RLS is forced. App role is `nexora_app` with no delete on journals, lines, audit, runs, or domain events |
-| API | Hono routes under `/v1` for tenants, memberships, entities, accounts, periods, journals, statements, DCF, and audit. Idempotency-Key on post. Expected-Version on reverse. Roles come from membership rows |
-| Web | Next.js shell that renders `GET /health`. It does not import the kernel |
-| Tests | Golden statements and DCF, FX rounding, graph cycles, publication block, RLS and immutability, HTTP tenant isolation |
+| API         | Hono routes under `/v1` for tenants, memberships, entities, accounts, periods, journals, statements, DCF, and audit. Idempotency-Key on post. Expected-Version on reverse. Roles come from membership rows                                                                                                                                                   |
+| Web         | Next.js shell that renders `GET /health`. It does not import the kernel                                                                                                                                                                                                                                                                                      |
+| Tests       | Golden statements and DCF, FX rounding, graph cycles, publication block, RLS and immutability, HTTP tenant isolation                                                                                                                                                                                                                                         |
 
 ### Kernel modules
 
@@ -90,11 +90,11 @@ packages/db       Drizzle schema, SQL migrations, RLS, triggers, ledger store.
 
 Later packages, still calling the kernel:
 
-| Package | Appears in |
-|---|---|
-| `packages/contracts` | G1. Zod and OpenAPI generated from one schema module so HTTP and the future Excel client share contracts |
-| `packages/auth` | G1. Better Auth session → tenant membership. Header actor ids retire |
-| Job runner | G4. Inngest or BullMQ for calculation runs over the graph limit. The worker calls the kernel and writes a calculation run. It does not invent a second engine |
+| Package              | Appears in                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/contracts` | G1. Zod and OpenAPI generated from one schema module so HTTP and the future Excel client share contracts                                                      |
+| `packages/auth`      | G1. Better Auth session → tenant membership. Header actor ids retire                                                                                          |
+| Job runner           | G4. Inngest or BullMQ for calculation runs over the graph limit. The worker calls the kernel and writes a calculation run. It does not invent a second engine |
 
 Redis is a cache of kernel outputs keyed by `hash(modelVersion, inputHash, rateSetVersion, engineVersion)`. A cache miss recomputes. A cache hit still returns the stored run id.
 
@@ -108,24 +108,24 @@ OpenTelemetry spans already wrap journal post, reversal, and DCF. They export on
 
 Every business row has `tenant_id`. Versioned financial objects also store engine version and input hash.
 
-| Object | Identity | Rule |
-|---|---|---|
-| Tenant | `tenant_id` | Home region, status `active` or `suspended` |
-| Membership | tenant + actor + role | Roles: owner, controller, viewer, auditor. `platform_admin` is not a membership role |
-| Legal entity | tenant + entity | One functional currency. One retained-earnings account, set once |
-| Account | tenant + entity + code | Report class and cash-flow class are data. They are not inferred by the client at read time |
-| Period | tenant + entity + date range | No overlap. `open` → `closed` only |
-| Journal | tenant + idempotency key | `draft` then `posted`. Posted is frozen |
-| Statement set | derived | Not a second ledger. Built from posted lines |
-| FX rate set | tenant + rate set version | Approved rates only. Original transaction currency is kept |
-| Consolidation group | tenant + as-of date | Ownership is effective-dated. Eliminations carry evidence ids |
-| Model version | tenant + model + version | Immutable after publication |
-| Scenario | tenant + base version + scenario id | Base row is never updated |
-| Calculation run | tenant + model version + input hash | Insert-only. `succeeded` or `failed` |
-| Valuation | tenant + method + assumption version | DCF first. Comps later, fed by declared inputs |
-| Instrument / cap table | tenant + legal entity + version | G7. Schedules reconcile to the penny |
-| Board pack | tenant + published state ids | Can be built only from published objects |
-| Audit event / domain event | append-only | Same transaction as the command they describe |
+| Object                     | Identity                             | Rule                                                                                        |
+| -------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Tenant                     | `tenant_id`                          | Home region, status `active` or `suspended`                                                 |
+| Membership                 | tenant + actor + role                | Roles: owner, controller, viewer, auditor. `platform_admin` is not a membership role        |
+| Legal entity               | tenant + entity                      | One functional currency. One retained-earnings account, set once                            |
+| Account                    | tenant + entity + code               | Report class and cash-flow class are data. They are not inferred by the client at read time |
+| Period                     | tenant + entity + date range         | No overlap. `open` → `closed` only                                                          |
+| Journal                    | tenant + idempotency key             | `draft` then `posted`. Posted is frozen                                                     |
+| Statement set              | derived                              | Not a second ledger. Built from posted lines                                                |
+| FX rate set                | tenant + rate set version            | Approved rates only. Original transaction currency is kept                                  |
+| Consolidation group        | tenant + as-of date                  | Ownership is effective-dated. Eliminations carry evidence ids                               |
+| Model version              | tenant + model + version             | Immutable after publication                                                                 |
+| Scenario                   | tenant + base version + scenario id  | Base row is never updated                                                                   |
+| Calculation run            | tenant + model version + input hash  | Insert-only. `succeeded` or `failed`                                                        |
+| Valuation                  | tenant + method + assumption version | DCF first. Comps later, fed by declared inputs                                              |
+| Instrument / cap table     | tenant + legal entity + version      | G7. Schedules reconcile to the penny                                                        |
+| Board pack                 | tenant + published state ids         | Can be built only from published objects                                                    |
+| Audit event / domain event | append-only                          | Same transaction as the command they describe                                               |
 
 ### Publication
 
@@ -133,14 +133,14 @@ Kernel states: `draft → validated → review → approved → published`, with
 
 UI labels from `UI-UX.md`:
 
-| Kernel status | UI label |
-|---|---|
-| `draft` | Draft |
-| `validated` | Draft, with a "checked" marker |
-| `review` | In Review |
-| `approved` | Approved |
-| `published` | Published |
-| `rejected` | Rejected |
+| Kernel status | UI label                       |
+| ------------- | ------------------------------ |
+| `draft`       | Draft                          |
+| `validated`   | Draft, with a "checked" marker |
+| `review`      | In Review                      |
+| `approved`    | Approved                       |
+| `published`   | Published                      |
+| `rejected`    | Rejected                       |
 
 Superseded is not a status mutation. A successor is a new row with `supersedes_id`. The prior published row stays `published`. The UI queries the successor and shows the label Superseded. Color plus text. Never color alone.
 
@@ -184,14 +184,14 @@ model refs, publication status
 
 ### Authorization
 
-| Action | Roles |
-|---|---|
-| Provision tenant | platform admin allow-list, then Better Auth platform role |
-| Grant membership | owner |
-| Write entity, account, period, journal, valuation | owner, controller |
-| Close period | owner, controller |
-| Read journals and statements | owner, controller, viewer, auditor |
-| Read audit | owner, controller, auditor |
+| Action                                            | Roles                                                     |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| Provision tenant                                  | platform admin allow-list, then Better Auth platform role |
+| Grant membership                                  | owner                                                     |
+| Write entity, account, period, journal, valuation | owner, controller                                         |
+| Close period                                      | owner, controller                                         |
+| Read journals and statements                      | owner, controller, viewer, auditor                        |
+| Read audit                                        | owner, controller, auditor                                |
 
 A viewer who cannot see a supporting schedule gets an explicit locked state. The screen does not render a blank or a substitute number.
 
@@ -219,20 +219,20 @@ From `UI-UX.md`, applied as build rules:
 
 Build in this order. A gate opens when its exit criteria pass in CI.
 
-| Gate | Outcome | Spec lineage |
-|---|---|---|
-| G0 | Kernel foundation, schema, RLS, posting API, health shell | V6 sprints 1–2, V7 slice. **Done** |
-| G1 | A controller can keep books in the UI for one entity | V6 sprints 1–2 completed as a product, V8 financials |
-| G2 | Statements and valuations publish as immutable versions with lineage | V7 publication and lineage |
-| G3 | Two entities, FX, and eliminations produce a balanced group | V7 consolidation and FX |
-| G4 | Model graph and scenarios. Base case stays unchanged | V7 calculation language, V6 sprint 4–5 |
-| G5 | Valuation workspace on pinned runs. Failed runs cannot publish | V7 valuation |
-| G6 | Board pack built only from published states | V8 reporting |
-| G7 | Debt, equity, cap table. Sources equal uses | V11 |
-| G8 | Import, mapping, reconciliation, normalization, QoE | V13 |
-| G9 | AI explains and proposes against kernel citations | V9 |
-| G10 | M&A, diligence, data room on published financial state | V10 |
-| G11 | Jurisdictions, i18n, explicit multi-region | V12 |
+| Gate | Outcome                                                              | Spec lineage                                         |
+| ---- | -------------------------------------------------------------------- | ---------------------------------------------------- |
+| G0   | Kernel foundation, schema, RLS, posting API, health shell            | V6 sprints 1–2, V7 slice. **Done**                   |
+| G1   | A controller can keep books in the UI for one entity                 | V6 sprints 1–2 completed as a product, V8 financials |
+| G2   | Statements and valuations publish as immutable versions with lineage | V7 publication and lineage                           |
+| G3   | Two entities, FX, and eliminations produce a balanced group          | V7 consolidation and FX                              |
+| G4   | Model graph and scenarios. Base case stays unchanged                 | V7 calculation language, V6 sprint 4–5               |
+| G5   | Valuation workspace on pinned runs. Failed runs cannot publish       | V7 valuation                                         |
+| G6   | Board pack built only from published states                          | V8 reporting                                         |
+| G7   | Debt, equity, cap table. Sources equal uses                          | V11                                                  |
+| G8   | Import, mapping, reconciliation, normalization, QoE                  | V13                                                  |
+| G9   | AI explains and proposes against kernel citations                    | V9                                                   |
+| G10  | M&A, diligence, data room on published financial state               | V10                                                  |
+| G11  | Jurisdictions, i18n, explicit multi-region                           | V12                                                  |
 
 Excel is a client of the same `/v1` contracts during G4–G5. It is not a parallel calculator and it does not get its own gate.
 
@@ -446,20 +446,20 @@ These write calculation runs. They do not silently post journals. Funding a draw
 
 Navigation from `UI-UX.md`, wired only when its gate exists.
 
-| Screen | Gate | Server dependency |
-|---|---|---|
-| Health shell | G0 | `GET /health` (done) |
-| Admin, chart, journals, statements | G1 | Current ledger API |
-| Publish and lineage inspector | G2 | Financial state and `/v1/lineage` |
-| Group and FX | G3 | Consolidation runs |
-| Model workspace, scenario compare | G4 | Calculation runs |
-| Valuation workspace | G5 | Valuation object |
-| Board pack | G6 | Report pack |
-| Capital | G7 | Schedules and cap table |
-| Import and QoE bridge | G8 | Import batches |
-| Assistant | G9 | Proposals plus citations |
-| Deals | G10 | Published state plus deal scenario |
-| Locale, basis, region admin | G11 | Mappings and residency |
+| Screen                             | Gate | Server dependency                  |
+| ---------------------------------- | ---- | ---------------------------------- |
+| Health shell                       | G0   | `GET /health` (done)               |
+| Admin, chart, journals, statements | G1   | Current ledger API                 |
+| Publish and lineage inspector      | G2   | Financial state and `/v1/lineage`  |
+| Group and FX                       | G3   | Consolidation runs                 |
+| Model workspace, scenario compare  | G4   | Calculation runs                   |
+| Valuation workspace                | G5   | Valuation object                   |
+| Board pack                         | G6   | Report pack                        |
+| Capital                            | G7   | Schedules and cap table            |
+| Import and QoE bridge              | G8   | Import batches                     |
+| Assistant                          | G9   | Proposals plus citations           |
+| Deals                              | G10  | Published state plus deal scenario |
+| Locale, basis, region admin        | G11  | Mappings and residency             |
 
 Dashboard KPIs appear in G2, and only from published state. A dashboard tile without a run id does not ship.
 
@@ -510,17 +510,17 @@ Reuse LedgerMind for information architecture only: Connect Data, Financials (ac
 
 Do not port LedgerMind’s financial execution. The audit’s blocking defects are closed here by the existing kernel, and copying that code would reopen them.
 
-| Audit item | LedgerMind | This repository |
-|---|---|---|
-| P0-02 Client grids stored as forecasts | `PROJECTION_STRICT_SAVE` defaults off | The kernel recalculates. A failed run cannot publish |
-| P0-03 Posted rows updated and deleted | `PUT`/`DELETE` on `transactions` | Posted journals are frozen. Corrections are reversals |
-| P0-04 Period lock incomplete | Delete and recurring bypass the lock | A closed period rejects mutation |
-| P0-05 Mixed currency summed | GL sums `amount` across currencies | FX translation is explicit and plugs CTA |
-| P0-08 Statement replaced in place | `parsedData` overwritten | Publication inserts a new version |
-| P1-02 FX and CTA | Absent | Kernel translation with a golden case |
-| P1-03 Consolidation | Claimed, not built | Elimination identity; NCI plus parent equals subsidiary equity |
-| Float projections | JavaScript numbers in `shared/projections` | Integer minor units or decimal.js |
-| AI overwrites accounts | Confidence above 0.7 replaces the user’s accounts | Suggestions stay labeled Suggested until the user accepts |
+| Audit item                             | LedgerMind                                        | This repository                                                |
+| -------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
+| P0-02 Client grids stored as forecasts | `PROJECTION_STRICT_SAVE` defaults off             | The kernel recalculates. A failed run cannot publish           |
+| P0-03 Posted rows updated and deleted  | `PUT`/`DELETE` on `transactions`                  | Posted journals are frozen. Corrections are reversals          |
+| P0-04 Period lock incomplete           | Delete and recurring bypass the lock              | A closed period rejects mutation                               |
+| P0-05 Mixed currency summed            | GL sums `amount` across currencies                | FX translation is explicit and plugs CTA                       |
+| P0-08 Statement replaced in place      | `parsedData` overwritten                          | Publication inserts a new version                              |
+| P1-02 FX and CTA                       | Absent                                            | Kernel translation with a golden case                          |
+| P1-03 Consolidation                    | Claimed, not built                                | Elimination identity; NCI plus parent equals subsidiary equity |
+| Float projections                      | JavaScript numbers in `shared/projections`        | Integer minor units or decimal.js                              |
+| AI overwrites accounts                 | Confidence above 0.7 replaces the user’s accounts | Suggestions stay labeled Suggested until the user accepts      |
 
 Product copy must match this table. Comparables, precedent transactions, live bank connect, and live accounting-system connect stay unavailable until a kernel method exists. A printed cash-flow page in an upload is not the cash flow. The kernel derives cash flow from classified activity.
 

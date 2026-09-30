@@ -1,12 +1,7 @@
 import { KernelError } from "./errors.js";
 
 export type PublicationStatus =
-  | "draft"
-  | "validated"
-  | "review"
-  | "approved"
-  | "published"
-  | "rejected";
+  "draft" | "validated" | "review" | "approved" | "published" | "rejected";
 
 export type CalculationStatus = "succeeded" | "failed";
 

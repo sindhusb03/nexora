@@ -41,7 +41,12 @@ export function eliminateIntercompany(input: {
     }
     const debit = parseMinor(line.debitMinor);
     const credit = parseMinor(line.creditMinor);
-    if (debit < 0n || credit < 0n || (debit > 0n && credit > 0n) || (debit === 0n && credit === 0n)) {
+    if (
+      debit < 0n ||
+      credit < 0n ||
+      (debit > 0n && credit > 0n) ||
+      (debit === 0n && credit === 0n)
+    ) {
       throw new KernelError("FIN_INVALID_JOURNAL_LINE", "Elimination line is not one-sided");
     }
     eliminationDebit += debit;

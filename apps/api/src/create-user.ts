@@ -19,7 +19,9 @@ if (!url) {
   process.exit(1);
 }
 if (!ACTOR_ID.test(actorId)) {
-  logger.error("user.refused", { message: "Actor id must be 1–64 lowercase letters, digits, dot, dash, or underscore." });
+  logger.error("user.refused", {
+    message: "Actor id must be 1–64 lowercase letters, digits, dot, dash, or underscore.",
+  });
   process.exit(1);
 }
 if (password.length < 12 || password.length > 256) {

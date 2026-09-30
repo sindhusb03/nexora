@@ -41,14 +41,24 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
     return c.json(await program.createFinancialState(readActor(c), body), 201);
   });
   app.get("/v1/financial-states/:id", async (c) => {
-    return c.json(await program.readFinancialStateVersion(readActor(c), z.uuid().parse(c.req.param("id"))));
+    return c.json(
+      await program.readFinancialStateVersion(readActor(c), z.uuid().parse(c.req.param("id"))),
+    );
   });
   app.get("/v1/valuations/:id", async (c) => {
-    return c.json(await program.readValuationVersion(readActor(c), z.uuid().parse(c.req.param("id"))));
+    return c.json(
+      await program.readValuationVersion(readActor(c), z.uuid().parse(c.req.param("id"))),
+    );
   });
   app.post("/v1/financial-states/:id/transition", async (c) => {
     const body = transitionSchema.parse(await c.req.json());
-    return c.json(await program.transitionFinancialState(readActor(c), z.uuid().parse(c.req.param("id")), body.to));
+    return c.json(
+      await program.transitionFinancialState(
+        readActor(c),
+        z.uuid().parse(c.req.param("id")),
+        body.to,
+      ),
+    );
   });
   app.get("/v1/lineage/:type/:id", async (c) => {
     return c.json(await program.lineage(readActor(c), c.req.param("type"), c.req.param("id")));
@@ -63,11 +73,15 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
   });
   app.post("/v1/consolidation-groups/:id/translate", async (c) => {
     const body = translateSchema.parse(await c.req.json());
-    return c.json(await program.translateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body));
+    return c.json(
+      await program.translateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body),
+    );
   });
   app.post("/v1/consolidation-groups/:id/eliminate", async (c) => {
     const body = eliminationSchema.parse(await c.req.json());
-    return c.json(await program.eliminateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body));
+    return c.json(
+      await program.eliminateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body),
+    );
   });
   app.post("/v1/models", async (c) => {
     const body = modelSchema.parse(await c.req.json());
@@ -75,11 +89,24 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
   });
   app.post("/v1/models/:id/versions", async (c) => {
     const body = modelVersionSchema.parse(await c.req.json());
-    return c.json(await program.saveModelVersion(readActor(c), z.uuid().parse(c.req.param("id")), body.nodes as CalcNode[]), 201);
+    return c.json(
+      await program.saveModelVersion(
+        readActor(c),
+        z.uuid().parse(c.req.param("id")),
+        body.nodes as CalcNode[],
+      ),
+      201,
+    );
   });
   app.post("/v1/models/:id/calculate", async (c) => {
     const body = modelVersionSchema.parse(await c.req.json());
-    return c.json(await program.calculateModel(readActor(c), z.uuid().parse(c.req.param("id")), body.nodes as CalcNode[]));
+    return c.json(
+      await program.calculateModel(
+        readActor(c),
+        z.uuid().parse(c.req.param("id")),
+        body.nodes as CalcNode[],
+      ),
+    );
   });
   app.post("/v1/scenarios", async (c) => {
     const body = scenarioSchema.parse(await c.req.json());
@@ -91,13 +118,17 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
   });
   app.post("/v1/valuations/:id/transition", async (c) => {
     const body = transitionSchema.parse(await c.req.json());
-    return c.json(await program.transitionValuation(readActor(c), z.uuid().parse(c.req.param("id")), body.to));
+    return c.json(
+      await program.transitionValuation(readActor(c), z.uuid().parse(c.req.param("id")), body.to),
+    );
   });
   app.post("/v1/valuations/:id/calculate", async (c) => {
     const valuationId = z.uuid().parse(c.req.param("id"));
     const body = sensitivitySchema.parse(await c.req.json());
     const current = await program.getValuation(readActor(c), valuationId);
-    return c.json(await program.sensitivity(readActor(c), { base: current.base, shocks: body.shocks }));
+    return c.json(
+      await program.sensitivity(readActor(c), { base: current.base, shocks: body.shocks }),
+    );
   });
   app.post("/v1/report-packs", async (c) => {
     const body = reportPackSchema.parse(await c.req.json());

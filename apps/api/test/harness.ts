@@ -8,7 +8,14 @@ export type TestApp = ReturnType<typeof createApp>;
 
 export const TEST_PASSWORD = "correct horse battery staple";
 
-export const TEST_ACTORS = ["platform-admin", "owner-1", "owner-2", "controller-1", "viewer-1", "auditor-1"] as const;
+export const TEST_ACTORS = [
+  "platform-admin",
+  "owner-1",
+  "owner-2",
+  "controller-1",
+  "viewer-1",
+  "auditor-1",
+] as const;
 
 export function testAuth(overrides: Partial<AuthConfig> = {}): AuthConfig {
   return {
@@ -59,7 +66,10 @@ class SessionClient {
   async register(...actors: string[]): Promise<void> {
     for (const actor of actors) {
       if (this.registered.has(actor)) continue;
-      const response = await this.app.request("/auth/signup", json("POST", { actorId: actor, password: TEST_PASSWORD }));
+      const response = await this.app.request(
+        "/auth/signup",
+        json("POST", { actorId: actor, password: TEST_PASSWORD }),
+      );
       if (response.status !== 201 && response.status !== 409) {
         throw new Error(`signup for ${actor} returned ${response.status}`);
       }
@@ -68,18 +78,32 @@ class SessionClient {
   }
 
   /** Returns the signed session, or the failed /auth response when sign-in or tenant selection is refused. */
-  async session(actor: string, region: string, tenant: string | null): Promise<SignedSession | Response> {
+  async session(
+    actor: string,
+    region: string,
+    tenant: string | null,
+  ): Promise<SignedSession | Response> {
     const key = `${actor}|${region}|${tenant ?? ""}`;
     const cached = this.sessions.get(key);
     if (cached) return cached;
     await this.register(actor);
-    const login = await this.app.request("/auth/login", json("POST", { actorId: actor, password: TEST_PASSWORD, region }));
+    const login = await this.app.request(
+      "/auth/login",
+      json("POST", { actorId: actor, password: TEST_PASSWORD, region }),
+    );
     if (login.status !== 200) return login;
-    const session = { cookie: cookieFrom(login), csrfToken: ((await login.json()) as { csrfToken: string }).csrfToken };
+    const session = {
+      cookie: cookieFrom(login),
+      csrfToken: ((await login.json()) as { csrfToken: string }).csrfToken,
+    };
     if (tenant) {
       const selected = await this.app.request("/auth/session/tenant", {
         ...json("POST", { tenantId: tenant }),
-        headers: { "content-type": "application/json", cookie: session.cookie, "x-csrf-token": session.csrfToken },
+        headers: {
+          "content-type": "application/json",
+          cookie: session.cookie,
+          "x-csrf-token": session.csrfToken,
+        },
       });
       if (selected.status !== 200) return selected;
     }
@@ -90,7 +114,11 @@ class SessionClient {
   async call(method: string, path: string, options: CallOptions): Promise<Response> {
     const headers = new Headers();
     if (options.actor) {
-      const session = await this.session(options.actor, options.region ?? "us-east-1", options.tenant ?? null);
+      const session = await this.session(
+        options.actor,
+        options.region ?? "us-east-1",
+        options.tenant ?? null,
+      );
       if (session instanceof Response) return session;
       headers.set("cookie", session.cookie);
       headers.set("x-csrf-token", session.csrfToken);
@@ -116,7 +144,12 @@ export function sessions(app: TestApp): SessionClient {
   return client;
 }
 
-export function call(app: TestApp, method: string, path: string, options: CallOptions): Promise<Response> {
+export function call(
+  app: TestApp,
+  method: string,
+  path: string,
+  options: CallOptions,
+): Promise<Response> {
   return sessions(app).call(method, path, options);
 }
 

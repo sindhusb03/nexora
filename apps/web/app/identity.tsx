@@ -110,7 +110,12 @@ export function useIdentity(): Identity {
   );
 
   const signOut = useCallback(async () => {
-    await apiRequest({ method: "POST", path: "/auth/logout", headers: csrfHeaders(), decode: acceptAny });
+    await apiRequest({
+      method: "POST",
+      path: "/auth/logout",
+      headers: csrfHeaders(),
+      decode: acceptAny,
+    });
     signedOut(null);
   }, [signedOut]);
 
@@ -119,7 +124,13 @@ export function useIdentity(): Identity {
 
 /** Low-level tenant switch for multi-step flows that must finish before the screen re-renders. */
 export function selectSessionTenant(tenantId: string | null): Promise<ApiResult<SignedSession>> {
-  return apiRequest({ method: "POST", path: "/auth/session/tenant", body: { tenantId }, headers: csrfHeaders(), decode: decodeSignedSession });
+  return apiRequest({
+    method: "POST",
+    path: "/auth/session/tenant",
+    body: { tenantId },
+    headers: csrfHeaders(),
+    decode: decodeSignedSession,
+  });
 }
 
 function fetchSession(): Promise<ApiResult<SignedSession>> {
@@ -157,7 +168,13 @@ export function IdentityGate({
   return <>{children(state.session, state.signed)}</>;
 }
 
-export function SignInPanel({ notice, onSignedIn }: { notice: ApiError | null; onSignedIn: (signed: SignedSession) => void }) {
+export function SignInPanel({
+  notice,
+  onSignedIn,
+}: {
+  notice: ApiError | null;
+  onSignedIn: (signed: SignedSession) => void;
+}) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [config, setConfig] = useState<AuthConfigView | null>(null);
   const [actorId, setActorId] = useState("");
@@ -167,11 +184,13 @@ export function SignInPanel({ notice, onSignedIn }: { notice: ApiError | null; o
   const [error, setError] = useState<{ error: ApiError } | null>(null);
 
   useEffect(() => {
-    void apiRequest({ method: "GET", path: "/auth/config", decode: decodeAuthConfig }).then((result) => {
-      if (!result.ok) return;
-      setConfig(result.data);
-      if (result.data.pinnedRegion) setRegion(result.data.pinnedRegion);
-    });
+    void apiRequest({ method: "GET", path: "/auth/config", decode: decodeAuthConfig }).then(
+      (result) => {
+        if (!result.ok) return;
+        setConfig(result.data);
+        if (result.data.pinnedRegion) setRegion(result.data.pinnedRegion);
+      },
+    );
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -179,7 +198,12 @@ export function SignInPanel({ notice, onSignedIn }: { notice: ApiError | null; o
     setPending(true);
     setError(null);
     if (mode === "signup") {
-      const created = await apiRequest({ method: "POST", path: "/auth/signup", body: { actorId, password }, decode: acceptAny });
+      const created = await apiRequest({
+        method: "POST",
+        path: "/auth/signup",
+        body: { actorId, password },
+        decode: acceptAny,
+      });
       if (!created.ok) {
         setError({ error: created.error });
         setPending(false);
@@ -208,16 +232,25 @@ export function SignInPanel({ notice, onSignedIn }: { notice: ApiError | null; o
         <div>
           <h1>{signup ? "Create an account" : "Sign in"}</h1>
           <p>
-            The kernel takes your actor, tenant, and region from this signed session. Requests without a session are
-            refused.
+            The kernel takes your actor, tenant, and region from this signed session. Requests
+            without a session are refused.
           </p>
         </div>
       </header>
       {notice ? <ErrorNotice error={notice} httpStatus={null} /> : null}
-      <form className="form-card" onSubmit={(event) => void submit(event)} aria-label={signup ? "Create account" : "Sign in"}>
+      <form
+        className="form-card"
+        onSubmit={(event) => void submit(event)}
+        aria-label={signup ? "Create account" : "Sign in"}
+      >
         <div className="form-row">
           <Field label="Actor ID">
-            <Input value={actorId} onChange={(event) => setActorId(event.target.value)} autoComplete="username" required />
+            <Input
+              value={actorId}
+              onChange={(event) => setActorId(event.target.value)}
+              autoComplete="username"
+              required
+            />
           </Field>
           <Field label="Password">
             <Input
@@ -246,7 +279,11 @@ export function SignInPanel({ notice, onSignedIn }: { notice: ApiError | null; o
         {config?.signupAllowed ? (
           <p className="muted small">
             {signup ? "Already registered?" : "New on this deployment?"}{" "}
-            <Button type="button" variant="ghost" onClick={() => setMode(signup ? "login" : "signup")}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setMode(signup ? "login" : "signup")}
+            >
               {signup ? "Sign in instead" : "Create an account"}
             </Button>
           </p>
@@ -281,11 +318,17 @@ export function IdentityDrawer({ identity }: { identity: Identity }) {
   }
 
   return (
-    <form className="session-bar" onSubmit={(event) => void open(event)} aria-label="Signed session">
+    <form
+      className="session-bar"
+      onSubmit={(event) => void open(event)}
+      aria-label="Signed session"
+    >
       <span className="session-tag">Signed in</span>
       <span>
         <strong>{signed.actorId}</strong> <span className="muted">· {signed.region}</span>
-        {signed.roles.length > 0 ? <span className="muted"> · {signed.roles.join(", ")}</span> : null}
+        {signed.roles.length > 0 ? (
+          <span className="muted"> · {signed.roles.join(", ")}</span>
+        ) : null}
         {signed.platformAdmin ? <span className="muted"> · platform admin</span> : null}
       </span>
       <Field label="Tenant ID">
@@ -296,15 +339,30 @@ export function IdentityDrawer({ identity }: { identity: Identity }) {
           className="input-wide"
         />
       </Field>
-      <Button type="submit" disabled={pending || tenantId.trim().length === 0 || tenantId.trim() === (signed.tenantId ?? "")}>
+      <Button
+        type="submit"
+        disabled={
+          pending || tenantId.trim().length === 0 || tenantId.trim() === (signed.tenantId ?? "")
+        }
+      >
         Open tenant
       </Button>
       {signed.tenantId ? (
-        <Button type="button" variant="outline" disabled={pending} onClick={() => void identity.selectTenant("")}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pending}
+          onClick={() => void identity.selectTenant("")}
+        >
           Leave tenant
         </Button>
       ) : null}
-      <Button type="button" variant="outline" disabled={pending} onClick={() => void identity.signOut()}>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={pending}
+        onClick={() => void identity.signOut()}
+      >
         Sign out
       </Button>
       {error ? <ErrorNotice error={error.error} httpStatus={error.status} /> : null}
@@ -321,8 +379,16 @@ function decodeSignedSession(value: unknown): SignedSession | null {
   const actorId = str(value, "actorId");
   const region = str(value, "region");
   const csrfToken = str(value, "csrfToken");
-  if (actorId === null || region === null || csrfToken === null || typeof value.platformAdmin !== "boolean") return null;
-  const roles = Array.isArray(value.roles) ? value.roles.filter((role): role is string => typeof role === "string") : [];
+  if (
+    actorId === null ||
+    region === null ||
+    csrfToken === null ||
+    typeof value.platformAdmin !== "boolean"
+  )
+    return null;
+  const roles = Array.isArray(value.roles)
+    ? value.roles.filter((role): role is string => typeof role === "string")
+    : [];
   return {
     actorId,
     tenantId: str(value, "tenantId"),

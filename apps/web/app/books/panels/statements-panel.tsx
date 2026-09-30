@@ -60,7 +60,9 @@ export function StatementsPanel({
                 <dt>RE close</dt>
                 <dd>
                   <StatusBadge status={data.retainedEarnings.close} />
-                  {data.retainedEarnings.close !== "derived" ? <span className="muted small"> Expected “derived”.</span> : null}
+                  {data.retainedEarnings.close !== "derived" ? (
+                    <span className="muted small"> Expected “derived”.</span>
+                  ) : null}
                 </dd>
               </div>
               <div>
@@ -70,7 +72,10 @@ export function StatementsPanel({
               <div>
                 <dt>Scope</dt>
                 <dd>
-                  {entity.legalName} · <span className="figure">{period.startDate} → {period.endDate}</span>{" "}
+                  {entity.legalName} ·{" "}
+                  <span className="figure">
+                    {period.startDate} → {period.endDate}
+                  </span>{" "}
                   <StatusBadge status={period.status} />
                 </dd>
               </div>
@@ -113,8 +118,8 @@ export function StatementsPanel({
               />
             </div>
             <p className="muted small" style={{ margin: 0 }}>
-              Figures are displayed exactly as returned by the kernel. The same input hash and engine version always
-              reproduce the same statements.
+              Figures are displayed exactly as returned by the kernel. The same input hash and
+              engine version always reproduce the same statements.
             </p>
           </>
         )}

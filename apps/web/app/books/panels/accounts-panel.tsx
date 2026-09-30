@@ -72,7 +72,10 @@ export function AccountsPanel({
       <ResourceView resource={accounts} label="accounts">
         {(rows) =>
           rows.length === 0 ? (
-            <p className="empty">No accounts yet. Statements need at least a cash account and a retained earnings account.</p>
+            <p className="empty">
+              No accounts yet. Statements need at least a cash account and a retained earnings
+              account.
+            </p>
           ) : (
             <table className="grid">
               <thead>
@@ -108,7 +111,12 @@ export function AccountsPanel({
         <h3>New account</h3>
         <div className="form-row">
           <Field label="Code">
-            <Input value={code} onChange={(event) => setCode(event.target.value)} maxLength={32} className="input-short" />
+            <Input
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              maxLength={32}
+              className="input-short"
+            />
           </Field>
           <Field label="Name">
             <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
@@ -123,7 +131,10 @@ export function AccountsPanel({
             </select>
           </Field>
           <Field label="Cash flow">
-            <select value={cashFlow} onChange={(event) => setCashFlow(parseCashFlow(event.target.value))}>
+            <select
+              value={cashFlow}
+              onChange={(event) => setCashFlow(parseCashFlow(event.target.value))}
+            >
               {CASH_FLOWS.map((value) => (
                 <option key={value} value={value}>
                   {value}
@@ -144,7 +155,9 @@ export function AccountsPanel({
           </Button>
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

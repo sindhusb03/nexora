@@ -1,4 +1,10 @@
-import { KernelError, ROLES, type CashFlowClass, type ReportClass, type Role } from "@nexora/kernel";
+import {
+  KernelError,
+  ROLES,
+  type CashFlowClass,
+  type ReportClass,
+  type Role,
+} from "@nexora/kernel";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
@@ -37,7 +43,12 @@ const REPORTS = ["asset", "liability", "equity", "revenue", "expense"] as const;
 const CASH_FLOWS = ["cash", "cfo", "cfi", "cff", "non_cash", "distribution"] as const;
 
 export function createLedgerStore(db: AppDatabase): LedgerStore {
-  const core: Omit<LedgerStore, keyof ReturnType<typeof createProgramStore> | keyof IdentityStore | keyof ReturnType<typeof createWorkspaceStore>> = {
+  const core: Omit<
+    LedgerStore,
+    | keyof ReturnType<typeof createProgramStore>
+    | keyof IdentityStore
+    | keyof ReturnType<typeof createWorkspaceStore>
+  > = {
     createTenant(input) {
       return tenantTx(db, input.tenant.tenantId, async (tx) => {
         await tx.insert(tenant).values({
@@ -205,7 +216,9 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
         const rows = await tx
           .select()
           .from(accountingPeriod)
-          .where(and(eq(accountingPeriod.tenantId, tenantId), eq(accountingPeriod.periodId, periodId)))
+          .where(
+            and(eq(accountingPeriod.tenantId, tenantId), eq(accountingPeriod.periodId, periodId)),
+          )
           .limit(1);
         const row = rows[0];
         return row ? mapPeriod(row) : null;
@@ -217,7 +230,12 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
         const rows = await tx
           .select()
           .from(accountingPeriod)
-          .where(and(eq(accountingPeriod.tenantId, tenantId), eq(accountingPeriod.legalEntityId, entityId)));
+          .where(
+            and(
+              eq(accountingPeriod.tenantId, tenantId),
+              eq(accountingPeriod.legalEntityId, entityId),
+            ),
+          );
         return rows.map(mapPeriod);
       });
     },
@@ -245,15 +263,21 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
     },
 
     findJournalByIdempotency(tenantId, idempotencyKey) {
-      return tenantTx(db, tenantId, (tx) => findJournal(tx, tenantId, eq(journalEntry.idempotencyKey, idempotencyKey)));
+      return tenantTx(db, tenantId, (tx) =>
+        findJournal(tx, tenantId, eq(journalEntry.idempotencyKey, idempotencyKey)),
+      );
     },
 
     findReversal(tenantId, journalId) {
-      return tenantTx(db, tenantId, (tx) => findJournal(tx, tenantId, eq(journalEntry.reversesJournalId, journalId)));
+      return tenantTx(db, tenantId, (tx) =>
+        findJournal(tx, tenantId, eq(journalEntry.reversesJournalId, journalId)),
+      );
     },
 
     getJournal(tenantId, journalId) {
-      return tenantTx(db, tenantId, (tx) => findJournal(tx, tenantId, eq(journalEntry.journalId, journalId)));
+      return tenantTx(db, tenantId, (tx) =>
+        findJournal(tx, tenantId, eq(journalEntry.journalId, journalId)),
+      );
     },
 
     listJournals(tenantId, entityId, periodId) {
@@ -279,7 +303,9 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           const lines = await tx
             .select()
             .from(journalLine)
-            .where(and(eq(journalLine.tenantId, tenantId), eq(journalLine.journalId, row.journalId)))
+            .where(
+              and(eq(journalLine.tenantId, tenantId), eq(journalLine.journalId, row.journalId)),
+            )
             .orderBy(asc(journalLine.lineNo));
           journals.push({
             journalId: row.journalId,
@@ -362,7 +388,11 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           aggregateId: input.journal.journalId,
           payload: input.audit.payload,
         });
-        const stored = await findJournal(tx, input.journal.tenantId, eq(journalEntry.journalId, input.journal.journalId));
+        const stored = await findJournal(
+          tx,
+          input.journal.tenantId,
+          eq(journalEntry.journalId, input.journal.journalId),
+        );
         if (!stored) {
           throw new KernelError("TENANT_ISOLATION", "Posted journal was not visible to its tenant");
         }
@@ -481,10 +511,19 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
       });
     },
   };
-  return { ...core, ...createProgramStore(db), ...createIdentityStore(db), ...createWorkspaceStore(db) };
+  return {
+    ...core,
+    ...createProgramStore(db),
+    ...createIdentityStore(db),
+    ...createWorkspaceStore(db),
+  };
 }
 
-export async function tenantTx<T>(db: AppDatabase, tenantId: string, fn: (tx: AppDatabase) => Promise<T>): Promise<T> {
+export async function tenantTx<T>(
+  db: AppDatabase,
+  tenantId: string,
+  fn: (tx: AppDatabase) => Promise<T>,
+): Promise<T> {
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));
@@ -496,7 +535,11 @@ export async function tenantTx<T>(db: AppDatabase, tenantId: string, fn: (tx: Ap
   }
 }
 
-export async function writeAudit(tx: AppDatabase, tenantId: string, audit: AuditWrite): Promise<void> {
+export async function writeAudit(
+  tx: AppDatabase,
+  tenantId: string,
+  audit: AuditWrite,
+): Promise<void> {
   await tx.insert(auditEvent).values({
     eventId: audit.eventId,
     eventType: audit.eventType,
@@ -545,14 +588,12 @@ async function findJournal(
     correlationId: row.correlationId,
     version: row.version,
     postedAt: row.postedAt,
-    lines: lines.map(
-      (line): StoredJournalLine => ({
-        accountId: line.accountId,
-        lineNo: line.lineNo,
-        debitMinor: minor(line.debitMinor),
-        creditMinor: minor(line.creditMinor),
-      }),
-    ),
+    lines: lines.map((line): StoredJournalLine => ({
+      accountId: line.accountId,
+      lineNo: line.lineNo,
+      debitMinor: minor(line.debitMinor),
+      creditMinor: minor(line.creditMinor),
+    })),
   };
 }
 

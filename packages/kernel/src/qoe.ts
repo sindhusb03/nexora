@@ -38,7 +38,11 @@ export function buildQoeBridge(input: {
   const reported = decimal(input.reported, "reported");
   let total = new AnalyticalDecimal(0);
   const steps = input.adjustments.map((adjustment) => {
-    if (adjustment.adjustmentId.length === 0 || adjustment.sourceRowId.length === 0 || adjustment.actorId.length === 0) {
+    if (
+      adjustment.adjustmentId.length === 0 ||
+      adjustment.sourceRowId.length === 0 ||
+      adjustment.actorId.length === 0
+    ) {
       throw new KernelError("FIN_NOT_FOUND", "QoE adjustment requires a source row and an actor");
     }
     const amount = decimal(adjustment.amount, adjustment.adjustmentId);

@@ -56,7 +56,9 @@ export function readWorkbook(bytes: Uint8Array): readonly Worksheet[] {
     const target = attr(rel[1] ?? "", "Target");
     if (id && target) targets.set(id, target.startsWith("/") ? target.slice(1) : `xl/${target}`);
   }
-  const strings = files["xl/sharedStrings.xml"] ? readSharedStrings(strFromU8(files["xl/sharedStrings.xml"])) : [];
+  const strings = files["xl/sharedStrings.xml"]
+    ? readSharedStrings(strFromU8(files["xl/sharedStrings.xml"]))
+    : [];
 
   const sheets: Worksheet[] = [];
   for (const sheet of strFromU8(workbookXml).matchAll(/<sheet\b([^>]*?)\/?>/g)) {
@@ -144,7 +146,11 @@ function decodeXml(text: string): string {
     if (entity === "gt") return ">";
     if (entity === "quot") return '"';
     if (entity === "apos") return "'";
-    const code = entity.startsWith("#x") ? Number.parseInt(entity.slice(2), 16) : Number.parseInt(entity.slice(1), 10);
-    return Number.isInteger(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    const code = entity.startsWith("#x")
+      ? Number.parseInt(entity.slice(2), 16)
+      : Number.parseInt(entity.slice(1), 10);
+    return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+      ? String.fromCodePoint(code)
+      : "";
   });
 }

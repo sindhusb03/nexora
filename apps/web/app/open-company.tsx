@@ -32,7 +32,11 @@ export function OpenCompany({
     }
     setFormError(null);
     const tenant = await action.run(() =>
-      provisionTenant(session, { name: legalName, homeRegion: session.region, ownerActorId: session.actorId }),
+      provisionTenant(session, {
+        name: legalName,
+        homeRegion: session.region,
+        ownerActorId: session.actorId,
+      }),
     );
     if (tenant === null) return;
     const opened = await selectTenant(tenant.tenantId, tenant.homeRegion);
@@ -40,7 +44,9 @@ export function OpenCompany({
       setFormError(opened.error.message);
       return;
     }
-    const entity = await action.run(() => createEntity(opened.data, { legalName, functionalCurrency }));
+    const entity = await action.run(() =>
+      createEntity(opened.data, { legalName, functionalCurrency }),
+    );
     if (entity === null) return;
   }
 
@@ -51,15 +57,24 @@ export function OpenCompany({
           <h1>Open your company</h1>
           <p>
             This creates the company in <code>{session.region || "your region"}</code> and makes{" "}
-            <code>{session.actorId}</code> the owner. You can then upload statements or post journals. The kernel keeps
-            the books.
+            <code>{session.actorId}</code> the owner. You can then upload statements or post
+            journals. The kernel keeps the books.
           </p>
         </div>
       </header>
-      <form className="form-card" onSubmit={(event) => void submit(event)} aria-label="Open your company">
+      <form
+        className="form-card"
+        onSubmit={(event) => void submit(event)}
+        aria-label="Open your company"
+      >
         <div className="form-row">
           <Field label="Company name">
-            <Input value={name} onChange={(event) => setName(event.target.value)} required autoComplete="organization" />
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              autoComplete="organization"
+            />
           </Field>
           <Field label="Currency">
             <Input
@@ -75,7 +90,9 @@ export function OpenCompany({
           </Button>
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

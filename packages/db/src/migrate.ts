@@ -2,7 +2,10 @@ import { loadMigrations, type Migration } from "./migration.js";
 
 /** The subset of PGlite and node-postgres used by the runner. `exec` accepts several statements. */
 export interface SqlExecutor {
-  query<R extends Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }>;
+  query<R extends Record<string, unknown>>(
+    text: string,
+    params?: unknown[],
+  ): Promise<{ rows: R[] }>;
   exec(text: string): Promise<void>;
 }
 
@@ -35,14 +38,20 @@ const BASELINE_MARKERS: Readonly<Record<string, string>> = {
 
 export async function runMigrations(
   db: SqlExecutor,
-  options: { readonly baseline?: boolean; readonly lock?: boolean; readonly apiLoginRole?: string | null } = {},
+  options: {
+    readonly baseline?: boolean;
+    readonly lock?: boolean;
+    readonly apiLoginRole?: string | null;
+  } = {},
 ): Promise<MigrationReport> {
   const migrations = loadMigrations();
   if (options.lock) {
     await db.query("SELECT pg_advisory_lock($1)", [LOCK_KEY]);
   }
   try {
-    const baselined = (await tableExists(db, "schema_migrations")) ? [] : await baseline(db, migrations, options.baseline ?? false);
+    const baselined = (await tableExists(db, "schema_migrations"))
+      ? []
+      : await baseline(db, migrations, options.baseline ?? false);
     const applied = await appliedRows(db);
     assertKnown(migrations, applied);
 
@@ -61,7 +70,10 @@ export async function runMigrations(
       }
       await inTransaction(db, async () => {
         await db.exec(migration.sql);
-        await db.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [migration.name, migration.checksum]);
+        await db.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [
+          migration.name,
+          migration.checksum,
+        ]);
       });
       newlyApplied.push(migration.name);
     }
@@ -70,7 +82,11 @@ export async function runMigrations(
     if (options.apiLoginRole) {
       await grantApiLogin(db, options.apiLoginRole);
     }
-    return { applied: newlyApplied, skipped: skipped.filter((name) => !baselined.includes(name)), baselined };
+    return {
+      applied: newlyApplied,
+      skipped: skipped.filter((name) => !baselined.includes(name)),
+      baselined,
+    };
   } finally {
     if (options.lock) {
       await db.query("SELECT pg_advisory_unlock($1)", [LOCK_KEY]);
@@ -86,15 +102,24 @@ export async function migrationStatus(db: SqlExecutor): Promise<MigrationStatus>
   const applied = await appliedRows(db);
   const known = new Set(migrations.map((migration) => migration.name));
   return {
-    pending: migrations.filter((migration) => !applied.has(migration.name)).map((migration) => migration.name),
+    pending: migrations
+      .filter((migration) => !applied.has(migration.name))
+      .map((migration) => migration.name),
     drifted: migrations
-      .filter((migration) => applied.has(migration.name) && applied.get(migration.name) !== migration.checksum)
+      .filter(
+        (migration) =>
+          applied.has(migration.name) && applied.get(migration.name) !== migration.checksum,
+      )
       .map((migration) => migration.name),
     unknown: [...applied.keys()].filter((name) => !known.has(name)),
   };
 }
 
-async function baseline(db: SqlExecutor, migrations: readonly Migration[], allowed: boolean): Promise<string[]> {
+async function baseline(
+  db: SqlExecutor,
+  migrations: readonly Migration[],
+  allowed: boolean,
+): Promise<string[]> {
   const present: Migration[] = [];
   for (const migration of migrations) {
     const marker = BASELINE_MARKERS[migration.name];
@@ -116,13 +141,18 @@ async function baseline(db: SqlExecutor, migrations: readonly Migration[], allow
      )`,
   );
   for (const migration of present) {
-    await db.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [migration.name, migration.checksum]);
+    await db.query("INSERT INTO schema_migrations (name, checksum) VALUES ($1, $2)", [
+      migration.name,
+      migration.checksum,
+    ]);
   }
   return present.map((migration) => migration.name);
 }
 
 async function appliedRows(db: SqlExecutor): Promise<Map<string, string>> {
-  const result = await db.query<{ name: string; checksum: string }>("SELECT name, checksum FROM schema_migrations ORDER BY name");
+  const result = await db.query<{ name: string; checksum: string }>(
+    "SELECT name, checksum FROM schema_migrations ORDER BY name",
+  );
   return new Map(result.rows.map((row) => [row.name, row.checksum]));
 }
 
@@ -130,12 +160,17 @@ function assertKnown(migrations: readonly Migration[], applied: ReadonlyMap<stri
   const known = new Set(migrations.map((migration) => migration.name));
   const unknown = [...applied.keys()].filter((name) => !known.has(name));
   if (unknown.length > 0) {
-    throw new MigrationError(`The database has migrations this build does not know: ${unknown.join(", ")}. Deploy the matching build.`);
+    throw new MigrationError(
+      `The database has migrations this build does not know: ${unknown.join(", ")}. Deploy the matching build.`,
+    );
   }
 }
 
 async function tableExists(db: SqlExecutor, table: string): Promise<boolean> {
-  const result = await db.query<{ present: boolean }>("SELECT to_regclass($1) IS NOT NULL AS present", [`public.${table}`]);
+  const result = await db.query<{ present: boolean }>(
+    "SELECT to_regclass($1) IS NOT NULL AS present",
+    [`public.${table}`],
+  );
   return result.rows[0]?.present === true;
 }
 
@@ -160,10 +195,14 @@ async function grantApiLogin(db: SqlExecutor, role: string): Promise<void> {
   );
   const row = result.rows[0];
   if (!row) {
-    throw new MigrationError(`Login role ${role} does not exist. Create it first (see docs/operations.md).`);
+    throw new MigrationError(
+      `Login role ${role} does not exist. Create it first (see docs/operations.md).`,
+    );
   }
   if (row.rolsuper || row.rolbypassrls) {
-    throw new MigrationError(`Login role ${role} is a superuser or bypasses RLS. The API role must be subject to row-level security.`);
+    throw new MigrationError(
+      `Login role ${role} is a superuser or bypasses RLS. The API role must be subject to row-level security.`,
+    );
   }
   await db.exec(`GRANT nexora_app TO ${role}`);
 }

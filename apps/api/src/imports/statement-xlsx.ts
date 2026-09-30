@@ -15,7 +15,12 @@ export interface StatementLine {
   readonly sheetRow: number;
   readonly label: string;
   readonly kind: "heading" | "line" | "total";
-  readonly values: readonly { readonly period: string; readonly amount: string; readonly raw: string; readonly formula: boolean }[];
+  readonly values: readonly {
+    readonly period: string;
+    readonly amount: string;
+    readonly raw: string;
+    readonly formula: boolean;
+  }[];
 }
 
 export interface StatementSheet {
@@ -37,7 +42,10 @@ const SERIAL_MIN = 20_000;
 const SERIAL_MAX = 80_000;
 const MAX_HEADER_SCAN_ROWS = 25;
 
-export function parseStatementWorkbook(sheets: readonly Worksheet[], fileName: string): StatementWorkbook {
+export function parseStatementWorkbook(
+  sheets: readonly Worksheet[],
+  fileName: string,
+): StatementWorkbook {
   const parsed: StatementSheet[] = [];
   const skippedSheets: { sheetName: string; reason: string }[] = [];
   for (const sheet of sheets) {
@@ -48,7 +56,10 @@ export function parseStatementWorkbook(sheets: readonly Worksheet[], fileName: s
   return { sheets: parsed, skippedSheets };
 }
 
-export function parseStatementSheet(sheet: Worksheet, fileName: string): StatementSheet | { reason: string } {
+export function parseStatementSheet(
+  sheet: Worksheet,
+  fileName: string,
+): StatementSheet | { reason: string } {
   const rows = new Map<number, SheetCell[]>();
   for (const cell of sheet.cells) {
     const list = rows.get(cell.row) ?? [];
@@ -66,14 +77,20 @@ export function parseStatementSheet(sheet: Worksheet, fileName: string): Stateme
     const read = candidates.map(periodLabel);
     if (read.length >= 2 && read.every((label) => label !== null)) {
       headerRow = rowNo;
-      periods = candidates.map((cell, index) => ({ col: cell.col, label: read[index] ?? "", derived: false }));
+      periods = candidates.map((cell, index) => ({
+        col: cell.col,
+        label: read[index] ?? "",
+        derived: false,
+      }));
       break;
     }
   }
   if (headerRow === null) {
     periods = unlabeledPeriods(rows);
     if (periods.length === 0 || classify(fileName, sheet.name, []) === null) {
-      return { reason: "No header row of period dates or period labels was found in the first 25 rows" };
+      return {
+        reason: "No header row of period dates or period labels was found in the first 25 rows",
+      };
     }
     headerRow = 0;
   }
@@ -118,12 +135,24 @@ export function parseStatementSheet(sheet: Worksheet, fileName: string): Stateme
   }
   const statementType = classify(fileName, sheet.name, lines);
   if (statementType === null) {
-    return { reason: "Could not tell whether this sheet is an income statement or a balance sheet" };
+    return {
+      reason: "Could not tell whether this sheet is an income statement or a balance sheet",
+    };
   }
-  return { sheetName: sheet.name, statementType, periods: markDerived(periods, lines), lines, skippedRows, skippedCells };
+  return {
+    sheetName: sheet.name,
+    statementType,
+    periods: markDerived(periods, lines),
+    lines,
+    skippedRows,
+    skippedCells,
+  };
 }
 
-function markDerived(periods: readonly StatementPeriod[], lines: readonly StatementLine[]): StatementPeriod[] {
+function markDerived(
+  periods: readonly StatementPeriod[],
+  lines: readonly StatementLine[],
+): StatementPeriod[] {
   const allFormula = new Map<string, boolean>();
   for (const line of lines) {
     if (line.kind !== "line") continue;
@@ -132,7 +161,10 @@ function markDerived(periods: readonly StatementPeriod[], lines: readonly Statem
     }
   }
   const typedColumns = periods.filter((period) => allFormula.get(period.label) === false).length;
-  return periods.map((period) => ({ ...period, derived: typedColumns > 0 && allFormula.get(period.label) === true }));
+  return periods.map((period) => ({
+    ...period,
+    derived: typedColumns > 0 && allFormula.get(period.label) === true,
+  }));
 }
 
 function unlabeledPeriods(rows: ReadonlyMap<number, SheetCell[]>): StatementPeriod[] {
@@ -142,7 +174,9 @@ function unlabeledPeriods(rows: ReadonlyMap<number, SheetCell[]>): StatementPeri
       if (cell.col >= 2 && cell.kind === "number") cols.add(cell.col);
     }
   }
-  return [...cols].sort((a, b) => a - b).map((col) => ({ col, label: `Column ${col}`, derived: false }));
+  return [...cols]
+    .sort((a, b) => a - b)
+    .map((col) => ({ col, label: `Column ${col}`, derived: false }));
 }
 
 function periodLabel(cell: SheetCell): string | null {
@@ -158,7 +192,13 @@ function periodLabel(cell: SheetCell): string | null {
     if (/^(this year|last year|ytd)$/i.test(text)) return text;
     if (/^(19|20)\d{2}$/.test(text)) return text;
     if (/^[A-Za-z]+ \d{1,2}, \d{4}$/.test(text)) return text;
-    if (/^(FY|Q[1-4]|H[12]|[A-Za-z]{3,9})?[\s\-/]*('?\d{2}|\d{4})([\s\-/]*(Q[1-4]|[A-Za-z]{3,9}|\d{1,2}))?$/i.test(text) && /\d/.test(text)) return text;
+    if (
+      /^(FY|Q[1-4]|H[12]|[A-Za-z]{3,9})?[\s\-/]*('?\d{2}|\d{4})([\s\-/]*(Q[1-4]|[A-Za-z]{3,9}|\d{1,2}))?$/i.test(
+        text,
+      ) &&
+      /\d/.test(text)
+    )
+      return text;
     if (/^total$/i.test(text)) return text;
   }
   return null;
@@ -169,7 +209,11 @@ const BALANCE_NAME = /balance|\bBS\b|financial position/i;
 const INCOME_LABELS = /gross profit|net income|total income|revenue|cost of goods|net ordinary/i;
 const BALANCE_LABELS = /total assets|total liabilities|\bequity\b|current assets/i;
 
-function classify(fileName: string, sheetName: string, lines: readonly StatementLine[]): StatementType | null {
+function classify(
+  fileName: string,
+  sheetName: string,
+  lines: readonly StatementLine[],
+): StatementType | null {
   for (const name of [sheetName, fileName]) {
     const income = INCOME_NAME.test(name);
     const balance = BALANCE_NAME.test(name);

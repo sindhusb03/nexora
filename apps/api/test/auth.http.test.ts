@@ -51,7 +51,11 @@ describe("signed sessions", () => {
 
     const forgedProvision = await app.request("/v1/tenants", {
       ...json("POST", { name: "Forged", homeRegion: "us-east-1", ownerActorId: "owner-1" }),
-      headers: { "content-type": "application/json", "x-actor-id": "platform-admin", "x-region": "us-east-1" },
+      headers: {
+        "content-type": "application/json",
+        "x-actor-id": "platform-admin",
+        "x-region": "us-east-1",
+      },
     });
     expect(forgedProvision.status).toBe(401);
   });
@@ -92,9 +96,14 @@ describe("signed sessions", () => {
       tenant: tenantId,
       body: { actorId: "auditor-1", role: "auditor" },
     });
-    const audit = await sessions(app).call("GET", "/v1/audit", { actor: "auditor-1", tenant: tenantId });
+    const audit = await sessions(app).call("GET", "/v1/audit", {
+      actor: "auditor-1",
+      tenant: tenantId,
+    });
     expect(audit.status).toBe(200);
-    const events = ((await audit.json()) as { events: Array<{ eventType: string; actorId: string }> }).events;
+    const events = (
+      (await audit.json()) as { events: Array<{ eventType: string; actorId: string }> }
+    ).events;
     const entityEvents = events.filter((event) => event.eventType === "EntityCreated");
     expect(entityEvents.length).toBeGreaterThan(0);
     for (const event of entityEvents) {
@@ -116,7 +125,11 @@ describe("signed sessions", () => {
 
     const wrong = await app.request("/v1/entities", {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: session.cookie, "x-csrf-token": "not-the-token" },
+      headers: {
+        "content-type": "application/json",
+        cookie: session.cookie,
+        "x-csrf-token": "not-the-token",
+      },
       body,
     });
     expect(wrong.status).toBe(403);
@@ -139,17 +152,29 @@ describe("signed sessions", () => {
   });
 
   it("refuses bad credentials without revealing which part was wrong", async () => {
-    const wrongPassword = await app.request("/auth/login", json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }));
-    const unknownActor = await app.request("/auth/login", json("POST", { actorId: "nobody-here", password: TEST_PASSWORD, region: "us-east-1" }));
+    const wrongPassword = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }),
+    );
+    const unknownActor = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "nobody-here", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
     expect(wrongPassword.status).toBe(401);
     expect(unknownActor.status).toBe(401);
     expect(await errorCode(wrongPassword)).toBe("AUTH_INVALID_CREDENTIALS");
     expect(await errorCode(unknownActor)).toBe("AUTH_INVALID_CREDENTIALS");
     expect(wrongPassword.headers.get("set-cookie")).toBeNull();
 
-    const weak = await app.request("/auth/signup", json("POST", { actorId: "weak-user", password: "short" }));
+    const weak = await app.request(
+      "/auth/signup",
+      json("POST", { actorId: "weak-user", password: "short" }),
+    );
     expect(weak.status).toBe(400);
-    const taken = await app.request("/auth/signup", json("POST", { actorId: "owner-1", password: TEST_PASSWORD }));
+    const taken = await app.request(
+      "/auth/signup",
+      json("POST", { actorId: "owner-1", password: TEST_PASSWORD }),
+    );
     expect(taken.status).toBe(409);
   });
 
@@ -183,14 +208,20 @@ describe("signed sessions", () => {
   });
 
   it("revokes the session on logout", async () => {
-    const login = await app.request("/auth/login", json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }));
+    const login = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
     const cookie = cookieFrom(login);
     const { csrfToken } = (await login.json()) as { csrfToken: string };
 
     const refused = await app.request("/auth/logout", { method: "POST", headers: { cookie } });
     expect(refused.status).toBe(403);
 
-    const logout = await app.request("/auth/logout", { method: "POST", headers: { cookie, "x-csrf-token": csrfToken } });
+    const logout = await app.request("/auth/logout", {
+      method: "POST",
+      headers: { cookie, "x-csrf-token": csrfToken },
+    });
     expect(logout.status).toBe(204);
 
     const after = await app.request("/auth/session", { headers: { cookie } });
@@ -200,7 +231,10 @@ describe("signed sessions", () => {
 
   it("ends a session at its expiry", async () => {
     const shortLived = build({ auth: testAuth({ sessionTtlSeconds: 1 }) });
-    const login = await shortLived.request("/auth/login", json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }));
+    const login = await shortLived.request(
+      "/auth/login",
+      json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
     expect(login.status).toBe(200);
     const cookie = cookieFrom(login);
     expect((await shortLived.request("/auth/session", { headers: { cookie } })).status).toBe(200);
@@ -211,10 +245,15 @@ describe("signed sessions", () => {
 
   it("refuses sign-up when the deployment disables it", async () => {
     const closed = build({ auth: testAuth({ allowSignup: false }) });
-    const response = await closed.request("/auth/signup", json("POST", { actorId: "new-user", password: TEST_PASSWORD }));
+    const response = await closed.request(
+      "/auth/signup",
+      json("POST", { actorId: "new-user", password: TEST_PASSWORD }),
+    );
     expect(response.status).toBe(403);
     expect(await errorCode(response)).toBe("AUTH_SIGNUP_DISABLED");
-    const config = (await (await closed.request("/auth/config")).json()) as { signupAllowed: boolean };
+    const config = (await (await closed.request("/auth/config")).json()) as {
+      signupAllowed: boolean;
+    };
     expect(config.signupAllowed).toBe(false);
   });
 
@@ -243,10 +282,17 @@ describe("signed sessions", () => {
 
   it("limits credential attempts and request bodies", async () => {
     const limited = build({
-      http: { ...DEFAULT_HTTP, bodyLimitBytes: 2_048, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 3 } },
+      http: {
+        ...DEFAULT_HTTP,
+        bodyLimitBytes: 2_048,
+        rateLimit: { windowMs: 60_000, max: 100_000, authMax: 3 },
+      },
     });
     const attempt = () =>
-      limited.request("/auth/login", json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }));
+      limited.request(
+        "/auth/login",
+        json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }),
+      );
     expect((await attempt()).status).toBe(401);
     expect((await attempt()).status).toBe(401);
     expect((await attempt()).status).toBe(401);
@@ -273,7 +319,9 @@ describe("signed sessions", () => {
     expect(health.headers.get("referrer-policy")).toBe("no-referrer");
     expect(health.headers.get("content-security-policy") ?? "").toContain("frame-ancestors 'none'");
 
-    const generated = await app.request("/health", { headers: { "x-request-id": "bad id with spaces" } });
+    const generated = await app.request("/health", {
+      headers: { "x-request-id": "bad id with spaces" },
+    });
     expect(generated.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
 
     const session = await signedIn(app, "owner-1", tenantId);
@@ -285,7 +333,10 @@ describe("signed sessions", () => {
     expect(((await ready.json()) as { status: string }).status).toBe("ready");
 
     const failing = build({
-      store: { ...store, ping: () => Promise.reject(new Error("connection refused for postgres://user:secret@host")) },
+      store: {
+        ...store,
+        ping: () => Promise.reject(new Error("connection refused for postgres://user:secret@host")),
+      },
     });
     const notReady = await failing.request("/ready");
     expect(notReady.status).toBe(503);
@@ -295,10 +346,16 @@ describe("signed sessions", () => {
   it("never writes passwords, cookies, or CSRF tokens to logs", async () => {
     const lines: string[] = [];
     const logged = build({ logger: jsonLogger((line) => lines.push(line)) });
-    const login = await logged.request("/auth/login", json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }));
+    const login = await logged.request(
+      "/auth/login",
+      json("POST", { actorId: "owner-1", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
     const cookie = cookieFrom(login);
     const { csrfToken } = (await login.json()) as { csrfToken: string };
-    await logged.request("/auth/login", json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }));
+    await logged.request(
+      "/auth/login",
+      json("POST", { actorId: "owner-1", password: "wrong-password-123", region: "us-east-1" }),
+    );
     await logged.request("/v1/entities", {
       method: "POST",
       headers: { "content-type": "application/json", cookie, "x-csrf-token": csrfToken },
@@ -375,7 +432,9 @@ describe("configuration", () => {
     expect(() => loadConfig({ ...production, AUTH_SECRET: "too-short" })).toThrow(ConfigError);
     expect(() => loadConfig({ ...production, NEXORA_DEV_HEADERS: "true" })).toThrow(ConfigError);
     expect(() => loadConfig({ ...production, AUTH_COOKIE_SECURE: "false" })).toThrow(ConfigError);
-    expect(() => loadConfig({ ...production, WEB_ORIGIN: "https://app.example.com/path" })).toThrow(ConfigError);
+    expect(() => loadConfig({ ...production, WEB_ORIGIN: "https://app.example.com/path" })).toThrow(
+      ConfigError,
+    );
   });
 
   it("uses safe production defaults", () => {
@@ -397,7 +456,11 @@ describe("configuration", () => {
   });
 
   it("treats blank values as unset", () => {
-    const config = loadConfig({ ...production, OTEL_EXPORTER_OTLP_ENDPOINT: "", PLATFORM_ADMIN_ACTOR_IDS: " " });
+    const config = loadConfig({
+      ...production,
+      OTEL_EXPORTER_OTLP_ENDPOINT: "",
+      PLATFORM_ADMIN_ACTOR_IDS: " ",
+    });
     expect(config.otelEndpoint).toBeNull();
     expect(config.platformAdminActorIds).toEqual([]);
     expect(() => loadConfig({ ...production, AUTH_SECRET: "" })).toThrow(ConfigError);

@@ -1,0 +1,15 @@
+{
+  "name": "main push",
+  "description": "Block direct updates, force pushes, and deletion of main. History on main stays linear.",
+  "enforcement": "active",
+  "kind": "push_branch",
+  "includedRefNames": ["refs/heads/main"],
+  "excludedRefNames": [],
+  "rules": [
+    { "ruleType": "block_direct_updates" },
+    { "ruleType": "required_linear_history" },
+    { "ruleType": "non_fast_forward" },
+    { "ruleType": "deletion" }
+  ],
+  "bypassActors": []
+}

@@ -6,7 +6,10 @@ import { hashMaterial } from "./hash.js";
  * because they are absent from the allow-list, not because they were stripped
  * after the fact.
  */
-export function stateHash(input: Readonly<Record<string, unknown>>, allow: readonly string[]): string {
+export function stateHash(
+  input: Readonly<Record<string, unknown>>,
+  allow: readonly string[],
+): string {
   if (allow.length === 0) {
     throw new KernelError("FIN_AMOUNT_SCALE", "State hash allow-list is empty");
   }

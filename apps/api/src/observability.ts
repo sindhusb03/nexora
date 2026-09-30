@@ -13,9 +13,19 @@ export interface Logger {
   error(event: string, fields?: LogFields): void;
 }
 
-export function jsonLogger(write: (line: string) => void = (line) => process.stdout.write(`${line}\n`)): Logger {
+export function jsonLogger(
+  write: (line: string) => void = (line) => process.stdout.write(`${line}\n`),
+): Logger {
   const emit = (level: string, event: string, fields?: LogFields) =>
-    write(JSON.stringify({ ts: new Date().toISOString(), level, event, service: "financial-kernel", ...fields }));
+    write(
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        level,
+        event,
+        service: "financial-kernel",
+        ...fields,
+      }),
+    );
   return {
     info: (event, fields) => emit("info", event, fields),
     warn: (event, fields) => emit("warn", event, fields),
@@ -23,7 +33,11 @@ export function jsonLogger(write: (line: string) => void = (line) => process.std
   };
 }
 
-export const silentLogger: Logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+export const silentLogger: Logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};
 
 const INBOUND_REQUEST_ID = /^[A-Za-z0-9._-]{8,128}$/;
 
@@ -59,7 +73,11 @@ export function errorFields(error: unknown): LogFields {
   while (queue.length > 0 && code === null) {
     const current = queue.shift();
     if (typeof current === "object" && current !== null) {
-      if ("code" in current && typeof current.code === "string" && /^[0-9A-Z]{5}$/.test(current.code)) {
+      if (
+        "code" in current &&
+        typeof current.code === "string" &&
+        /^[0-9A-Z]{5}$/.test(current.code)
+      ) {
         code = current.code;
       }
       if ("cause" in current) queue.push(current.cause);
@@ -86,7 +104,9 @@ interface NodeSdkLike {
 export async function startTelemetry(endpoint: string | null, logger: Logger): Promise<Telemetry> {
   const disabled: Telemetry = { exporting: false, shutdown: async () => undefined };
   if (!endpoint) {
-    logger.info("telemetry.disabled", { reason: "OTEL_EXPORTER_OTLP_ENDPOINT is unset; spans stay in-process no-ops" });
+    logger.info("telemetry.disabled", {
+      reason: "OTEL_EXPORTER_OTLP_ENDPOINT is unset; spans stay in-process no-ops",
+    });
     return disabled;
   }
   const sdkModule = "@opentelemetry/sdk-node";
@@ -100,7 +120,10 @@ export async function startTelemetry(endpoint: string | null, logger: Logger): P
       throw new Error("OpenTelemetry modules did not expose NodeSDK and OTLPTraceExporter");
     }
     const exporter = new OTLPTraceExporter({ url: `${endpoint.replace(/\/$/, "")}/v1/traces` });
-    const sdk = new NodeSDK({ serviceName: "financial-kernel", traceExporter: exporter }) as NodeSdkLike;
+    const sdk = new NodeSDK({
+      serviceName: "financial-kernel",
+      traceExporter: exporter,
+    }) as NodeSdkLike;
     sdk.start();
     logger.info("telemetry.started", { endpoint });
     return { exporting: true, shutdown: () => sdk.shutdown() };

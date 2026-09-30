@@ -12,7 +12,13 @@ export async function kernelCall(
   if (options?.idempotencyKey) {
     headers["idempotency-key"] = options.idempotencyKey;
   }
-  return apiRequest({ method, path, body, headers, decode: (value) => (isRecord(value) ? value : null) });
+  return apiRequest({
+    method,
+    path,
+    body,
+    headers,
+    decode: (value) => (isRecord(value) ? value : null),
+  });
 }
 
 export type KernelRecord = Record<string, unknown>;
@@ -31,7 +37,10 @@ export interface StateVersion {
 }
 
 /** Transition responses omit the engine version, so the drafted version's value is carried forward. */
-export function decodeStateVersion(data: KernelRecord, previous: StateVersion | null): StateVersion | null {
+export function decodeStateVersion(
+  data: KernelRecord,
+  previous: StateVersion | null,
+): StateVersion | null {
   const financialStateId = field(data, "financialStateId");
   const status = field(data, "status");
   const stateHash = field(data, "stateHash");
@@ -104,7 +113,11 @@ export interface SensitivityResult {
   readonly calculationRunId: string | null;
   readonly inputHash: string | null;
   readonly engineVersion: string | null;
-  readonly runs: readonly { readonly id: string; readonly enterpriseValue: string; readonly equityValue: string }[];
+  readonly runs: readonly {
+    readonly id: string;
+    readonly enterpriseValue: string;
+    readonly equityValue: string;
+  }[];
 }
 
 export function decodeSensitivity(data: KernelRecord): SensitivityResult | null {
@@ -159,7 +172,14 @@ export function decodeLineage(data: KernelRecord): readonly LineageEdge[] | null
     const toType = field(raw, "toType");
     const toId = field(raw, "toId");
     const relation = field(raw, "relation");
-    if (fromType === null || fromId === null || toType === null || toId === null || relation === null) return null;
+    if (
+      fromType === null ||
+      fromId === null ||
+      toType === null ||
+      toId === null ||
+      relation === null
+    )
+      return null;
     edges.push({ fromType, fromId, toType, toId, relation });
   }
   return edges;

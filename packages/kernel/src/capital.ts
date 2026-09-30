@@ -50,7 +50,11 @@ export interface CapTableHolding {
 
 export function reconcileCapTable(holdings: readonly CapTableHolding[]): {
   readonly fullyDilutedShares: string;
-  readonly ownership: readonly { readonly holderId: string; readonly fullyDilutedShares: string; readonly percent: string }[];
+  readonly ownership: readonly {
+    readonly holderId: string;
+    readonly fullyDilutedShares: string;
+    readonly percent: string;
+  }[];
   readonly engineVersion: string;
   readonly inputHash: string;
 } {
@@ -74,7 +78,9 @@ export function reconcileCapTable(holdings: readonly CapTableHolding[]): {
     const percent =
       index === rows.length - 1
         ? one.minus(assigned)
-        : new AnalyticalDecimal(row.fullyDiluted.toString()).div(new AnalyticalDecimal(total.toString()));
+        : new AnalyticalDecimal(row.fullyDiluted.toString()).div(
+            new AnalyticalDecimal(total.toString()),
+          );
     const fixed = percent.toFixed(ANALYTICAL_SCALE);
     if (index !== rows.length - 1) {
       assigned = assigned.plus(new AnalyticalDecimal(fixed));
@@ -127,15 +133,27 @@ export function lboReturns(input: {
   readonly entryEquity: string;
   readonly exitEquity: string;
   readonly holdYears: string;
-}): { readonly moic: string; readonly irr: string; readonly engineVersion: string; readonly inputHash: string } {
-  if (!PLAIN_DECIMAL.test(input.entryEquity) || !PLAIN_DECIMAL.test(input.exitEquity) || !PLAIN_DECIMAL.test(input.holdYears)) {
+}): {
+  readonly moic: string;
+  readonly irr: string;
+  readonly engineVersion: string;
+  readonly inputHash: string;
+} {
+  if (
+    !PLAIN_DECIMAL.test(input.entryEquity) ||
+    !PLAIN_DECIMAL.test(input.exitEquity) ||
+    !PLAIN_DECIMAL.test(input.holdYears)
+  ) {
     throw new KernelError("VALUATION_INVALID_ASSUMPTION", "LBO returns require decimal strings");
   }
   const entry = new AnalyticalDecimal(input.entryEquity);
   const exit = new AnalyticalDecimal(input.exitEquity);
   const years = new AnalyticalDecimal(input.holdYears);
   if (entry.lte(0) || exit.lt(0) || years.lte(0)) {
-    throw new KernelError("VALUATION_INVALID_ASSUMPTION", "LBO entry equity and hold period must be positive");
+    throw new KernelError(
+      "VALUATION_INVALID_ASSUMPTION",
+      "LBO entry equity and hold period must be positive",
+    );
   }
   const moic = exit.div(entry);
   const irr = moic.pow(new AnalyticalDecimal(1).div(years)).minus(1);
@@ -151,5 +169,8 @@ function sumLines(lines: readonly SourcesUsesLine[], label: string): bigint {
   if (lines.length === 0) {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", `${label} list is empty`);
   }
-  return lines.reduce((sum, line) => sum + parseMinor(assertNonNegativeMinor(line.amountMinor, label).toString()), 0n);
+  return lines.reduce(
+    (sum, line) => sum + parseMinor(assertNonNegativeMinor(line.amountMinor, label).toString()),
+    0n,
+  );
 }

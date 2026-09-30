@@ -42,11 +42,14 @@ const STATE_ALLOW = ["entityId", "periodId", "basis", "currency", "netIncomeMino
 
 export function createProgramService(store: LedgerStore) {
   return {
-    createFinancialState: (actor: ActorContext, input: StateInput) => createFinancialState(store, actor, input),
+    createFinancialState: (actor: ActorContext, input: StateInput) =>
+      createFinancialState(store, actor, input),
     transitionFinancialState: (actor: ActorContext, id: string, to: string) =>
       transitionFinancialState(store, actor, id, to),
-    readFinancialStateVersion: (actor: ActorContext, id: string) => readFinancialStateVersion(store, actor, id),
-    readValuationVersion: (actor: ActorContext, id: string) => readValuationVersion(store, actor, id),
+    readFinancialStateVersion: (actor: ActorContext, id: string) =>
+      readFinancialStateVersion(store, actor, id),
+    readValuationVersion: (actor: ActorContext, id: string) =>
+      readValuationVersion(store, actor, id),
     lineage: (actor: ActorContext, type: string, id: string) => lineage(store, actor, type, id),
     createFxRateSet: (actor: ActorContext, input: FxInput) => createFxRateSet(store, actor, input),
     translateGroup: (actor: ActorContext, groupId: string, input: TranslateInput) =>
@@ -62,34 +65,77 @@ export function createProgramService(store: LedgerStore) {
       calculateModel(store, actor, modelId, nodes),
     createScenario: (
       actor: ActorContext,
-      input: { baseVersionId: string; name: string; base: Record<string, string>; overrides: Record<string, string> },
+      input: {
+        baseVersionId: string;
+        name: string;
+        base: Record<string, string>;
+        overrides: Record<string, string>;
+      },
     ) => createScenario(store, actor, input),
     createValuation: (actor: ActorContext, input: DcfInput) => createValuation(store, actor, input),
     getValuation: (actor: ActorContext, id: string) => readValuation(store, actor, id),
-    transitionValuation: (actor: ActorContext, id: string, to: string) => transitionValuation(store, actor, id, to),
-    sensitivity: (actor: ActorContext, input: { base: DcfInput; shocks: readonly { id: string; wacc?: string | undefined; terminalGrowth?: string | undefined }[] }) =>
-      sensitivity(store, actor, input),
-    createReportPack: (actor: ActorContext, input: { statementStateId: string; valuationId: string }) =>
-      createReportPack(store, actor, input),
+    transitionValuation: (actor: ActorContext, id: string, to: string) =>
+      transitionValuation(store, actor, id, to),
+    sensitivity: (
+      actor: ActorContext,
+      input: {
+        base: DcfInput;
+        shocks: readonly {
+          id: string;
+          wacc?: string | undefined;
+          terminalGrowth?: string | undefined;
+        }[];
+      },
+    ) => sensitivity(store, actor, input),
+    createReportPack: (
+      actor: ActorContext,
+      input: { statementStateId: string; valuationId: string },
+    ) => createReportPack(store, actor, input),
     getReportPack: (actor: ActorContext, id: string) => getReportPack(store, actor, id),
     rollDebt: (actor: ActorContext, input: DebtInput) => saveDebt(store, actor, input),
     capTable: (actor: ActorContext, input: CapInput) => saveCapTable(store, actor, input),
-    sourcesUses: (actor: ActorContext, input: { sources: readonly { label: string; amountMinor: string }[]; uses: readonly { label: string; amountMinor: string }[] }) =>
-      saveSourcesUses(store, actor, input),
-    lbo: (actor: ActorContext, input: { entryEquity: string; exitEquity: string; holdYears: string }) => saveLbo(store, actor, input),
-    importBatch: (actor: ActorContext, input: { rows: readonly { rowNo: number; account: string; amount: string }[] }) =>
-      importBatch(store, actor, input),
-    qoe: (actor: ActorContext, input: { reported: string; adjustments: readonly { adjustmentId: string; sourceRowId: string; amount: string }[] }) =>
-      qoe(store, actor, input),
-    propose: (actor: ActorContext, input: { claims: readonly { text: string; citationId: string | null }[] }) =>
-      propose(store, actor, input),
+    sourcesUses: (
+      actor: ActorContext,
+      input: {
+        sources: readonly { label: string; amountMinor: string }[];
+        uses: readonly { label: string; amountMinor: string }[];
+      },
+    ) => saveSourcesUses(store, actor, input),
+    lbo: (
+      actor: ActorContext,
+      input: { entryEquity: string; exitEquity: string; holdYears: string },
+    ) => saveLbo(store, actor, input),
+    importBatch: (
+      actor: ActorContext,
+      input: { rows: readonly { rowNo: number; account: string; amount: string }[] },
+    ) => importBatch(store, actor, input),
+    qoe: (
+      actor: ActorContext,
+      input: {
+        reported: string;
+        adjustments: readonly { adjustmentId: string; sourceRowId: string; amount: string }[];
+      },
+    ) => qoe(store, actor, input),
+    propose: (
+      actor: ActorContext,
+      input: { claims: readonly { text: string; citationId: string | null }[] },
+    ) => propose(store, actor, input),
     acceptProposal: (
       actor: ActorContext,
-      input: { entityId: string; periodId: string; currency: string; lines: readonly { accountId: string; debitMinor: string; creditMinor: string }[] },
+      input: {
+        entityId: string;
+        periodId: string;
+        currency: string;
+        lines: readonly { accountId: string; debitMinor: string; creditMinor: string }[];
+      },
     ) => acceptProposal(store, actor, input),
     createDeal: (
       actor: ActorContext,
-      input: { publishedStateHash: string; base: Record<string, string>; overrides: Record<string, string> },
+      input: {
+        publishedStateHash: string;
+        base: Record<string, string>;
+        overrides: Record<string, string>;
+      },
     ) => createDeal(store, actor, input),
     mapBasis: (
       actor: ActorContext,
@@ -184,7 +230,9 @@ async function readValuationVersion(store: LedgerStore, actor: ActorContext, id:
   }
   const stored = isRecord(current.payload) ? current.payload : {};
   const result = Object.fromEntries(
-    Object.entries(stored).filter(([key]) => key !== "assumption" && key !== "makerActorId" && key !== "calculationStatus"),
+    Object.entries(stored).filter(
+      ([key]) => key !== "assumption" && key !== "makerActorId" && key !== "calculationStatus",
+    ),
   );
   return {
     ...result,
@@ -196,7 +244,12 @@ async function readValuationVersion(store: LedgerStore, actor: ActorContext, id:
   };
 }
 
-async function transitionFinancialState(store: LedgerStore, actor: ActorContext, id: string, to: string) {
+async function transitionFinancialState(
+  store: LedgerStore,
+  actor: ActorContext,
+  id: string,
+  to: string,
+) {
   const tenant = await scope(store, actor, to === "published" ? "state.publish" : "state.write");
   const current = await store.getFinancialState(tenant.tenantId, id);
   if (!current) {
@@ -257,7 +310,12 @@ async function transitionFinancialState(store: LedgerStore, actor: ActorContext,
     relation: "supersedes",
     createdAt: now,
   });
-  return { financialStateId: nextId, status: target, stateHash: current.stateHash, supersedesId: current.id };
+  return {
+    financialStateId: nextId,
+    status: target,
+    stateHash: current.stateHash,
+    supersedesId: current.id,
+  };
 }
 
 async function lineage(store: LedgerStore, actor: ActorContext, type: string, id: string) {
@@ -276,7 +334,12 @@ async function lineage(store: LedgerStore, actor: ActorContext, type: string, id
 
 interface FxInput {
   readonly label: string;
-  readonly rates: readonly { readonly base: string; readonly quote: string; readonly rateType: "closing" | "historical" | "average"; readonly rate: string }[];
+  readonly rates: readonly {
+    readonly base: string;
+    readonly quote: string;
+    readonly rateType: "closing" | "historical" | "average";
+    readonly rate: string;
+  }[];
 }
 
 async function createFxRateSet(store: LedgerStore, actor: ActorContext, input: FxInput) {
@@ -297,11 +360,24 @@ async function createFxRateSet(store: LedgerStore, actor: ActorContext, input: F
 interface TranslateInput {
   readonly sourceCurrency: string;
   readonly ctaAccountId: string;
-  readonly lines: readonly { readonly accountId: string; readonly rateType: "closing" | "historical" | "average"; readonly debitPositiveMinor: string }[];
-  readonly rates: { readonly closing: FxRate; readonly historical: FxRate; readonly average: FxRate };
+  readonly lines: readonly {
+    readonly accountId: string;
+    readonly rateType: "closing" | "historical" | "average";
+    readonly debitPositiveMinor: string;
+  }[];
+  readonly rates: {
+    readonly closing: FxRate;
+    readonly historical: FxRate;
+    readonly average: FxRate;
+  };
 }
 
-async function translateGroup(store: LedgerStore, actor: ActorContext, groupId: string, input: TranslateInput) {
+async function translateGroup(
+  store: LedgerStore,
+  actor: ActorContext,
+  groupId: string,
+  input: TranslateInput,
+) {
   const tenant = await scope(store, actor, "consolidation.run");
   const result = translateTrialBalance(input);
   const now = new Date().toISOString();
@@ -320,7 +396,9 @@ async function translateGroup(store: LedgerStore, actor: ActorContext, groupId: 
       correlationId: actor.correlationId,
       createdAt: now,
     },
-    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { inputHash: result.inputHash }),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      inputHash: result.inputHash,
+    }),
   });
   return { ...result, calculationRunId, consolidationGroupId: groupId };
 }
@@ -328,12 +406,25 @@ async function translateGroup(store: LedgerStore, actor: ActorContext, groupId: 
 interface EliminateInput {
   readonly evidenceId: string;
   readonly balances: readonly { readonly accountId: string; readonly debitPositiveMinor: string }[];
-  readonly eliminations: readonly { readonly accountId: string; readonly debitMinor: string; readonly creditMinor: string; readonly evidenceId: string }[];
+  readonly eliminations: readonly {
+    readonly accountId: string;
+    readonly debitMinor: string;
+    readonly creditMinor: string;
+    readonly evidenceId: string;
+  }[];
 }
 
-async function eliminateGroup(store: LedgerStore, actor: ActorContext, groupId: string, input: EliminateInput) {
+async function eliminateGroup(
+  store: LedgerStore,
+  actor: ActorContext,
+  groupId: string,
+  input: EliminateInput,
+) {
   const tenant = await scope(store, actor, "consolidation.run");
-  const result = eliminateIntercompany({ balances: input.balances, eliminations: input.eliminations });
+  const result = eliminateIntercompany({
+    balances: input.balances,
+    eliminations: input.eliminations,
+  });
   const now = new Date().toISOString();
   await store.insertElimination({
     tenantId: tenant.tenantId,
@@ -343,12 +434,18 @@ async function eliminateGroup(store: LedgerStore, actor: ActorContext, groupId: 
     inputHash: result.inputHash,
     payload: { balances: result.balances },
     createdAt: now,
-    audit: audit(actor, "EliminationRecorded", "elimination_entry", groupId, now, { inputHash: result.inputHash }),
+    audit: audit(actor, "EliminationRecorded", "elimination_entry", groupId, now, {
+      inputHash: result.inputHash,
+    }),
   });
   return result;
 }
 
-async function createGroup(store: LedgerStore, actor: ActorContext, input: { name: string; reportingCurrency: string }) {
+async function createGroup(
+  store: LedgerStore,
+  actor: ActorContext,
+  input: { name: string; reportingCurrency: string },
+) {
   const tenant = await scope(store, actor, "consolidation.run");
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -372,7 +469,12 @@ async function createModel(store: LedgerStore, actor: ActorContext, input: { nam
   return { modelId };
 }
 
-async function saveModelVersion(store: LedgerStore, actor: ActorContext, modelId: string, nodes: readonly CalcNode[]) {
+async function saveModelVersion(
+  store: LedgerStore,
+  actor: ActorContext,
+  modelId: string,
+  nodes: readonly CalcNode[],
+) {
   const tenant = await scope(store, actor, "model.write");
   const now = new Date().toISOString();
   const modelVersionId = crypto.randomUUID();
@@ -384,7 +486,11 @@ async function saveModelVersion(store: LedgerStore, actor: ActorContext, modelId
     status: "draft",
     inputHash,
     engineVersion: ENGINE_VERSION,
-    nodes: nodes.map((node) => ({ id: crypto.randomUUID(), nodeKey: node.id, payload: { ...node } })),
+    nodes: nodes.map((node) => ({
+      id: crypto.randomUUID(),
+      nodeKey: node.id,
+      payload: { ...node },
+    })),
     payload: { nodes },
     createdAt: now,
     audit: audit(actor, "ModelVersionCreated", "model_version", modelVersionId, now, { inputHash }),
@@ -392,7 +498,12 @@ async function saveModelVersion(store: LedgerStore, actor: ActorContext, modelId
   return { modelVersionId, inputHash, engineVersion: ENGINE_VERSION };
 }
 
-async function calculateModel(store: LedgerStore, actor: ActorContext, modelId: string, nodes: readonly CalcNode[]) {
+async function calculateModel(
+  store: LedgerStore,
+  actor: ActorContext,
+  modelId: string,
+  nodes: readonly CalcNode[],
+) {
   const tenant = await scope(store, actor, "model.calculate");
   const result = evaluateGraph(nodes);
   const now = new Date().toISOString();
@@ -411,7 +522,9 @@ async function calculateModel(store: LedgerStore, actor: ActorContext, modelId: 
       correlationId: actor.correlationId,
       createdAt: now,
     },
-    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { inputHash: result.inputHash }),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      inputHash: result.inputHash,
+    }),
   });
   return { ...result, calculationRunId, modelId };
 }
@@ -419,7 +532,12 @@ async function calculateModel(store: LedgerStore, actor: ActorContext, modelId: 
 async function createScenario(
   store: LedgerStore,
   actor: ActorContext,
-  input: { baseVersionId: string; name: string; base: Record<string, string>; overrides: Record<string, string> },
+  input: {
+    baseVersionId: string;
+    name: string;
+    base: Record<string, string>;
+    overrides: Record<string, string>;
+  },
 ) {
   const tenant = await scope(store, actor, "scenario.write");
   const projected = projectScenario(input.base, input.overrides);
@@ -447,24 +565,76 @@ async function createValuation(store: LedgerStore, actor: ActorContext, input: D
   try {
     const result = valueDcf(input);
     await store.insertCalculationRun({
-      run: runRecord(tenant.tenantId, actor, calculationRunId, "dcf", "succeeded", result.engineVersion, result.inputHash, input, result, now),
-      audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { inputHash: result.inputHash }),
+      run: runRecord(
+        tenant.tenantId,
+        actor,
+        calculationRunId,
+        "dcf",
+        "succeeded",
+        result.engineVersion,
+        result.inputHash,
+        input,
+        result,
+        now,
+      ),
+      audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+        inputHash: result.inputHash,
+      }),
     });
     await store.insertValuation(
-      valuationRow(tenant.tenantId, actor, id, "draft", "succeeded", calculationRunId, result.inputHash, { ...result, assumption: input }, now),
+      valuationRow(
+        tenant.tenantId,
+        actor,
+        id,
+        "draft",
+        "succeeded",
+        calculationRunId,
+        result.inputHash,
+        { ...result, assumption: input },
+        now,
+      ),
     );
-    return { valuationId: id, status: "draft", calculationStatus: "succeeded", ...result, calculationRunId };
+    return {
+      valuationId: id,
+      status: "draft",
+      calculationStatus: "succeeded",
+      ...result,
+      calculationRunId,
+    };
   } catch (error) {
     if (!(error instanceof KernelError)) {
       throw error;
     }
     const inputHash = hashMaterial(input);
     await store.insertCalculationRun({
-      run: runRecord(tenant.tenantId, actor, calculationRunId, "dcf", "failed", ENGINE_VERSION, inputHash, input, { code: error.code }, now),
-      audit: audit(actor, "CalculationFailed", "calculation_run", calculationRunId, now, { code: error.code }),
+      run: runRecord(
+        tenant.tenantId,
+        actor,
+        calculationRunId,
+        "dcf",
+        "failed",
+        ENGINE_VERSION,
+        inputHash,
+        input,
+        { code: error.code },
+        now,
+      ),
+      audit: audit(actor, "CalculationFailed", "calculation_run", calculationRunId, now, {
+        code: error.code,
+      }),
     });
     await store.insertValuation(
-      valuationRow(tenant.tenantId, actor, id, "draft", "failed", calculationRunId, inputHash, { code: error.code, assumption: input }, now),
+      valuationRow(
+        tenant.tenantId,
+        actor,
+        id,
+        "draft",
+        "failed",
+        calculationRunId,
+        inputHash,
+        { code: error.code, assumption: input },
+        now,
+      ),
     );
     return {
       valuationId: id,
@@ -493,7 +663,12 @@ async function readValuation(store: LedgerStore, actor: ActorContext, id: string
   return { valuationId: current.id, status: current.status, stateHash: current.stateHash, base };
 }
 
-async function transitionValuation(store: LedgerStore, actor: ActorContext, id: string, to: string) {
+async function transitionValuation(
+  store: LedgerStore,
+  actor: ActorContext,
+  id: string,
+  to: string,
+) {
   const tenant = await scope(store, actor, "valuation.publish");
   const current = await store.getValuation(tenant.tenantId, id);
   if (!current) {
@@ -511,7 +686,17 @@ async function transitionValuation(store: LedgerStore, actor: ActorContext, id: 
   const now = new Date().toISOString();
   const nextId = crypto.randomUUID();
   await store.insertValuation({
-    ...valuationRow(tenant.tenantId, actor, nextId, target, calculationStatus, null, current.stateHash, current.payload, now),
+    ...valuationRow(
+      tenant.tenantId,
+      actor,
+      nextId,
+      target,
+      calculationStatus,
+      null,
+      current.stateHash,
+      current.payload,
+      now,
+    ),
     makerActorId: readMaker(current.payload),
   });
   await store.insertApproval({
@@ -525,21 +710,46 @@ async function transitionValuation(store: LedgerStore, actor: ActorContext, id: 
     createdAt: now,
     audit: audit(actor, "ApprovalRecorded", "valuation", nextId, now, { decision: target }),
   });
-  return { valuationId: nextId, status: target, stateHash: current.stateHash, supersedesId: current.id };
+  return {
+    valuationId: nextId,
+    status: target,
+    stateHash: current.stateHash,
+    supersedesId: current.id,
+  };
 }
 
 async function sensitivity(
   store: LedgerStore,
   actor: ActorContext,
-  input: { base: DcfInput; shocks: readonly { id: string; wacc?: string | undefined; terminalGrowth?: string | undefined }[] },
+  input: {
+    base: DcfInput;
+    shocks: readonly {
+      id: string;
+      wacc?: string | undefined;
+      terminalGrowth?: string | undefined;
+    }[];
+  },
 ) {
   const tenant = await scope(store, actor, "valuation.calculate");
   const result = valueDcfSensitivity(input);
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
   await store.insertCalculationRun({
-    run: runRecord(tenant.tenantId, actor, calculationRunId, "dcf-sensitivity", "succeeded", result.engineVersion, result.inputHash, input, result.runs, now),
-    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { inputHash: result.inputHash }),
+    run: runRecord(
+      tenant.tenantId,
+      actor,
+      calculationRunId,
+      "dcf-sensitivity",
+      "succeeded",
+      result.engineVersion,
+      result.inputHash,
+      input,
+      result.runs,
+      now,
+    ),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      inputHash: result.inputHash,
+    }),
   });
   return {
     calculationRunId,
@@ -554,7 +764,11 @@ async function sensitivity(
   };
 }
 
-async function createReportPack(store: LedgerStore, actor: ActorContext, input: { statementStateId: string; valuationId: string }) {
+async function createReportPack(
+  store: LedgerStore,
+  actor: ActorContext,
+  input: { statementStateId: string; valuationId: string },
+) {
   const tenant = await scope(store, actor, "report.write");
   const statement = await store.getFinancialState(tenant.tenantId, input.statementStateId);
   const valuationRow = await store.getValuation(tenant.tenantId, input.valuationId);
@@ -569,18 +783,33 @@ async function createReportPack(store: LedgerStore, actor: ActorContext, input: 
   }
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const stateHashValue = hashMaterial({ statement: statement.stateHash, valuation: valuationRow.stateHash });
+  const stateHashValue = hashMaterial({
+    statement: statement.stateHash,
+    valuation: valuationRow.stateHash,
+  });
   await store.insertReportPack({
     tenantId: tenant.tenantId,
     id,
     status: "published",
     cutoffAt: now,
     stateHash: stateHashValue,
-    payload: { statementStateId: statement.id, valuationId: valuationRow.id, statementHash: statement.stateHash, valuationHash: valuationRow.stateHash },
+    payload: {
+      statementStateId: statement.id,
+      valuationId: valuationRow.id,
+      statementHash: statement.stateHash,
+      valuationHash: valuationRow.stateHash,
+    },
     createdAt: now,
-    audit: audit(actor, "ReportPackPublished", "report_pack", id, now, { stateHash: stateHashValue }),
+    audit: audit(actor, "ReportPackPublished", "report_pack", id, now, {
+      stateHash: stateHashValue,
+    }),
   });
-  return { reportPackId: id, status: "published", stateHash: stateHashValue, engineVersion: ENGINE_VERSION };
+  return {
+    reportPackId: id,
+    status: "published",
+    stateHash: stateHashValue,
+    engineVersion: ENGINE_VERSION,
+  };
 }
 
 async function getReportPack(store: LedgerStore, actor: ActorContext, id: string) {
@@ -626,14 +855,21 @@ async function saveDebt(store: LedgerStore, actor: ActorContext, input: DebtInpu
     inputHash: rolled.inputHash,
     payload: { ...rolled },
     createdAt: now,
-    audit: audit(actor, "DebtRolled", "debt_terms", instrumentId, now, { closingMinor: rolled.closingMinor }),
+    audit: audit(actor, "DebtRolled", "debt_terms", instrumentId, now, {
+      closingMinor: rolled.closingMinor,
+    }),
   });
   return { instrumentId, ...rolled };
 }
 
 interface CapInput {
   readonly entityId: string;
-  readonly holdings: readonly { readonly holderId: string; readonly commonShares: string; readonly options: string; readonly convertibles: string }[];
+  readonly holdings: readonly {
+    readonly holderId: string;
+    readonly commonShares: string;
+    readonly options: string;
+    readonly convertibles: string;
+  }[];
 }
 
 async function saveCapTable(store: LedgerStore, actor: ActorContext, input: CapInput) {
@@ -649,7 +885,9 @@ async function saveCapTable(store: LedgerStore, actor: ActorContext, input: CapI
     payload: { fullyDilutedShares: reconciled.fullyDilutedShares, ownership: reconciled.ownership },
     holdings: input.holdings.map((holding) => ({ ...holding, id: crypto.randomUUID() })),
     createdAt: now,
-    audit: audit(actor, "CapTableReconciled", "cap_table_version", id, now, { inputHash: reconciled.inputHash }),
+    audit: audit(actor, "CapTableReconciled", "cap_table_version", id, now, {
+      inputHash: reconciled.inputHash,
+    }),
   });
   return { capTableVersionId: id, ...reconciled };
 }
@@ -657,27 +895,60 @@ async function saveCapTable(store: LedgerStore, actor: ActorContext, input: CapI
 async function saveSourcesUses(
   store: LedgerStore,
   actor: ActorContext,
-  input: { sources: readonly { label: string; amountMinor: string }[]; uses: readonly { label: string; amountMinor: string }[] },
+  input: {
+    sources: readonly { label: string; amountMinor: string }[];
+    uses: readonly { label: string; amountMinor: string }[];
+  },
 ) {
   const tenant = await scope(store, actor, "capital.write");
   const result = assertSourcesEqualUses(input);
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
   await store.insertCalculationRun({
-    run: runRecord(tenant.tenantId, actor, calculationRunId, "sources-uses", "succeeded", result.engineVersion, result.inputHash, input, result, now),
-    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { inputHash: result.inputHash }),
+    run: runRecord(
+      tenant.tenantId,
+      actor,
+      calculationRunId,
+      "sources-uses",
+      "succeeded",
+      result.engineVersion,
+      result.inputHash,
+      input,
+      result,
+      now,
+    ),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      inputHash: result.inputHash,
+    }),
   });
   return { calculationRunId, ...result };
 }
 
-async function saveLbo(store: LedgerStore, actor: ActorContext, input: { entryEquity: string; exitEquity: string; holdYears: string }) {
+async function saveLbo(
+  store: LedgerStore,
+  actor: ActorContext,
+  input: { entryEquity: string; exitEquity: string; holdYears: string },
+) {
   const tenant = await scope(store, actor, "capital.write");
   const result = lboReturns(input);
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
   await store.insertCalculationRun({
-    run: runRecord(tenant.tenantId, actor, calculationRunId, "lbo", "succeeded", result.engineVersion, result.inputHash, input, result, now),
-    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, { moic: result.moic }),
+    run: runRecord(
+      tenant.tenantId,
+      actor,
+      calculationRunId,
+      "lbo",
+      "succeeded",
+      result.engineVersion,
+      result.inputHash,
+      input,
+      result,
+      now,
+    ),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      moic: result.moic,
+    }),
   });
   return { calculationRunId, ...result };
 }
@@ -693,12 +964,19 @@ async function importBatch(
     throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "Import requires an idempotency key");
   }
   const fileHash = hashMaterial(
-    input.rows.map((row) => ({ rowNo: String(row.rowNo), account: row.account, amount: row.amount })),
+    input.rows.map((row) => ({
+      rowNo: String(row.rowNo),
+      account: row.account,
+      amount: row.amount,
+    })),
   );
   const existing = await store.findImportBatch(tenant.tenantId, key);
   if (existing) {
     if (existing.stateHash !== fileHash) {
-      throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "Idempotency key was already used for a different file");
+      throw new KernelError(
+        "FIN_IDEMPOTENCY_MISMATCH",
+        "Idempotency key was already used for a different file",
+      );
     }
     return { importBatchId: existing.id, fileHash, replayed: true };
   }
@@ -710,7 +988,11 @@ async function importBatch(
     idempotencyKey: key,
     fileHash,
     payload: { rows: input.rows },
-    rows: input.rows.map((row) => ({ id: crypto.randomUUID(), rowNo: row.rowNo, payload: { ...row } })),
+    rows: input.rows.map((row) => ({
+      id: crypto.randomUUID(),
+      rowNo: row.rowNo,
+      payload: { ...row },
+    })),
     createdAt: now,
     audit: audit(actor, "ImportBatchCreated", "import_batch", id, now, { fileHash }),
   });
@@ -720,7 +1002,10 @@ async function importBatch(
 async function qoe(
   store: LedgerStore,
   actor: ActorContext,
-  input: { reported: string; adjustments: readonly { adjustmentId: string; sourceRowId: string; amount: string }[] },
+  input: {
+    reported: string;
+    adjustments: readonly { adjustmentId: string; sourceRowId: string; amount: string }[];
+  },
 ) {
   const tenant = await scope(store, actor, "import.write");
   const bridge = buildQoeBridge({
@@ -730,7 +1015,11 @@ async function qoe(
   return { ...bridge, tenantId: tenant.tenantId };
 }
 
-async function propose(store: LedgerStore, actor: ActorContext, input: { claims: readonly { text: string; citationId: string | null }[] }) {
+async function propose(
+  store: LedgerStore,
+  actor: ActorContext,
+  input: { claims: readonly { text: string; citationId: string | null }[] },
+) {
   const tenant = await scope(store, actor, "proposal.write");
   const cited = acceptCitedClaims(input.claims);
   const now = new Date().toISOString();
@@ -743,10 +1032,17 @@ async function propose(store: LedgerStore, actor: ActorContext, input: { claims:
     citationId: cited.accepted.find((claim) => claim.citationId)?.citationId ?? null,
     payload: { accepted: cited.accepted, discarded: cited.discarded },
     createdAt: now,
-    audit: audit(actor, "ProposalSuggested", "proposal", id, now, { discarded: cited.discarded.length }),
+    audit: audit(actor, "ProposalSuggested", "proposal", id, now, {
+      discarded: cited.discarded.length,
+    }),
   });
   if (cited.accepted.every((claim) => !/\d/.test(claim.text)) && cited.discarded.length > 0) {
-    return { proposalId: id, status: "suggested", refusal: "Uncited numeric claims were discarded", ...cited };
+    return {
+      proposalId: id,
+      status: "suggested",
+      refusal: "Uncited numeric claims were discarded",
+      ...cited,
+    };
   }
   return { proposalId: id, status: "suggested", ...cited };
 }
@@ -754,7 +1050,12 @@ async function propose(store: LedgerStore, actor: ActorContext, input: { claims:
 async function acceptProposal(
   store: LedgerStore,
   actor: ActorContext,
-  input: { entityId: string; periodId: string; currency: string; lines: readonly { accountId: string; debitMinor: string; creditMinor: string }[] },
+  input: {
+    entityId: string;
+    periodId: string;
+    currency: string;
+    lines: readonly { accountId: string; debitMinor: string; creditMinor: string }[];
+  },
 ) {
   await scope(store, actor, "proposal.write");
   const journal = validateJournal({
@@ -767,13 +1068,21 @@ async function acceptProposal(
       credit: money(input.currency, line.creditMinor),
     })),
   });
-  return { accepted: true, payloadHash: journal.payloadHash, totalDebitMinor: journal.totalDebitMinor };
+  return {
+    accepted: true,
+    payloadHash: journal.payloadHash,
+    totalDebitMinor: journal.totalDebitMinor,
+  };
 }
 
 async function createDeal(
   store: LedgerStore,
   actor: ActorContext,
-  input: { publishedStateHash: string; base: Record<string, string>; overrides: Record<string, string> },
+  input: {
+    publishedStateHash: string;
+    base: Record<string, string>;
+    overrides: Record<string, string>;
+  },
 ) {
   const tenant = await scope(store, actor, "deal.write");
   const result = applyDealScenario(input);
@@ -812,7 +1121,9 @@ async function mapBasis(
     groupHash: mapped.groupHash,
     payload: { groupBalances: mapped.groupBalances },
     createdAt: now,
-    audit: audit(actor, "ReportingBasisMapped", "reporting_basis", id, now, { groupHash: mapped.groupHash }),
+    audit: audit(actor, "ReportingBasisMapped", "reporting_basis", id, now, {
+      groupHash: mapped.groupHash,
+    }),
   });
   return { reportingBasisId: id, ...mapped };
 }
@@ -893,7 +1204,10 @@ function valuationRow(
       calculationStatus,
     },
     createdAt: now,
-    audit: audit(actor, "ValuationRecorded", "valuation", id, now, { status, stateHash: stateHashValue }),
+    audit: audit(actor, "ValuationRecorded", "valuation", id, now, {
+      status,
+      stateHash: stateHashValue,
+    }),
   };
 }
 
@@ -999,7 +1313,15 @@ function readDcfInput(value: unknown): DcfInput | null {
   ) {
     return null;
   }
-  return { currency, freeCashFlows: flows, wacc, terminalGrowth, netDebt, nonOperatingAssets, otherClaims };
+  return {
+    currency,
+    freeCashFlows: flows,
+    wacc,
+    terminalGrowth,
+    netDebt,
+    nonOperatingAssets,
+    otherClaims,
+  };
 }
 
 function readMaker(payload: unknown): string {

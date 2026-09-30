@@ -4,14 +4,14 @@ The UI/UX must prioritize trust, clarity, and control above visual flair. Financ
 
 ## 1. Core Design Philosophy
 
-| Principle | What it means in practice |
-| --- | --- |
-| Trust First | Every material number must feel verifiable. Lineage and assumptions should be one click away. |
-| Clarity over Decoration | Clean, calm, high-signal interface. Avoid unnecessary gradients, illustrations, or animations. |
-| Progressive Density | Support both high-level executive views and deep analyst work without switching tools. |
-| Draft vs Published Separation | Visually and functionally distinct. Never mix them. |
-| AI as Assistant, not Authority | AI suggestions are clearly labeled, reversible, and never presented as final truth. |
-| No Hidden Assumptions | Material drivers and assumptions must always be visible or easily accessible. |
+| Principle                      | What it means in practice                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Trust First                    | Every material number must feel verifiable. Lineage and assumptions should be one click away.  |
+| Clarity over Decoration        | Clean, calm, high-signal interface. Avoid unnecessary gradients, illustrations, or animations. |
+| Progressive Density            | Support both high-level executive views and deep analyst work without switching tools.         |
+| Draft vs Published Separation  | Visually and functionally distinct. Never mix them.                                            |
+| AI as Assistant, not Authority | AI suggestions are clearly labeled, reversible, and never presented as final truth.            |
+| No Hidden Assumptions          | Material drivers and assumptions must always be visible or easily accessible.                  |
 
 ## 2. Visual Style Direction
 
@@ -96,15 +96,15 @@ When a user cannot see supporting data, show a clear locked/permission state ins
 
 ## 5. Core Screen Patterns
 
-| Screen | UX Priority |
-| --- | --- |
-| Company / CFO Dashboard | High-level health, alerts, key KPIs, clear “what needs attention” |
-| Financial Statements | Excellent drill-down, period comparison, variance analysis |
-| Model Workspace | Spreadsheet-like density + structured assumption panel + version control |
-| Scenario Manager | Side-by-side comparison is critical |
-| Valuation Workspace | Method clarity, input transparency, sensitivity controls |
-| Board Pack | Presentation-quality, locked after publish, clear data cutoff |
-| AI Assistant | Contextual, cited, clearly labeled as AI, easy to accept/reject suggestions |
+| Screen                  | UX Priority                                                                 |
+| ----------------------- | --------------------------------------------------------------------------- |
+| Company / CFO Dashboard | High-level health, alerts, key KPIs, clear “what needs attention”           |
+| Financial Statements    | Excellent drill-down, period comparison, variance analysis                  |
+| Model Workspace         | Spreadsheet-like density + structured assumption panel + version control    |
+| Scenario Manager        | Side-by-side comparison is critical                                         |
+| Valuation Workspace     | Method clarity, input transparency, sensitivity controls                    |
+| Board Pack              | Presentation-quality, locked after publish, clear data cutoff               |
+| AI Assistant            | Contextual, cited, clearly labeled as AI, easy to accept/reject suggestions |
 
 ## 6. AI Interaction Design
 

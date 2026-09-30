@@ -37,7 +37,9 @@ export function axisCurrency(value: number): string {
 
 /** Replaces "15000000 minor-unit" phrases with currency. The stored minor string is unchanged. */
 export function humanizeMinorPhrases(text: string, currency: string): string {
-  return text.replace(/\b(\d+)\s+minor(?:-unit)?(?:\s+units?)?\b/g, (_match, digits: string) => withCurrency(minorToDisplay(digits), currency));
+  return text.replace(/\b(\d+)\s+minor(?:-unit)?(?:\s+units?)?\b/g, (_match, digits: string) =>
+    withCurrency(minorToDisplay(digits), currency),
+  );
 }
 
 export function minorToAxis(minor: string): number {
@@ -64,6 +66,6 @@ export function shortHash(value: string): string {
 }
 
 export function csvCell(value: string): string {
-  if (/[",\n]/.test(value)) return `"${value.replaceAll("\"", "\"\"")}"`;
+  if (/[",\n]/.test(value)) return `"${value.replaceAll('"', '""')}"`;
   return value;
 }

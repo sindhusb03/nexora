@@ -17,7 +17,12 @@ export function productSections(kind: DataSourceKind | null): readonly ShellSect
     { id: "upload", label: "Upload & Map", href: "/classic?section=upload" },
   ];
   if (smartLedgerApplies(kind)) {
-    dataItems.push({ id: "ledger", label: "Smart Ledger", href: "/classic?section=ledger", meta: aiBadge() });
+    dataItems.push({
+      id: "ledger",
+      label: "Smart Ledger",
+      href: "/classic?section=ledger",
+      meta: aiBadge(),
+    });
   }
 
   return [
@@ -36,7 +41,13 @@ export function productSections(kind: DataSourceKind | null): readonly ShellSect
     },
     {
       label: "Operations",
-      items: [{ id: "operations", label: "AR, AP, inventory, payroll, assets", href: "/classic?section=operations" }],
+      items: [
+        {
+          id: "operations",
+          label: "AR, AP, inventory, payroll, assets",
+          href: "/classic?section=operations",
+        },
+      ],
     },
     {
       label: "Capital access",

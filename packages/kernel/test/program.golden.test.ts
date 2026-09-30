@@ -31,8 +31,14 @@ const rate = (value: string): FxRate => ({
 describe("published state hash", () => {
   it("ignores presentation fields that are outside the allow-list", () => {
     const allow = ["entityId", "periodId", "netIncomeMinor"] as const;
-    const left = stateHash({ entityId: "e1", periodId: "p1", netIncomeMinor: "50000", label: "Draft" }, allow);
-    const right = stateHash({ entityId: "e1", periodId: "p1", netIncomeMinor: "50000", label: "Published" }, allow);
+    const left = stateHash(
+      { entityId: "e1", periodId: "p1", netIncomeMinor: "50000", label: "Draft" },
+      allow,
+    );
+    const right = stateHash(
+      { entityId: "e1", periodId: "p1", netIncomeMinor: "50000", label: "Published" },
+      allow,
+    );
     expect(left).toBe(right);
     expect(left).toHaveLength(64);
   });
@@ -53,7 +59,9 @@ describe("group translation and ownership", () => {
         average: rate("0.85"),
       },
     });
-    const byAccount = new Map(translated.lines.map((line) => [line.accountId, line.debitPositiveMinor]));
+    const byAccount = new Map(
+      translated.lines.map((line) => [line.accountId, line.debitPositiveMinor]),
+    );
     expect(byAccount.get("cash")).toBe("9000");
     expect(byAccount.get("equity")).toBe("-8000");
     expect(byAccount.get("cta")).toBe("-1000");
@@ -168,7 +176,9 @@ describe("capital, QoE, basis, and citations", () => {
   it("traces a QoE bridge and stores both basis hashes", () => {
     const bridge = buildQoeBridge({
       reported: "100",
-      adjustments: [{ adjustmentId: "adj-1", sourceRowId: "row-1", actorId: "controller-1", amount: "15" }],
+      adjustments: [
+        { adjustmentId: "adj-1", sourceRowId: "row-1", actorId: "controller-1", amount: "15" },
+      ],
     });
     expect(bridge.normalized).toBe("115.000000000000");
     expect(bridge.steps[0]?.stepHash).toHaveLength(64);

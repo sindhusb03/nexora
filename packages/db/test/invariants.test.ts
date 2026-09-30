@@ -27,7 +27,9 @@ describe("kernel database contract", () => {
       );
     });
 
-    const visible = await asTenant(db, tenantA, (query) => query<{ name: string }>("SELECT name FROM tenant"));
+    const visible = await asTenant(db, tenantA, (query) =>
+      query<{ name: string }>("SELECT name FROM tenant"),
+    );
     expect(visible.rows.map((row) => row.name)).toEqual(["A"]);
 
     const entity = "33333333-3333-4333-8333-333333333333";
@@ -81,11 +83,13 @@ describe("kernel database contract", () => {
     ).rejects.toThrow(/FIN_IMMUTABLE_RECORD/);
 
     await expect(
-      asTenant(db, tenantA, (query) => query(`DELETE FROM journal_entry WHERE journal_id = $1`, [journal])),
+      asTenant(db, tenantA, (query) =>
+        query(`DELETE FROM journal_entry WHERE journal_id = $1`, [journal]),
+      ),
     ).rejects.toThrow(/permission denied/);
-    await expect(db.query(`DELETE FROM journal_entry WHERE journal_id = $1`, [journal])).rejects.toThrow(
-      /FIN_IMMUTABLE_RECORD/,
-    );
+    await expect(
+      db.query(`DELETE FROM journal_entry WHERE journal_id = $1`, [journal]),
+    ).rejects.toThrow(/FIN_IMMUTABLE_RECORD/);
 
     const unbalanced = crypto.randomUUID();
     await expect(
@@ -102,9 +106,10 @@ describe("kernel database contract", () => {
            VALUES ($1, $2, $3, $4, 1, 100, 0), ($5, $2, $3, $6, 2, 0, 90)`,
           [crypto.randomUUID(), tenantA, unbalanced, cash, crypto.randomUUID(), revenue],
         );
-        await query(`UPDATE journal_entry SET status = 'posted', posted_at = now() WHERE journal_id = $1`, [
-          unbalanced,
-        ]);
+        await query(
+          `UPDATE journal_entry SET status = 'posted', posted_at = now() WHERE journal_id = $1`,
+          [unbalanced],
+        );
       }),
     ).rejects.toThrow(/FIN_UNBALANCED_JOURNAL/);
 
@@ -135,7 +140,9 @@ describe("kernel database contract", () => {
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,
     );
     const actual = result.rows.map((row) => row.table_name).sort();
-    const expected = Object.values(schema).map((table) => getTableName(table)).sort();
+    const expected = Object.values(schema)
+      .map((table) => getTableName(table))
+      .sort();
     expect(actual).toEqual(expected);
   });
 });
@@ -143,7 +150,12 @@ describe("kernel database contract", () => {
 async function asTenant<T>(
   db: PGlite,
   tenantId: string,
-  fn: (query: <R extends Record<string, unknown>>(text: string, params?: unknown[]) => Promise<{ rows: R[] }>) => Promise<T>,
+  fn: (
+    query: <R extends Record<string, unknown>>(
+      text: string,
+      params?: unknown[],
+    ) => Promise<{ rows: R[] }>,
+  ) => Promise<T>,
 ): Promise<T> {
   await db.exec("BEGIN");
   try {

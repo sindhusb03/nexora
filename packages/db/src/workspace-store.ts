@@ -46,23 +46,44 @@ export function createWorkspaceStore(db: AppDatabase) {
         await tx
           .update(workspaceRecord)
           .set({ status: input.status, payload: input.payload, updatedAt: input.updatedAt })
-          .where(and(eq(workspaceRecord.workspaceRecordId, input.id), eq(workspaceRecord.tenantId, input.tenantId)));
+          .where(
+            and(
+              eq(workspaceRecord.workspaceRecordId, input.id),
+              eq(workspaceRecord.tenantId, input.tenantId),
+            ),
+          );
         await writeAudit(tx, input.tenantId, input.audit);
       });
     },
 
-    setTenantStatus(input: { tenantId: string; status: "active" | "suspended"; audit: WorkspaceWrite["audit"] }) {
+    setTenantStatus(input: {
+      tenantId: string;
+      status: "active" | "suspended";
+      audit: WorkspaceWrite["audit"];
+    }) {
       return tenantTx(db, input.tenantId, async (tx) => {
-        await tx.update(tenant).set({ status: input.status }).where(eq(tenant.tenantId, input.tenantId));
+        await tx
+          .update(tenant)
+          .set({ status: input.status })
+          .where(eq(tenant.tenantId, input.tenantId));
         await writeAudit(tx, input.tenantId, input.audit);
       });
     },
 
-    deleteMembership(input: { tenantId: string; membershipId: string; audit: WorkspaceWrite["audit"] }) {
+    deleteMembership(input: {
+      tenantId: string;
+      membershipId: string;
+      audit: WorkspaceWrite["audit"];
+    }) {
       return tenantTx(db, input.tenantId, async (tx) => {
         await tx
           .delete(membership)
-          .where(and(eq(membership.membershipId, input.membershipId), eq(membership.tenantId, input.tenantId)));
+          .where(
+            and(
+              eq(membership.membershipId, input.membershipId),
+              eq(membership.tenantId, input.tenantId),
+            ),
+          );
         await writeAudit(tx, input.tenantId, input.audit);
       });
     },

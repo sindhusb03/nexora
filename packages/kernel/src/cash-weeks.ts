@@ -28,7 +28,11 @@ export interface CashForecast {
   readonly openingCashMinor: string;
   readonly minimumCashMinor: string;
   readonly weeks: readonly CashWeekResult[];
-  readonly alerts: readonly { readonly weekIndex: string; readonly endingMinor: string; readonly shortfallMinor: string }[];
+  readonly alerts: readonly {
+    readonly weekIndex: string;
+    readonly endingMinor: string;
+    readonly shortfallMinor: string;
+  }[];
 }
 
 /** Thirteen weekly buckets. Ending cash of week n is the opening cash of week n+1. */
@@ -60,7 +64,11 @@ export function buildCashForecast(input: {
     const headroom = ending - minimum;
     const belowMinimum = headroom < 0n;
     if (belowMinimum) {
-      alerts.push({ weekIndex: week.weekIndex, endingMinor: ending.toString(), shortfallMinor: (-headroom).toString() });
+      alerts.push({
+        weekIndex: week.weekIndex,
+        endingMinor: ending.toString(),
+        shortfallMinor: (-headroom).toString(),
+      });
     }
     weeks.push({
       weekIndex: week.weekIndex,

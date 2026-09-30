@@ -1,0 +1,38 @@
+name: Feature
+description: A new behavior that still has one financial source of truth
+title: "feat: "
+labels: []
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: Who can do what when this is done.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk class
+      description: See docs/sdlc.md. The highest class touched wins.
+      options:
+        - R0
+        - R1
+        - R2
+        - R3
+    validations:
+      required: true
+  - type: textarea
+    id: invariant
+    attributes:
+      label: Invariant
+      description: The financial rule that must stay true. Write "None" only for R0.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance
+      description: Inputs, formula or method version when a number is involved, and the tests that should fail first.
+    validations:
+      required: true

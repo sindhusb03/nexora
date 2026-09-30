@@ -43,8 +43,25 @@ describe("13-week cash", () => {
       minimumCashMinor: "500",
       weeks: weeks("1000"),
     });
-    expect(tight.weeks[1]).toMatchObject({ endingMinor: "400", headroomMinor: "-100", belowMinimum: true });
-    expect(tight.alerts.map((alert) => alert.weekIndex)).toEqual(["2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]);
+    expect(tight.weeks[1]).toMatchObject({
+      endingMinor: "400",
+      headroomMinor: "-100",
+      belowMinimum: true,
+    });
+    expect(tight.alerts.map((alert) => alert.weekIndex)).toEqual([
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+      "13",
+    ]);
     expect(tight.alerts[0]).toEqual({ weekIndex: "2", endingMinor: "400", shortfallMinor: "100" });
     expect(tight.weeks[12]?.beginningMinor).toBe("400");
     expect(tight.inputHash).toHaveLength(64);

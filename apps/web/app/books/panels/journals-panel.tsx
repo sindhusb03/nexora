@@ -54,8 +54,12 @@ export function JournalsPanel({
   const action = useAction();
 
   const accountRows = accounts.status === "ready" ? accounts.data : [];
-  const postable = accountRows.filter((account) => account.active && account.currency === entity.functionalCurrency);
-  const accountLabel = new Map(accountRows.map((account) => [account.accountId, `${account.code} · ${account.name}`]));
+  const postable = accountRows.filter(
+    (account) => account.active && account.currency === entity.functionalCurrency,
+  );
+  const accountLabel = new Map(
+    accountRows.map((account) => [account.accountId, `${account.code} · ${account.name}`]),
+  );
   const periodOpen = period.status === "open";
 
   function updateLine(key: string, patch: Partial<Omit<DraftLine, "key">>) {
@@ -147,7 +151,13 @@ export function JournalsPanel({
                         <td>
                           <Hash value={journal.payloadHash} />
                         </td>
-                        <td>{journal.reversesJournalId ? <Hash value={journal.reversesJournalId} /> : ""}</td>
+                        <td>
+                          {journal.reversesJournalId ? (
+                            <Hash value={journal.reversesJournalId} />
+                          ) : (
+                            ""
+                          )}
+                        </td>
                         <td className="cell-action">
                           <Button
                             type="button"
@@ -175,7 +185,11 @@ export function JournalsPanel({
                                 {journal.lines.map((line) => (
                                   <tr key={line.lineNo}>
                                     <td className="figure">{line.lineNo}</td>
-                                    <td>{accountLabel.get(line.accountId) ?? <code className="hash">{line.accountId}</code>}</td>
+                                    <td>
+                                      {accountLabel.get(line.accountId) ?? (
+                                        <code className="hash">{line.accountId}</code>
+                                      )}
+                                    </td>
                                     <td className="num">
                                       <Figure value={line.debitMinor} />
                                     </td>
@@ -187,7 +201,8 @@ export function JournalsPanel({
                               </tbody>
                             </table>
                             <p className="muted small">
-                              Kernel total debit: {journal.totalDebitMinor} minor units ({journal.totalDebit} {journal.currency})
+                              Kernel total debit: {journal.totalDebitMinor} minor units (
+                              {journal.totalDebit} {journal.currency})
                             </p>
                           </td>
                         </tr>
@@ -205,7 +220,9 @@ export function JournalsPanel({
         <div className="result-card" role="status">
           <div className="result-head">
             <StatusBadge status="posted" />
-            <strong>{posted.replayed ? "Journal already posted (idempotent replay)" : "Journal posted"}</strong>
+            <strong>
+              {posted.replayed ? "Journal already posted (idempotent replay)" : "Journal posted"}
+            </strong>
           </div>
           <dl className="kv">
             <dt>Total debit (kernel)</dt>
@@ -229,13 +246,17 @@ export function JournalsPanel({
       <form className="form-card" onSubmit={submit}>
         <h3>Post journal</h3>
         {!periodOpen ? (
-          <p className="notice notice-info">This period is {period.status}. The kernel rejects postings into it.</p>
+          <p className="notice notice-info">
+            This period is {period.status}. The kernel rejects postings into it.
+          </p>
         ) : null}
         <p className="muted small">
-          Currency is fixed to the entity functional currency ({entity.functionalCurrency}). Balance is validated by
-          the kernel on submit; this form does not total the lines.
+          Currency is fixed to the entity functional currency ({entity.functionalCurrency}). Balance
+          is validated by the kernel on submit; this form does not total the lines.
         </p>
-        {accounts.status === "error" ? <ErrorNotice error={accounts.error} httpStatus={accounts.httpStatus} /> : null}
+        {accounts.status === "error" ? (
+          <ErrorNotice error={accounts.error} httpStatus={accounts.httpStatus} />
+        ) : null}
         <table className="grid grid-form">
           <thead>
             <tr>
@@ -289,7 +310,11 @@ export function JournalsPanel({
                     type="button"
                     variant="outline"
                     disabled={lines.length <= MIN_LINES}
-                    onClick={() => setLines((current) => current.filter((candidate) => candidate.key !== line.key))}
+                    onClick={() =>
+                      setLines((current) =>
+                        current.filter((candidate) => candidate.key !== line.key),
+                      )
+                    }
                   >
                     Remove
                   </Button>
@@ -299,7 +324,11 @@ export function JournalsPanel({
           </tbody>
         </table>
         <div className="form-row">
-          <Button type="button" variant="outline" onClick={() => setLines((current) => [...current, blankLine()])}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setLines((current) => [...current, blankLine()])}
+          >
             Add line
           </Button>
           <Field label="Currency">
@@ -310,7 +339,9 @@ export function JournalsPanel({
           </Button>
         </div>
         {formError ? <p className="form-error">{formError}</p> : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

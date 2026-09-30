@@ -24,9 +24,19 @@ export function Palette({
   const matches = filterCommands(commands, query);
   return (
     <div className="nx-palette-backdrop" onMouseDown={onClose}>
-      <div className="nx-palette" onMouseDown={(event) => event.stopPropagation()} data-testid="command-palette">
+      <div
+        className="nx-palette"
+        onMouseDown={(event) => event.stopPropagation()}
+        data-testid="command-palette"
+      >
         <Command label="Command palette" shouldFilter={false}>
-          <Command.Input autoFocus value={query} onValueChange={setQuery} placeholder="Jump to statements, cash, approvals…" data-testid="command-input" />
+          <Command.Input
+            autoFocus
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Jump to statements, cash, approvals…"
+            data-testid="command-input"
+          />
           <Command.List>
             {matches.length === 0 ? <Command.Empty>No matching screens.</Command.Empty> : null}
             {matches.map((command) => (

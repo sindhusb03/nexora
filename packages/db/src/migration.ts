@@ -21,7 +21,11 @@ export function loadMigrations(): readonly Migration[] {
   const migrations = join(directory, "../migrations");
   return MIGRATION_NAMES.map((name) => {
     const sql = readFileSync(join(migrations, name), "utf8");
-    return { name, sql, checksum: createHash("sha256").update(sql.replace(/\r\n/g, "\n")).digest("hex") };
+    return {
+      name,
+      sql,
+      checksum: createHash("sha256").update(sql.replace(/\r\n/g, "\n")).digest("hex"),
+    };
   });
 }
 

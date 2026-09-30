@@ -1,0 +1,21 @@
+{
+  "name": "main merge",
+  "description": "Changes reach main only through a pull request with one approval and an up-to-date branch.",
+  "enforcement": "active",
+  "kind": "merge_branch",
+  "includedRefNames": ["refs/heads/main"],
+  "excludedRefNames": [],
+  "rules": [
+    {
+      "ruleType": "pull_request",
+      "parameters": {
+        "requiredApprovingReviewCount": 1,
+        "requireCodeOwnerReview": false
+      }
+    },
+    {
+      "ruleType": "require_branch_up_to_date"
+    }
+  ],
+  "bypassActors": []
+}

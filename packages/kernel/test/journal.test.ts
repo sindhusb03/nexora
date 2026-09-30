@@ -9,7 +9,11 @@ import {
   validateJournal,
 } from "../src/index.js";
 
-function line(accountId: string, debit: bigint, credit: bigint): {
+function line(
+  accountId: string,
+  debit: bigint,
+  credit: bigint,
+): {
   accountId: string;
   debit: ReturnType<typeof money>;
   credit: ReturnType<typeof money>;

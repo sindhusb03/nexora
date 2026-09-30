@@ -26,7 +26,12 @@ export type CalcNode =
       /** Zero-based period, stored as an integer string so the input hash stays decimal. */
       readonly period?: string;
     }
-  | { readonly id: string; readonly type: "aggregate"; readonly op: "sum"; readonly refs: readonly string[] }
+  | {
+      readonly id: string;
+      readonly type: "aggregate";
+      readonly op: "sum";
+      readonly refs: readonly string[];
+    }
   | { readonly id: string; readonly type: "output"; readonly ref: string };
 
 export interface GraphResult {
@@ -145,7 +150,8 @@ function evaluateNode(node: CalcNode, values: ReadonlyMap<string, Decimal>): Dec
       if (node.values.length === 0) {
         throw new KernelError("CALC_INVALID_NODE", `Timeseries ${node.id} is empty`);
       }
-      const index = node.period === undefined ? node.values.length - 1 : periodIndex(node.period, node.id);
+      const index =
+        node.period === undefined ? node.values.length - 1 : periodIndex(node.period, node.id);
       const selected = node.values[index];
       if (selected === undefined) {
         throw new KernelError("CALC_INVALID_NODE", `Timeseries ${node.id} index is out of range`);

@@ -10,7 +10,9 @@ import { errorFields, jsonLogger } from "./observability.js";
 const logger = jsonLogger();
 const url = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL;
 if (!url) {
-  logger.error("migrate.refused", { message: "Set DATABASE_MIGRATION_URL (schema owner) or DATABASE_URL." });
+  logger.error("migrate.refused", {
+    message: "Set DATABASE_MIGRATION_URL (schema owner) or DATABASE_URL.",
+  });
   process.exit(1);
 }
 

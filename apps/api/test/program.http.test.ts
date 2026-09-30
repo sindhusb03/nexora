@@ -53,7 +53,14 @@ describe("program gates", () => {
       actor: "owner-1",
       tenant: tenantId,
       region: "us-east-1",
-      body: { entityId, code: "1000", name: "Cash", report: "asset", cashFlow: "cash", retainedEarnings: false },
+      body: {
+        entityId,
+        code: "1000",
+        name: "Cash",
+        report: "asset",
+        cashFlow: "cash",
+        retainedEarnings: false,
+      },
     });
     cashId = (await readJson<{ accountId: string }>(cash)).accountId;
   });
@@ -61,7 +68,10 @@ describe("program gates", () => {
   it("publishes an OpenAPI document from the route schemas", async () => {
     const response = await app.request("/openapi.json");
     expect(response.status).toBe(200);
-    const body = await readJson<{ openapi: string; components: { schemas: Record<string, { type?: string }> } }>(response);
+    const body = await readJson<{
+      openapi: string;
+      components: { schemas: Record<string, { type?: string }> };
+    }>(response);
     expect(body.openapi).toBe("3.1.0");
     expect(body.components.schemas.financialState).toBeTruthy();
   });
@@ -75,19 +85,30 @@ describe("program gates", () => {
     const approved = await walk(app, tenantId, draft.financialStateId, "owner-1");
     const blocked = await transition(app, tenantId, approved, "published", "owner-1");
     expect(blocked.status).toBe(409);
-    expect((await readJson<{ error: { code: string } }>(blocked)).error.code).toBe("PUBLISH_BLOCKED");
+    expect((await readJson<{ error: { code: string } }>(blocked)).error.code).toBe(
+      "PUBLISH_BLOCKED",
+    );
 
     const published = await transition(app, tenantId, approved, "published", "controller-1");
     expect(published.status).toBe(200);
-    const publishedBody = await readJson<{ financialStateId: string; stateHash: string; status: string }>(published);
+    const publishedBody = await readJson<{
+      financialStateId: string;
+      stateHash: string;
+      status: string;
+    }>(published);
     expect(publishedBody.stateHash).toBe(draft.stateHash);
     expect(publishedBody.status).toBe("published");
 
-    const stored = await call(app, "GET", `/v1/financial-states/${publishedBody.financialStateId}`, {
-      actor: "controller-1",
-      tenant: tenantId,
-      region: "us-east-1",
-    });
+    const stored = await call(
+      app,
+      "GET",
+      `/v1/financial-states/${publishedBody.financialStateId}`,
+      {
+        actor: "controller-1",
+        tenant: tenantId,
+        region: "us-east-1",
+      },
+    );
     expect(stored.status).toBe(200);
     expect(await readJson<Record<string, unknown>>(stored)).toMatchObject({
       financialStateId: publishedBody.financialStateId,
@@ -104,7 +125,11 @@ describe("program gates", () => {
     });
     expect(lineage.status).toBe(200);
     const edges = await readJson<{ edges: { toId: string; relation: string }[] }>(lineage);
-    expect(edges.edges.some((edge) => edge.toId === publishedBody.financialStateId && edge.relation === "supersedes")).toBe(true);
+    expect(
+      edges.edges.some(
+        (edge) => edge.toId === publishedBody.financialStateId && edge.relation === "supersedes",
+      ),
+    ).toBe(true);
 
     const other = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
@@ -126,7 +151,9 @@ describe("program gates", () => {
       region: "eu-central-1",
     });
     expect(region.status).toBe(403);
-    expect((await readJson<{ error: { code: string } }>(region)).error.code).toBe("REGION_MISMATCH");
+    expect((await readJson<{ error: { code: string } }>(region)).error.code).toBe(
+      "REGION_MISMATCH",
+    );
 
     return { publishedId: publishedBody.financialStateId, stateHash: publishedBody.stateHash };
   });
@@ -139,10 +166,20 @@ describe("program gates", () => {
       body: { ...DCF, wacc: "0.02", terminalGrowth: "0.02" },
     });
     expect(failed.status).toBe(201);
-    const failedBody = await readJson<{ valuationId: string; calculationStatus: string; code: string }>(failed);
+    const failedBody = await readJson<{
+      valuationId: string;
+      calculationStatus: string;
+      code: string;
+    }>(failed);
     expect(failedBody.calculationStatus).toBe("failed");
     expect(failedBody.code).toBe("VALUATION_INVALID_ASSUMPTION");
-    const failedPublish = await transitionValuation(app, tenantId, failedBody.valuationId, "published", "controller-1");
+    const failedPublish = await transitionValuation(
+      app,
+      tenantId,
+      failedBody.valuationId,
+      "published",
+      "controller-1",
+    );
     expect(failedPublish.status).toBe(409);
 
     const created = await call(app, "POST", "/v1/valuations", {
@@ -173,9 +210,16 @@ describe("program gates", () => {
     expect(draftPack.status).toBe(404);
 
     const approved = await walkValuation(app, tenantId, valuation.valuationId, "owner-1");
-    const publishedValuation = await transitionValuation(app, tenantId, approved, "published", "controller-1");
+    const publishedValuation = await transitionValuation(
+      app,
+      tenantId,
+      approved,
+      "published",
+      "controller-1",
+    );
     expect(publishedValuation.status).toBe(200);
-    const publishedValuationId = (await readJson<{ valuationId: string }>(publishedValuation)).valuationId;
+    const publishedValuationId = (await readJson<{ valuationId: string }>(publishedValuation))
+      .valuationId;
 
     const storedValuation = await call(app, "GET", `/v1/valuations/${publishedValuationId}`, {
       actor: "controller-1",
@@ -194,16 +238,22 @@ describe("program gates", () => {
     });
     expect(storedBody).not.toHaveProperty("assumption");
 
-    const sensitivity = await call(app, "POST", `/v1/valuations/${valuation.valuationId}/calculate`, {
-      actor: "owner-1",
-      tenant: tenantId,
-      region: "us-east-1",
-      body: { shocks: [{ id: "wacc-up", wacc: "0.12" }] },
-    });
-    expect(sensitivity.status).toBe(200);
-    const shocked = await readJson<{ runs: { id: string; enterpriseValue: string; calculationRunId: string }[]; engineVersion: string }>(
-      sensitivity,
+    const sensitivity = await call(
+      app,
+      "POST",
+      `/v1/valuations/${valuation.valuationId}/calculate`,
+      {
+        actor: "owner-1",
+        tenant: tenantId,
+        region: "us-east-1",
+        body: { shocks: [{ id: "wacc-up", wacc: "0.12" }] },
+      },
     );
+    expect(sensitivity.status).toBe(200);
+    const shocked = await readJson<{
+      runs: { id: string; enterpriseValue: string; calculationRunId: string }[];
+      engineVersion: string;
+    }>(sensitivity);
     expect(shocked.engineVersion).toBe("fe-kernel-0.2.0");
     expect(shocked.runs[0]?.id).toBe("wacc-up");
     expect(shocked.runs[0]?.enterpriseValue).not.toBe("1340.909090909091");
@@ -219,7 +269,11 @@ describe("program gates", () => {
       body: { statementStateId: publishedStatementId, valuationId: publishedValuationId },
     });
     expect(pack.status).toBe(201);
-    const packBody = await readJson<{ reportPackId: string; stateHash: string; engineVersion: string }>(pack);
+    const packBody = await readJson<{
+      reportPackId: string;
+      stateHash: string;
+      engineVersion: string;
+    }>(pack);
     const first = await call(app, "GET", `/v1/report-packs/${packBody.reportPackId}`, {
       actor: "owner-1",
       tenant: tenantId,
@@ -240,7 +294,9 @@ describe("program gates", () => {
       body: { statementStateId: publishedStatementId, valuationId: failedBody.valuationId },
     });
     expect(failedPack.status).toBe(409);
-    expect((await readJson<{ error: { code: string } }>(failedPack)).error.code).toBe("PUBLISH_BLOCKED");
+    expect((await readJson<{ error: { code: string } }>(failedPack)).error.code).toBe(
+      "PUBLISH_BLOCKED",
+    );
   });
 
   it("translates a group, evaluates a model, and leaves the scenario base unchanged", async () => {
@@ -273,9 +329,11 @@ describe("program gates", () => {
       },
     });
     expect(translated.status).toBe(200);
-    const fx = await readJson<{ ctaMinor: string; lines: { accountId: string; debitPositiveMinor: string }[]; engineVersion: string }>(
-      translated,
-    );
+    const fx = await readJson<{
+      ctaMinor: string;
+      lines: { accountId: string; debitPositiveMinor: string }[];
+      engineVersion: string;
+    }>(translated);
     expect(fx.ctaMinor).toBe("-1000");
     expect(fx.engineVersion).toBe("fe-kernel-0.2.0");
     expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
@@ -352,7 +410,11 @@ describe("program gates", () => {
       region: "us-east-1",
       body: { nodes },
     });
-    const calc = await readJson<{ outputs: Record<string, string>; inputHash: string; engineVersion: string }>(calculated);
+    const calc = await readJson<{
+      outputs: Record<string, string>;
+      inputHash: string;
+      engineVersion: string;
+    }>(calculated);
     expect(calc.outputs.out).toBe("22.000000000000");
     expect(calc.engineVersion).toBe("fe-kernel-0.2.0");
 
@@ -368,7 +430,9 @@ describe("program gates", () => {
       },
     });
     expect(scenario.status).toBe(201);
-    const scenarioBody = await readJson<{ base: { growth: string }; scenario: { growth: string } }>(scenario);
+    const scenarioBody = await readJson<{ base: { growth: string }; scenario: { growth: string } }>(
+      scenario,
+    );
     expect(scenarioBody.base.growth).toBe("0.05");
     expect(scenarioBody.scenario.growth).toBe("0.01");
     expect(calc.inputHash).toBe(versionBody.inputHash);
@@ -389,7 +453,9 @@ describe("program gates", () => {
       },
     });
     expect(debt.status).toBe(201);
-    expect((await readJson<{ closingMinor: string; engineVersion: string }>(debt)).closingMinor).toBe("116000");
+    expect(
+      (await readJson<{ closingMinor: string; engineVersion: string }>(debt)).closingMinor,
+    ).toBe("116000");
 
     const cap = await call(app, "POST", "/v1/capital/cap-table", {
       actor: "owner-1",
@@ -456,7 +522,9 @@ describe("program gates", () => {
       body: { rows },
     });
     expect(replay.status).toBe(200);
-    expect((await readJson<{ importBatchId: string; replayed: boolean }>(replay)).importBatchId).toBe(batch.importBatchId);
+    expect(
+      (await readJson<{ importBatchId: string; replayed: boolean }>(replay)).importBatchId,
+    ).toBe(batch.importBatchId);
     const clash = await call(app, "POST", "/v1/imports", {
       actor: "owner-1",
       tenant: tenantId,
@@ -470,9 +538,14 @@ describe("program gates", () => {
       actor: "owner-1",
       tenant: tenantId,
       region: "us-east-1",
-      body: { reported: "100", adjustments: [{ adjustmentId: "a1", sourceRowId: batch.importBatchId, amount: "15" }] },
+      body: {
+        reported: "100",
+        adjustments: [{ adjustmentId: "a1", sourceRowId: batch.importBatchId, amount: "15" }],
+      },
     });
-    expect((await readJson<{ normalized: string; engineVersion: string }>(qoe)).normalized).toBe("115.000000000000");
+    expect((await readJson<{ normalized: string; engineVersion: string }>(qoe)).normalized).toBe(
+      "115.000000000000",
+    );
 
     const proposal = await call(app, "POST", "/v1/proposals", {
       actor: "owner-1",
@@ -500,7 +573,9 @@ describe("program gates", () => {
       },
     });
     expect(unbalanced.status).toBe(422);
-    expect((await readJson<{ error: { code: string } }>(unbalanced)).error.code).toBe("FIN_UNBALANCED_JOURNAL");
+    expect((await readJson<{ error: { code: string } }>(unbalanced)).error.code).toBe(
+      "FIN_UNBALANCED_JOURNAL",
+    );
 
     const published = await state(app, tenantId, entityId, periodId, "50000", "Deal");
     const deal = await call(app, "POST", "/v1/deals", {
@@ -514,7 +589,11 @@ describe("program gates", () => {
       },
     });
     expect(deal.status).toBe(201);
-    const dealBody = await readJson<{ base: { growth: string }; scenario: { growth: string }; outputHash: string }>(deal);
+    const dealBody = await readJson<{
+      base: { growth: string };
+      scenario: { growth: string };
+      outputHash: string;
+    }>(deal);
     expect(dealBody.base.growth).toBe("0.05");
     expect(dealBody.scenario.growth).toBe("0.01");
     expect(dealBody.outputHash).toHaveLength(64);
@@ -536,7 +615,14 @@ describe("program gates", () => {
   });
 });
 
-async function state(app: TestApp, tenantId: string, entityId: string, periodId: string, netIncomeMinor: string, label: string) {
+async function state(
+  app: TestApp,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+  netIncomeMinor: string,
+  label: string,
+) {
   const response = await call(app, "POST", "/v1/financial-states", {
     actor: "owner-1",
     tenant: tenantId,
@@ -556,7 +642,13 @@ async function transition(app: TestApp, tenantId: string, id: string, to: string
   });
 }
 
-async function transitionValuation(app: TestApp, tenantId: string, id: string, to: string, actor: string) {
+async function transitionValuation(
+  app: TestApp,
+  tenantId: string,
+  id: string,
+  to: string,
+  actor: string,
+) {
   return call(app, "POST", `/v1/valuations/${id}/transition`, {
     actor,
     tenant: tenantId,

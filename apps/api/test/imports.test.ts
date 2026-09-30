@@ -5,7 +5,12 @@ import { strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 
 import { extractPdfText, parseBankStatement, type PdfLine } from "../src/imports/bank-pdf.js";
-import { excelNumberToDecimal, printedAmountToDecimal, statementAmountToDecimal, trimBinaryNoise } from "../src/imports/decimal-text.js";
+import {
+  excelNumberToDecimal,
+  printedAmountToDecimal,
+  statementAmountToDecimal,
+  trimBinaryNoise,
+} from "../src/imports/decimal-text.js";
 import { parseStatementCsv } from "../src/imports/statement-csv.js";
 import { parseStatementPdf } from "../src/imports/statement-pdf.js";
 import { parseStatementSheet, parseStatementWorkbook } from "../src/imports/statement-xlsx.js";
@@ -19,7 +24,9 @@ describe("decimal text", () => {
     expect(excelNumberToDecimal("-5238.2299999999996")).toBe("-5238.23");
     expect(excelNumberToDecimal("0")).toBe("0");
     expect(excelNumberToDecimal("1E+3")).toBe("1000");
-    expect(excelNumberToDecimal("-5.6843418860808015E-14")).toBe("-0.0000000000000568434188608080".replace(/0+$/, ""));
+    expect(excelNumberToDecimal("-5.6843418860808015E-14")).toBe(
+      "-0.0000000000000568434188608080".replace(/0+$/, ""),
+    );
     expect(excelNumberToDecimal("12abc")).toBeNull();
   });
 
@@ -68,7 +75,18 @@ describe("bank statement lines", () => {
     line(2, 457, [201, "01 Total de depósitos"], [388, "$3,320.00"]),
     line(2, 438, [50, "Retiros"]),
     line(2, 419, [50, "Cheques Pagados"]),
-    line(2, 387, [50, "00000000004"], [105, "12-06"], [141, "500099971"], [208, "85.00"], [248, "00000000008"], [303, "12-24"], [339, "501015440"], [402, "557.00"]),
+    line(
+      2,
+      387,
+      [50, "00000000004"],
+      [105, "12-06"],
+      [141, "500099971"],
+      [208, "85.00"],
+      [248, "00000000008"],
+      [303, "12-24"],
+      [339, "501015440"],
+      [402, "557.00"],
+    ),
     line(2, 353, [201, "02 Cheques Pagados"], [392, "$642.00"]),
     line(2, 336, [50, "Otros Débitos"]),
     line(2, 311, [50, "12-02"], [187, "Compra"], [227, "12-01 Indeed 100509588"], [406, "43.81"]),
@@ -109,13 +127,33 @@ describe("bank statement lines", () => {
 
   it("compares parsed rows with the printed section totals", () => {
     expect(statement.totalChecks).toEqual([
-      { label: "Total de depósitos", printedCount: 1, printedAmount: "3320.00", parsedCount: 1, parsedAmount: "3320.00", matches: true },
-      { label: "Total de retiros", printedCount: 3, printedAmount: "685.81", parsedCount: 3, parsedAmount: "685.81", matches: true },
+      {
+        label: "Total de depósitos",
+        printedCount: 1,
+        printedAmount: "3320.00",
+        parsedCount: 1,
+        parsedAmount: "3320.00",
+        matches: true,
+      },
+      {
+        label: "Total de retiros",
+        printedCount: 3,
+        printedAmount: "685.81",
+        parsedCount: 3,
+        parsedAmount: "685.81",
+        matches: true,
+      },
     ]);
   });
 });
 
-function cell(row: number, col: number, kind: SheetCell["kind"], text: string, formula = false): SheetCell {
+function cell(
+  row: number,
+  col: number,
+  kind: SheetCell["kind"],
+  text: string,
+  formula = false,
+): SheetCell {
   return { row, col, kind, text, formula };
 }
 
@@ -149,7 +187,9 @@ describe("statement sheets", () => {
       ["2023-02-28", false],
       ["2023-03-31", true],
     ]);
-    expect(sheet.lines.map((row) => [row.label, row.kind, row.values.map((value) => value.amount)])).toEqual([
+    expect(
+      sheet.lines.map((row) => [row.label, row.kind, row.values.map((value) => value.amount)]),
+    ).toEqual([
       ["Sales", "heading", []],
       ["4001 - Sales", "line", ["3293269.45", "8798.47", "3302067.92"]],
       ["Total - Sales", "total", ["3293269.45"]],
@@ -160,18 +200,32 @@ describe("statement sheets", () => {
 
   it("refuses a sheet it cannot classify", () => {
     const outcome = parseStatementSheet(
-      { name: "Sheet1", cells: [cell(1, 2, "number", "44957"), cell(1, 3, "number", "44985"), cell(2, 1, "string", "Widgets"), cell(2, 2, "number", "5")] },
+      {
+        name: "Sheet1",
+        cells: [
+          cell(1, 2, "number", "44957"),
+          cell(1, 3, "number", "44985"),
+          cell(2, 1, "string", "Widgets"),
+          cell(2, 2, "number", "5"),
+        ],
+      },
       "export.xlsx",
     );
-    expect(outcome).toEqual({ reason: "Could not tell whether this sheet is an income statement or a balance sheet" });
+    expect(outcome).toEqual({
+      reason: "Could not tell whether this sheet is an income statement or a balance sheet",
+    });
   });
 });
 
 function workbook(sheetName: string, rowsXml: string): string {
   const files = zipSync({
     "[Content_Types].xml": strToU8("<Types/>"),
-    "xl/workbook.xml": strToU8(`<workbook><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
-    "xl/_rels/workbook.xml.rels": strToU8('<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
+    "xl/workbook.xml": strToU8(
+      `<workbook><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    ),
+    "xl/_rels/workbook.xml.rels": strToU8(
+      '<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    ),
     "xl/worksheets/sheet1.xml": strToU8(`<worksheet><sheetData>${rowsXml}</sheetData></worksheet>`),
   });
   return Buffer.from(files).toString("base64");
@@ -202,17 +256,29 @@ describe("POST /v1/imports/file", () => {
     const response = await call(app, "POST", "/v1/imports/file", {
       actor: "owner-1",
       tenant: tenantId,
-      body: { kind: "financial_statements", cadence: "monthly", fileName: "empty.pdf", contentBase64: "" },
+      body: {
+        kind: "financial_statements",
+        cadence: "monthly",
+        fileName: "empty.pdf",
+        contentBase64: "",
+      },
     });
     expect(response.status).toBe(400);
-    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("IMPORT_EMPTY_FILE");
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IMPORT_EMPTY_FILE",
+    );
   });
 
   it("parses without storing when no company is selected", async () => {
     const app = await testApp();
     const response = await call(app, "POST", "/v1/imports/file", {
       actor: "owner-1",
-      body: { kind: "financial_statements", cadence: "monthly", fileName: "Balance Sheet.xlsx", contentBase64: BALANCE_SHEET },
+      body: {
+        kind: "financial_statements",
+        cadence: "monthly",
+        fileName: "Balance Sheet.xlsx",
+        contentBase64: BALANCE_SHEET,
+      },
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { stored: boolean; importBatchId: string | null };
@@ -226,7 +292,12 @@ describe("POST /v1/imports/file", () => {
       call(app, "POST", "/v1/imports/file", {
         actor: "owner-1",
         tenant: tenantId,
-        body: { kind: "financial_statements", cadence: "monthly", fileName: "Balance Sheet.xlsx", contentBase64: BALANCE_SHEET },
+        body: {
+          kind: "financial_statements",
+          cadence: "monthly",
+          fileName: "Balance Sheet.xlsx",
+          contentBase64: BALANCE_SHEET,
+        },
       });
     const first = await upload();
     if (first.status !== 201) throw new Error(await first.text());
@@ -238,10 +309,15 @@ describe("POST /v1/imports/file", () => {
     };
     expect(stored.stored).toBe(true);
     expect(stored.fileHash).toBe(
-      (await import("node:crypto")).createHash("sha256").update(Buffer.from(BALANCE_SHEET, "base64")).digest("hex"),
+      (await import("node:crypto"))
+        .createHash("sha256")
+        .update(Buffer.from(BALANCE_SHEET, "base64"))
+        .digest("hex"),
     );
     expect(stored.cadence).toBe("monthly");
-    expect(stored.statements.sheets).toEqual([expect.objectContaining({ statementType: "balance_sheet", periodCount: 2, valueCount: 4 })]);
+    expect(stored.statements.sheets).toEqual([
+      expect.objectContaining({ statementType: "balance_sheet", periodCount: 2, valueCount: 4 }),
+    ]);
 
     const replay = await upload();
     expect(replay.status).toBe(200);
@@ -254,24 +330,48 @@ describe("POST /v1/imports/file", () => {
     const response = await call(app, "POST", "/v1/imports/file", {
       actor: "owner-1",
       tenant: tenantId,
-      body: { kind: "financial_statements", cadence: "yearly", fileName: "old.xls", contentBase64: xls },
+      body: {
+        kind: "financial_statements",
+        cadence: "yearly",
+        fileName: "old.xls",
+        contentBase64: xls,
+      },
     });
     expect(response.status).toBe(400);
-    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("IMPORT_FORMAT_UNSUPPORTED");
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "IMPORT_FORMAT_UNSUPPORTED",
+    );
   });
 
   it("stores a CSV income statement", async () => {
     const { app, tenantId } = await provisioned();
-    const csv = "Line,Current Month This Year,Year to Date This Year\nSales,119668.99,2157467.10\nTotal Revenues,2157467.10,2157467.10\n";
+    const csv =
+      "Line,Current Month This Year,Year to Date This Year\nSales,119668.99,2157467.10\nTotal Revenues,2157467.10,2157467.10\n";
     const response = await call(app, "POST", "/v1/imports/file", {
       actor: "owner-1",
       tenant: tenantId,
-      body: { kind: "financial_statements", cadence: "yearly", fileName: "Income Statement.csv", contentBase64: Buffer.from(csv).toString("base64") },
+      body: {
+        kind: "financial_statements",
+        cadence: "yearly",
+        fileName: "Income Statement.csv",
+        contentBase64: Buffer.from(csv).toString("base64"),
+      },
     });
     if (response.status !== 201) throw new Error(await response.text());
-    const body = (await response.json()) as { cadence: string; statements: { sheets: { statementType: string; valuedLineCount: number; firstPeriod: string }[] } };
+    const body = (await response.json()) as {
+      cadence: string;
+      statements: {
+        sheets: { statementType: string; valuedLineCount: number; firstPeriod: string }[];
+      };
+    };
     expect(body.cadence).toBe("yearly");
-    expect(body.statements.sheets[0]).toEqual(expect.objectContaining({ statementType: "income_statement", valuedLineCount: 2, firstPeriod: "Current Month This Year" }));
+    expect(body.statements.sheets[0]).toEqual(
+      expect.objectContaining({
+        statementType: "income_statement",
+        valuedLineCount: 2,
+        firstPeriod: "Current Month This Year",
+      }),
+    );
   });
 });
 
@@ -297,7 +397,9 @@ describe("statement files from the demo layouts", () => {
     expect(sheet?.periods.map((period) => period.label)).toEqual(["December 31, 2024"]);
     const cash = sheet?.lines.find((row) => row.label === "Cash on Hand");
     expect(cash?.values[0]?.amount).toBe("1.00");
-    expect(sheet?.lines.find((row) => row.label === "Total Assets")?.values[0]?.amount).toBe("625347.79");
+    expect(sheet?.lines.find((row) => row.label === "Total Assets")?.values[0]?.amount).toBe(
+      "625347.79",
+    );
   });
 
   it("reads an audited balance sheet that prints whole dollars", () => {
@@ -314,13 +416,21 @@ describe("statement files from the demo layouts", () => {
       },
       "audited.pdf",
     );
-    expect(book.sheets[0]?.lines.find((row) => row.label === "Cash and cash equivalents")?.values[0]?.amount).toBe("733447");
+    expect(
+      book.sheets[0]?.lines.find((row) => row.label === "Cash and cash equivalents")?.values[0]
+        ?.amount,
+    ).toBe("733447");
   });
 
   it("reads a CSV with the same columns as the monthly workbooks", () => {
-    const book = parseStatementCsv('Account,"December 31, 2024"\nCash,"1,024.46"\nTotal Assets,"2,000.00"\n', "Balance Sheet.csv");
+    const book = parseStatementCsv(
+      'Account,"December 31, 2024"\nCash,"1,024.46"\nTotal Assets,"2,000.00"\n',
+      "Balance Sheet.csv",
+    );
     expect(book.sheets[0]?.statementType).toBe("balance_sheet");
-    expect(book.sheets[0]?.lines.find((row) => row.label === "Cash")?.values[0]?.amount).toBe("1024.46");
+    expect(book.sheets[0]?.lines.find((row) => row.label === "Cash")?.values[0]?.amount).toBe(
+      "1024.46",
+    );
   });
 
   it("reads an income sheet whose period headers contain line breaks", () => {
@@ -332,25 +442,52 @@ describe("statement files from the demo layouts", () => {
       { row: 2, col: 3, kind: "number", text: "20.25", formula: false },
     ];
     const book = parseStatementWorkbook([{ name: "Income 2 yrs", cells }], "income.xlsx");
-    expect(book.sheets[0]?.periods.map((period) => period.label)).toEqual(["Current Month This Year", "Year to Date This Year"]);
-    expect(book.sheets[0]?.lines[0]?.values.map((value) => value.amount)).toEqual(["10.5", "20.25"]);
+    expect(book.sheets[0]?.periods.map((period) => period.label)).toEqual([
+      "Current Month This Year",
+      "Year to Date This Year",
+    ]);
+    expect(book.sheets[0]?.lines[0]?.values.map((value) => value.amount)).toEqual([
+      "10.5",
+      "20.25",
+    ]);
   });
 
-  const demoZip = fileURLToPath(new URL("../../../docs/demo_data/financial_statements/yearly_quaterly/Datasets for Testing.zip", import.meta.url));
+  const demoZip = fileURLToPath(
+    new URL(
+      "../../../docs/demo_data/financial_statements/yearly_quaterly/Datasets for Testing.zip",
+      import.meta.url,
+    ),
+  );
 
-  it.skipIf(!existsSync(demoZip))("reads the Entregameds PDF and the Omega workbook from the demo zip", async () => {
-    const packed = unzipSync(readFileSync(demoZip), {
-      filter: (file) => file.name.endsWith("1 Entregameds Balance Sheet 2024.pdf") || file.name.endsWith("Copy of I-S Y B-S OMEGA LLC 2025.xlsx"),
-    });
-    const pdfName = Object.keys(packed).find((name) => name.endsWith(".pdf"));
-    const xlsxName = Object.keys(packed).find((name) => name.endsWith(".xlsx"));
-    if (!pdfName || !xlsxName) throw new Error("demo zip is missing the expected files");
-    const pdf = parseStatementPdf(await extractPdfText(packed[pdfName] ?? new Uint8Array()), pdfName);
-    const cash = pdf.sheets[0]?.lines.find((row) => row.label === "Cash on Hand");
-    expect(cash?.values[0]?.amount).toBe("1.00");
-    expect(pdf.sheets[0]?.lines.find((row) => row.label === "Total Assets")?.values[0]?.amount).toBe("625347.79");
-    const workbook = parseStatementWorkbook(readWorkbook(packed[xlsxName] ?? new Uint8Array()), xlsxName);
-    expect(workbook.sheets.map((sheet) => sheet.statementType).sort()).toEqual(["balance_sheet", "income_statement"]);
-    expect(workbook.skippedSheets).toEqual([]);
-  });
+  it.skipIf(!existsSync(demoZip))(
+    "reads the Entregameds PDF and the Omega workbook from the demo zip",
+    async () => {
+      const packed = unzipSync(readFileSync(demoZip), {
+        filter: (file) =>
+          file.name.endsWith("1 Entregameds Balance Sheet 2024.pdf") ||
+          file.name.endsWith("Copy of I-S Y B-S OMEGA LLC 2025.xlsx"),
+      });
+      const pdfName = Object.keys(packed).find((name) => name.endsWith(".pdf"));
+      const xlsxName = Object.keys(packed).find((name) => name.endsWith(".xlsx"));
+      if (!pdfName || !xlsxName) throw new Error("demo zip is missing the expected files");
+      const pdf = parseStatementPdf(
+        await extractPdfText(packed[pdfName] ?? new Uint8Array()),
+        pdfName,
+      );
+      const cash = pdf.sheets[0]?.lines.find((row) => row.label === "Cash on Hand");
+      expect(cash?.values[0]?.amount).toBe("1.00");
+      expect(
+        pdf.sheets[0]?.lines.find((row) => row.label === "Total Assets")?.values[0]?.amount,
+      ).toBe("625347.79");
+      const workbook = parseStatementWorkbook(
+        readWorkbook(packed[xlsxName] ?? new Uint8Array()),
+        xlsxName,
+      );
+      expect(workbook.sheets.map((sheet) => sheet.statementType).sort()).toEqual([
+        "balance_sheet",
+        "income_statement",
+      ]);
+      expect(workbook.skippedSheets).toEqual([]);
+    },
+  );
 });

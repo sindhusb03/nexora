@@ -1,5 +1,12 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { buildQoeBridge, explainVariance, forecastScenario, groundModelText, type QoeBridge, type VarianceResult } from "@nexora/kernel";
+import {
+  buildQoeBridge,
+  explainVariance,
+  forecastScenario,
+  groundModelText,
+  type QoeBridge,
+  type VarianceResult,
+} from "@nexora/kernel";
 import { generateText } from "ai";
 
 import { PLANNING_DRIVERS, QOE_ADJUSTMENTS } from "../demo/books.js";
@@ -24,7 +31,11 @@ export interface CopilotAnswer {
   readonly accepted: boolean;
   readonly rejectedNumbers: readonly string[];
   readonly citations: readonly { readonly id: string; readonly label: string }[];
-  readonly proposal: { readonly title: string; readonly summary: string; readonly citationId: string } | null;
+  readonly proposal: {
+    readonly title: string;
+    readonly summary: string;
+    readonly citationId: string;
+  } | null;
 }
 
 const AGENTS = ["general", "mapping", "variance", "normalization", "board", "watcher"] as const;
@@ -50,9 +61,27 @@ export async function answerCopilot(input: {
   );
   const variance = explainVariance({
     lines: [
-      { key: "revenue", label: "Revenue", kind: "revenue", actualMinor: input.facts.revenue, planMinor: "15000000" },
-      { key: "expenses", label: "Expenses", kind: "expense", actualMinor: input.facts.expenses, planMinor: "11000000" },
-      { key: "net", label: "Net income", kind: "profit", actualMinor: input.facts.netIncome, planMinor: "4000000" },
+      {
+        key: "revenue",
+        label: "Revenue",
+        kind: "revenue",
+        actualMinor: input.facts.revenue,
+        planMinor: "15000000",
+      },
+      {
+        key: "expenses",
+        label: "Expenses",
+        kind: "expense",
+        actualMinor: input.facts.expenses,
+        planMinor: "11000000",
+      },
+      {
+        key: "net",
+        label: "Net income",
+        kind: "profit",
+        actualMinor: input.facts.netIncome,
+        planMinor: "4000000",
+      },
     ],
   });
   const qoe = buildQoeBridge({
@@ -114,31 +143,53 @@ function mockDraft(
   if (agent === "mapping") {
     return {
       text: `Mapping suggestion, labeled Suggested. ${documentTitle} account 4001.1 Piezas maps to patient services. ${shared} Nothing is posted until you accept it.`,
-      proposal: { title: "Map Piezas to patient services", summary: "Suggest mapping 4001.1 Piezas to account 4000. Suggested, not posted.", citationId: facts.statementHash },
+      proposal: {
+        title: "Map Piezas to patient services",
+        summary: "Suggest mapping 4001.1 Piezas to account 4000. Suggested, not posted.",
+        citationId: facts.statementHash,
+      },
     };
   }
   if (agent === "variance") {
     return {
       text: `Variance note, labeled Suggested. Revenue variance minor ${revenueLine?.varianceMinor ?? "0"}. ${shared}`,
-      proposal: { title: "Revenue variance commentary", summary: `Revenue variance minor ${revenueLine?.varianceMinor ?? "0"} versus plan. Suggested.`, citationId: variance.inputHash },
+      proposal: {
+        title: "Revenue variance commentary",
+        summary: `Revenue variance minor ${revenueLine?.varianceMinor ?? "0"} versus plan. Suggested.`,
+        citationId: variance.inputHash,
+      },
     };
   }
   if (agent === "normalization") {
     return {
       text: `Normalization scout, labeled Suggested. Reported net income minor ${qoe.reported}. Normalized minor ${qoe.normalized}. QoE ${qoe.inputHash}. ${shared}`,
-      proposal: { title: "Review owner travel add-back", summary: "Owner travel remains a suggested add-back and does not change posted actuals.", citationId: qoe.inputHash },
+      proposal: {
+        title: "Review owner travel add-back",
+        summary: "Owner travel remains a suggested add-back and does not change posted actuals.",
+        citationId: qoe.inputHash,
+      },
     };
   }
   if (agent === "board") {
     return {
       text: `Board-pack draft, labeled Suggested. ${shared} Every figure in the pack opens to statement ${facts.statementHash}.`,
-      proposal: { title: "Board commentary draft", summary: "Draft commentary for the September pack. Suggested until the controller accepts it.", citationId: facts.statementHash },
+      proposal: {
+        title: "Board commentary draft",
+        summary:
+          "Draft commentary for the September pack. Suggested until the controller accepts it.",
+        citationId: facts.statementHash,
+      },
     };
   }
   if (agent === "watcher") {
     return {
       text: `Watcher, labeled Suggested. Ending cash minor ${facts.endingCash} is the book balance. The downside cash case is a separate kernel run. ${shared}`,
-      proposal: { title: "Watch downside cash", summary: "Downside week 4 adds a large outflow. Review the 13-week case before the board meeting.", citationId: facts.statementHash },
+      proposal: {
+        title: "Watch downside cash",
+        summary:
+          "Downside week 4 adds a large outflow. Review the 13-week case before the board meeting.",
+        citationId: facts.statementHash,
+      },
     };
   }
   return {
@@ -171,6 +222,11 @@ async function liveDraft(
     proposal:
       agent === "general"
         ? null
-        : { title: `${agent} suggestion`, summary: "Suggested by the live model. Accepting records your decision and does not post a journal.", citationId: "model-proposal" },
+        : {
+            title: `${agent} suggestion`,
+            summary:
+              "Suggested by the live model. Accepting records your decision and does not post a journal.",
+            citationId: "model-proposal",
+          },
   };
 }

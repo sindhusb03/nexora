@@ -13,15 +13,42 @@ describe("driver forecast", () => {
     });
 
     expect(result.months).toEqual([
-      { period: "1", revenueMinor: "100000", cogsMinor: "60000", grossProfitMinor: "40000", opexMinor: "20000", ebitdaMinor: "20000" },
-      { period: "2", revenueMinor: "110000", cogsMinor: "66000", grossProfitMinor: "44000", opexMinor: "20000", ebitdaMinor: "24000" },
-      { period: "3", revenueMinor: "121000", cogsMinor: "72600", grossProfitMinor: "48400", opexMinor: "20000", ebitdaMinor: "28400" },
+      {
+        period: "1",
+        revenueMinor: "100000",
+        cogsMinor: "60000",
+        grossProfitMinor: "40000",
+        opexMinor: "20000",
+        ebitdaMinor: "20000",
+      },
+      {
+        period: "2",
+        revenueMinor: "110000",
+        cogsMinor: "66000",
+        grossProfitMinor: "44000",
+        opexMinor: "20000",
+        ebitdaMinor: "24000",
+      },
+      {
+        period: "3",
+        revenueMinor: "121000",
+        cogsMinor: "72600",
+        grossProfitMinor: "48400",
+        opexMinor: "20000",
+        ebitdaMinor: "28400",
+      },
     ]);
     expect(result.engineVersion).toBe("fe-kernel-0.2.0");
     expect(result.inputHash).toHaveLength(64);
 
     const compared = forecastScenario(
-      { revenueMinor: "100000", growthRate: "0.10", grossMargin: "0.40", opexMinor: "20000", periods: 2 },
+      {
+        revenueMinor: "100000",
+        growthRate: "0.10",
+        grossMargin: "0.40",
+        opexMinor: "20000",
+        periods: 2,
+      },
       { growthRate: "0.00" },
     );
     expect(compared.base.months[1]?.revenueMinor).toBe("110000");
@@ -46,7 +73,13 @@ describe("driver forecast", () => {
 
   it("rejects a non-decimal driver", () => {
     expect(() =>
-      forecastDrivers({ revenueMinor: "100.5", growthRate: "fast", grossMargin: "0.4", opexMinor: "10", periods: 1 }),
+      forecastDrivers({
+        revenueMinor: "100.5",
+        growthRate: "fast",
+        grossMargin: "0.4",
+        opexMinor: "10",
+        periods: 1,
+      }),
     ).toThrowError(expect.objectContaining({ code: "FIN_AMOUNT_SCALE" }));
   });
 });

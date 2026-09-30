@@ -1,0 +1,16 @@
+title = "Nexora gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Demo and CI-only credentials. They are not production secrets."
+regexTarget = "match"
+regexes = [
+  '''nexora-demo-2026''',
+  '''ci-only-auth-secret-0123456789abcdef0123456789''',
+  '''ci-owner-password''',
+  '''ci-api-password''',
+  '''correct horse battery staple''',
+  '''replace-with-at-least-32-characters''',
+]

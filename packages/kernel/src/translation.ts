@@ -30,7 +30,11 @@ export interface TranslatedTrialBalance {
 export function translateTrialBalance(input: {
   readonly sourceCurrency: string;
   readonly lines: readonly TrialBalanceLine[];
-  readonly rates: { readonly closing: FxRate; readonly historical: FxRate; readonly average: FxRate };
+  readonly rates: {
+    readonly closing: FxRate;
+    readonly historical: FxRate;
+    readonly average: FxRate;
+  };
   readonly ctaAccountId: string;
 }): TranslatedTrialBalance {
   if (input.lines.length === 0) {
@@ -60,8 +64,14 @@ export function translateTrialBalance(input: {
 
   const combined = new Map<string, bigint>();
   for (const line of input.lines) {
-    const translated = translate(money(input.sourceCurrency, line.debitPositiveMinor), input.rates[line.rateType]);
-    combined.set(line.accountId, (combined.get(line.accountId) ?? 0n) + parseMinor(translated.derived.minor));
+    const translated = translate(
+      money(input.sourceCurrency, line.debitPositiveMinor),
+      input.rates[line.rateType],
+    );
+    combined.set(
+      line.accountId,
+      (combined.get(line.accountId) ?? 0n) + parseMinor(translated.derived.minor),
+    );
   }
 
   let translatedTotal = 0n;

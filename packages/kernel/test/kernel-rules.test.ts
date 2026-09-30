@@ -50,7 +50,9 @@ describe("publication and scenarios", () => {
     expect(() => assertCanPublish({ calculationStatus: "failed", from: "approved" })).toThrowError(
       expect.objectContaining({ code: "PUBLISH_BLOCKED" }),
     );
-    expect(() => assertCanPublish({ calculationStatus: "succeeded", from: "approved" })).not.toThrow();
+    expect(() =>
+      assertCanPublish({ calculationStatus: "succeeded", from: "approved" }),
+    ).not.toThrow();
     expect(() => assertTransition("published", "draft")).toThrow(KernelError);
   });
 
@@ -88,10 +90,9 @@ describe("elimination, periods, and authorization", () => {
 
   it("rejects overlapping and closed periods", () => {
     expect(() =>
-      assertNoPeriodOverlap(
-        { startDate: "2024-06-01", endDate: "2024-12-31" },
-        [{ startDate: "2024-01-01", endDate: "2024-12-31" }],
-      ),
+      assertNoPeriodOverlap({ startDate: "2024-06-01", endDate: "2024-12-31" }, [
+        { startDate: "2024-01-01", endDate: "2024-12-31" },
+      ]),
     ).toThrowError(expect.objectContaining({ code: "FIN_OVERLAPPING_PERIOD" }));
     expect(() => assertPeriodOpen("closed")).toThrowError(
       expect.objectContaining({ code: "FIN_PERIOD_CLOSED" }),

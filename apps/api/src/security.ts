@@ -48,7 +48,15 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
     c.header("ratelimit-reset", String(resetSeconds));
     if (window.count > options.max) {
       c.header("retry-after", String(resetSeconds));
-      return c.json({ error: { code: "RATE_LIMITED", message: `Too many ${options.name} requests; retry after ${resetSeconds}s` } }, 429);
+      return c.json(
+        {
+          error: {
+            code: "RATE_LIMITED",
+            message: `Too many ${options.name} requests; retry after ${resetSeconds}s`,
+          },
+        },
+        429,
+      );
     }
     await next();
   };

@@ -53,12 +53,18 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
     let current: { y: number; items: PdfTextItem[] } | null = null;
     for (const item of items) {
       if (!current || Math.abs(current.y - item.y) > LINE_TOLERANCE) {
-        if (current) lines.push({ page: pageNo, y: current.y, items: current.items.sort((a, b) => a.x - b.x) });
+        if (current)
+          lines.push({
+            page: pageNo,
+            y: current.y,
+            items: current.items.sort((a, b) => a.x - b.x),
+          });
         current = { y: item.y, items: [] };
       }
       current.items.push({ x: item.x, text: item.text });
     }
-    if (current) lines.push({ page: pageNo, y: current.y, items: current.items.sort((a, b) => a.x - b.x) });
+    if (current)
+      lines.push({ page: pageNo, y: current.y, items: current.items.sort((a, b) => a.x - b.x) });
   }
   await pdf.cleanup();
   return { pages: pdf.numPages, lines, textItems };
@@ -94,7 +100,11 @@ export interface BankStatement {
   readonly periodEnd: string | null;
   readonly accountNumber: string | null;
   readonly rows: readonly BankRow[];
-  readonly skipped: readonly { readonly page: number; readonly text: string; readonly reason: string }[];
+  readonly skipped: readonly {
+    readonly page: number;
+    readonly text: string;
+    readonly reason: string;
+  }[];
   readonly totalChecks: readonly BankTotalCheck[];
 }
 
@@ -124,15 +134,46 @@ interface Section {
 
 const SECTIONS: readonly Section[] = [
   { pattern: /^dep[oó]sitos$/i, name: "Depósitos", sign: "credit", group: "deposits" },
-  { pattern: /^hojas de dep[oó]sito$/i, name: "Hojas de depósito", sign: "credit", group: "deposits" },
+  {
+    pattern: /^hojas de dep[oó]sito$/i,
+    name: "Hojas de depósito",
+    sign: "credit",
+    group: "deposits",
+  },
   { pattern: /^otros cr[eé]ditos$/i, name: "Otros créditos", sign: "credit", group: "deposits" },
   { pattern: /^retiros$/i, name: "Retiros", sign: "debit", group: "withdrawals" },
-  { pattern: /^cheques pagados$/i, name: "Cheques pagados", sign: "debit", group: "withdrawals", checks: true },
+  {
+    pattern: /^cheques pagados$/i,
+    name: "Cheques pagados",
+    sign: "debit",
+    group: "withdrawals",
+    checks: true,
+  },
   { pattern: /^otros d[eé]bitos$/i, name: "Otros débitos", sign: "debit", group: "withdrawals" },
-  { pattern: /^cr[eé]ditos y d[eé]bitos miscel[aá]neos$/i, name: "Créditos y débitos misceláneos", sign: "marked", group: "miscellaneous" },
-  { pattern: /^cargos por servicios$/i, name: "Cargos por servicios", sign: "debit", group: "fees" },
-  { pattern: /^transferencias internas a /i, name: "Transferencias internas (entrada)", sign: "credit", group: "transfers" },
-  { pattern: /^transferencias internas de /i, name: "Transferencias internas (salida)", sign: "debit", group: "transfers" },
+  {
+    pattern: /^cr[eé]ditos y d[eé]bitos miscel[aá]neos$/i,
+    name: "Créditos y débitos misceláneos",
+    sign: "marked",
+    group: "miscellaneous",
+  },
+  {
+    pattern: /^cargos por servicios$/i,
+    name: "Cargos por servicios",
+    sign: "debit",
+    group: "fees",
+  },
+  {
+    pattern: /^transferencias internas a /i,
+    name: "Transferencias internas (entrada)",
+    sign: "credit",
+    group: "transfers",
+  },
+  {
+    pattern: /^transferencias internas de /i,
+    name: "Transferencias internas (salida)",
+    sign: "debit",
+    group: "transfers",
+  },
 ];
 
 /** Single words that print on their own line inside a table header or as an account caption, not as a new heading. */
@@ -179,7 +220,10 @@ export function parseBankStatement(text: PdfText): BankStatement {
   let last: { page: number; y: number } | null = null;
 
   for (const rawLine of text.lines) {
-    const line: PdfLine = { ...rawLine, items: rawLine.items.filter((item) => !FOOTER.test(item.text)) };
+    const line: PdfLine = {
+      ...rawLine,
+      items: rawLine.items.filter((item) => !FOOTER.test(item.text)),
+    };
     const joined = line.items.map((item) => item.text).join(" ");
     const first = line.items[0];
     if (!first) continue;
@@ -198,7 +242,8 @@ export function parseBankStatement(text: PdfText): BankStatement {
     if (!inDetail) continue;
 
     const lastItem = line.items[line.items.length - 1];
-    const hasAmount = lastItem !== undefined && lastItem.x >= AMOUNT_COLUMN_MIN_X && isPrintedAmount(lastItem.text);
+    const hasAmount =
+      lastItem !== undefined && lastItem.x >= AMOUNT_COLUMN_MIN_X && isPrintedAmount(lastItem.text);
 
     if (line.items.length === 1 && first.x <= HEADING_MAX_X) {
       const heading = joined.replace(/\s*\(continuaci[oó]n\)\s*$/i, "").trim();
@@ -211,7 +256,12 @@ export function parseBankStatement(text: PdfText): BankStatement {
     const printedTotal = PRINTED_TOTAL.exec(first.text);
     if (printedTotal && hasAmount && lastItem) {
       const amount = printedAmountToDecimal(lastItem.text);
-      if (amount) printedTotals.push({ label: printedTotal[2] ?? "", count: Number.parseInt(printedTotal[1] ?? "", 10), amount });
+      if (amount)
+        printedTotals.push({
+          label: printedTotal[2] ?? "",
+          count: Number.parseInt(printedTotal[1] ?? "", 10),
+          amount,
+        });
       last = null;
       continue;
     }
@@ -222,7 +272,8 @@ export function parseBankStatement(text: PdfText): BankStatement {
         rows.push(row);
         groups.push(section.group);
       }
-      for (const reason of outcome.problems) skipped.push({ page: line.page, text: joined, reason });
+      for (const reason of outcome.problems)
+        skipped.push({ page: line.page, text: joined, reason });
       last = null;
       continue;
     }
@@ -230,32 +281,52 @@ export function parseBankStatement(text: PdfText): BankStatement {
     if (/^\d{2}-\d{2}$/.test(first.text) && first.x < DATE_COLUMN_MAX_X) {
       last = null;
       if (!section) {
-        skipped.push({ page: line.page, text: joined, reason: "Dated line outside a known deposit or withdrawal heading" });
+        skipped.push({
+          page: line.page,
+          text: joined,
+          reason: "Dated line outside a known deposit or withdrawal heading",
+        });
         continue;
       }
       if (!hasAmount || !lastItem) {
-        skipped.push({ page: line.page, text: joined, reason: "No printed amount in the amount column" });
+        skipped.push({
+          page: line.page,
+          text: joined,
+          reason: "No printed amount in the amount column",
+        });
         continue;
       }
       const date = isoDate(first.text, start, end);
       const amount = printedAmountToDecimal(lastItem.text);
       if (!date || !amount) {
-        skipped.push({ page: line.page, text: joined, reason: date ? "Amount could not be read" : "Date is outside the statement period" });
+        skipped.push({
+          page: line.page,
+          text: joined,
+          reason: date ? "Amount could not be read" : "Date is outside the statement period",
+        });
         continue;
       }
       const middle = line.items.slice(1, -1);
-      const marker = middle.find((item) => item.x >= AMOUNT_COLUMN_MIN_X - 20 && (item.text === "+" || item.text === "-"));
+      const marker = middle.find(
+        (item) => item.x >= AMOUNT_COLUMN_MIN_X - 20 && (item.text === "+" || item.text === "-"),
+      );
       let negative: boolean;
       if (section.sign === "marked") {
         if (!marker) {
-          skipped.push({ page: line.page, text: joined, reason: "Miscellaneous line without a + or - marker" });
+          skipped.push({
+            page: line.page,
+            text: joined,
+            reason: "Miscellaneous line without a + or - marker",
+          });
           continue;
         }
         negative = marker.text === "-";
       } else {
         negative = section.sign === "debit";
       }
-      const referenceItem = middle.find((item) => item.x < REFERENCE_COLUMN_MAX_X && /^\d+$/.test(item.text));
+      const referenceItem = middle.find(
+        (item) => item.x < REFERENCE_COLUMN_MAX_X && /^\d+$/.test(item.text),
+      );
       const description = middle
         .filter((item) => item !== referenceItem && item !== marker)
         .map((item) => item.text)
@@ -275,9 +346,19 @@ export function parseBankStatement(text: PdfText): BankStatement {
       continue;
     }
 
-    if (section?.group === "fees" && hasAmount && lastItem && first.x <= HEADING_MAX_X && !/^total\b/i.test(first.text)) {
+    if (
+      section?.group === "fees" &&
+      hasAmount &&
+      lastItem &&
+      first.x <= HEADING_MAX_X &&
+      !/^total\b/i.test(first.text)
+    ) {
       if (printedAmountToDecimal(lastItem.text) !== "0.00") {
-        skipped.push({ page: line.page, text: joined, reason: "Service charge printed without a posting date" });
+        skipped.push({
+          page: line.page,
+          text: joined,
+          reason: "Service charge printed without a posting date",
+        });
       }
       last = null;
       continue;
@@ -293,7 +374,10 @@ export function parseBankStatement(text: PdfText): BankStatement {
       first.x >= CONTINUATION_MIN_X &&
       !/^(\d+ )?(total|balance)\b/i.test(joined)
     ) {
-      rows[rows.length - 1] = { ...previous, description: `${previous.description} ${joined}`.trim() };
+      rows[rows.length - 1] = {
+        ...previous,
+        description: `${previous.description} ${joined}`.trim(),
+      };
       last = { page: line.page, y: line.y };
       continue;
     }
@@ -323,7 +407,10 @@ function checkTotals(
     const printedCount = matching.reduce((sum, total) => sum + total.count, 0);
     const printedMinor = matching.reduce((sum, total) => sum + toMinor(total.amount), 0n);
     const inGroup = rows.filter((_, index) => groups[index] === group);
-    const parsedMinor = inGroup.reduce((sum, row) => sum + toMinor(row.amount.replace(/^-/, "")), 0n);
+    const parsedMinor = inGroup.reduce(
+      (sum, row) => sum + toMinor(row.amount.replace(/^-/, "")),
+      0n,
+    );
     checks.push({
       label: matching[0]?.label ?? group,
       printedCount,
@@ -360,14 +447,23 @@ function readCheckLine(
   while (index < items.length) {
     const checkNo = items[index];
     const dateItem = items[index + 1];
-    if (!checkNo || !dateItem || !/^\d{5,}$/.test(checkNo.text) || !/^\d{2}-\d{2}$/.test(dateItem.text)) {
+    if (
+      !checkNo ||
+      !dateItem ||
+      !/^\d{5,}$/.test(checkNo.text) ||
+      !/^\d{2}-\d{2}$/.test(dateItem.text)
+    ) {
       index += 1;
       continue;
     }
     let cursor = index + 2;
     let reference: string | null = null;
     const maybeReference = items[cursor];
-    if (maybeReference && /^\d+$/.test(maybeReference.text) && !isPrintedAmount(maybeReference.text)) {
+    if (
+      maybeReference &&
+      /^\d+$/.test(maybeReference.text) &&
+      !isPrintedAmount(maybeReference.text)
+    ) {
       reference = maybeReference.text;
       cursor += 1;
     }
@@ -375,7 +471,9 @@ function readCheckLine(
     const amount = amountItem ? printedAmountToDecimal(amountItem.text) : null;
     const date = isoDate(dateItem.text, start, end);
     if (!amount || !date) {
-      problems.push(amount ? "Check date is outside the statement period" : "Check has no readable amount");
+      problems.push(
+        amount ? "Check date is outside the statement period" : "Check has no readable amount",
+      );
       index = cursor + 1;
       continue;
     }
@@ -398,7 +496,11 @@ function readSpanishDate(text: string): { year: number; month: number; day: numb
   if (!match) return null;
   const month = MONTHS[(match[2] ?? "").toLowerCase()];
   if (!month) return null;
-  return { year: Number.parseInt(match[3] ?? "", 10), month, day: Number.parseInt(match[1] ?? "", 10) };
+  return {
+    year: Number.parseInt(match[3] ?? "", 10),
+    month,
+    day: Number.parseInt(match[1] ?? "", 10),
+  };
 }
 
 /** Statement lines print MM-DD. The year comes from the statement period; a period that crosses New Year splits by month. */

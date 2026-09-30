@@ -31,7 +31,11 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
     findUser(actorId) {
       return appTx(db, async (tx) => {
         const rows = await tx
-          .select({ actorId: authUser.actorId, passwordHash: authUser.passwordHash, disabled: authUser.disabled })
+          .select({
+            actorId: authUser.actorId,
+            passwordHash: authUser.passwordHash,
+            disabled: authUser.disabled,
+          })
           .from(authUser)
           .where(eq(authUser.actorId, actorId))
           .limit(1);
@@ -83,7 +87,13 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
         const rows = await tx
           .update(authSession)
           .set({ tenantId })
-          .where(and(eq(authSession.sessionId, sessionId), isNull(authSession.revokedAt), sql`${authSession.expiresAt} > now()`))
+          .where(
+            and(
+              eq(authSession.sessionId, sessionId),
+              isNull(authSession.revokedAt),
+              sql`${authSession.expiresAt} > now()`,
+            ),
+          )
           .returning({ sessionId: authSession.sessionId });
         return rows.length === 1;
       });

@@ -5,10 +5,16 @@ const DEFAULT_COST = 32_768;
 
 function derive(password: string, salt: Buffer, options: ScryptOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    scrypt(password.normalize("NFKC"), salt, KEY_LENGTH, { ...options, maxmem: 256 * 1024 * 1024 }, (error, key) => {
-      if (error) reject(error);
-      else resolve(key);
-    });
+    scrypt(
+      password.normalize("NFKC"),
+      salt,
+      KEY_LENGTH,
+      { ...options, maxmem: 256 * 1024 * 1024 },
+      (error, key) => {
+        if (error) reject(error);
+        else resolve(key);
+      },
+    );
   });
 }
 
@@ -26,12 +32,20 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const cost = Number(n);
   const blockSize = Number(r);
   const parallelism = Number(p);
-  if (![cost, blockSize, parallelism].every((value) => Number.isInteger(value) && value > 0) || !saltText || !hashText) {
+  if (
+    ![cost, blockSize, parallelism].every((value) => Number.isInteger(value) && value > 0) ||
+    !saltText ||
+    !hashText
+  ) {
     return false;
   }
   const expected = Buffer.from(hashText, "base64url");
   if (expected.length !== KEY_LENGTH) return false;
-  const actual = await derive(password, Buffer.from(saltText, "base64url"), { N: cost, r: blockSize, p: parallelism });
+  const actual = await derive(password, Buffer.from(saltText, "base64url"), {
+    N: cost,
+    r: blockSize,
+    p: parallelism,
+  });
   return timingSafeEqual(actual, expected);
 }
 

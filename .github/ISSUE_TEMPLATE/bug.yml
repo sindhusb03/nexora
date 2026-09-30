@@ -1,0 +1,38 @@
+name: Bug
+description: A defect against an existing invariant
+title: "fix: "
+labels: []
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke, and what should have happened.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk class
+      description: See docs/sdlc.md. Use the highest class the defect can touch.
+      options:
+        - R0
+        - R1
+        - R2
+        - R3
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Steps, tenant role, and period. Do not paste customer documents or live credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Name the invariant. For a number, name the engine version and the inputs.
+    validations:
+      required: true

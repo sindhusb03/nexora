@@ -74,7 +74,9 @@ export function UploadMap({
       return;
     }
     if (spreadsheet || pdf) {
-      setFileNote("Save the sheet as CSV. The kernel import reads an account column and an amount column from text.");
+      setFileNote(
+        "Save the sheet as CSV. The kernel import reads an account column and an amount column from text.",
+      );
       return;
     }
     const text = await file.text();
@@ -91,7 +93,9 @@ export function UploadMap({
     writeDataSource(next);
     onChange(next);
     if (session.tenantId.length === 0) {
-      setFileNote("Rows are ready to map. Provision a company before the kernel stores the import.");
+      setFileNote(
+        "Rows are ready to map. Provision a company before the kernel stores the import.",
+      );
       return;
     }
     const stored = await action.run(() =>
@@ -99,7 +103,13 @@ export function UploadMap({
         session,
         "POST",
         "/v1/imports",
-        { rows: parsed.map((row) => ({ rowNo: row.rowNo, account: row.account, amount: row.amount })) },
+        {
+          rows: parsed.map((row) => ({
+            rowNo: row.rowNo,
+            account: row.account,
+            amount: row.amount,
+          })),
+        },
         { idempotencyKey: `${file.name}:${file.size}:${parsed.length}` },
       ),
     );
@@ -118,7 +128,9 @@ export function UploadMap({
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      setFileNote(`${file.name} is ${file.size} bytes. The kernel accepts files up to ${MAX_UPLOAD_BYTES} bytes here. Nothing was uploaded.`);
+      setFileNote(
+        `${file.name} is ${file.size} bytes. The kernel accepts files up to ${MAX_UPLOAD_BYTES} bytes here. Nothing was uploaded.`,
+      );
       return;
     }
     setFileNote(`Sending ${file.name} to the kernel…`);
@@ -136,7 +148,9 @@ export function UploadMap({
     }
     const result = decodeFileImport(data);
     if (!result) {
-      setFileNote("The kernel returned a response this screen does not recognise. Nothing is shown.");
+      setFileNote(
+        "The kernel returned a response this screen does not recognise. Nothing is shown.",
+      );
       return;
     }
     const storedNote = result.stored
@@ -186,7 +200,14 @@ export function UploadMap({
       (sheet) =>
         `${statementLabel(sheet.statementType)} "${sheet.sheetName}": ${sheet.valuedLineCount} lines with values across ${sheet.periodCount} periods (${sheet.firstPeriod} to ${sheet.lastPeriod})${sheet.derivedPeriods.length > 0 ? `; column ${sheet.derivedPeriods.join(", ")} holds only formulas and is kept as reported, not as a month` : ""}; ${sheet.skippedCells} cells skipped.`,
     );
-    setFileNote([...sheets, statementPairNote(applied.pair, applied.cashFlowInFile), storedNote, "Smart Ledger stays hidden."].join(" "));
+    setFileNote(
+      [
+        ...sheets,
+        statementPairNote(applied.pair, applied.cashFlowInFile),
+        storedNote,
+        "Smart Ledger stays hidden.",
+      ].join(" "),
+    );
   }
 
   return (
@@ -194,7 +215,10 @@ export function UploadMap({
       <header className="page-head">
         <div>
           <h1>Upload and map</h1>
-          <p>Choose one source. Bank or trial balance opens Smart Ledger. Financial statements need an income statement and a balance sheet. Cash flow is calculated from that pair.</p>
+          <p>
+            Choose one source. Bank or trial balance opens Smart Ledger. Financial statements need
+            an income statement and a balance sheet. Cash flow is calculated from that pair.
+          </p>
         </div>
       </header>
 
@@ -231,28 +255,44 @@ export function UploadMap({
       {source.kind === "financial_statements" ? (
         <div className="notice notice-locked" role="status">
           <strong>Smart Ledger not applicable.</strong>
-          <p>Statements arrive structured. Upload the income statement and the balance sheet. Cash flow is calculated from that pair, so it is not an upload.</p>
+          <p>
+            Statements arrive structured. Upload the income statement and the balance sheet. Cash
+            flow is calculated from that pair, so it is not an upload.
+          </p>
         </div>
       ) : null}
 
       {source.kind === "bank" ? (
         <div className="form-card">
           <h2>Bank transactions</h2>
-          <p className="muted">PDF and CSV files land as source rows. A live bank connection is not linked on this kernel yet.</p>
+          <p className="muted">
+            PDF and CSV files land as source rows. A live bank connection is not linked on this
+            kernel yet.
+          </p>
           <div className="row-actions">
             <Button type="button" variant="outline" disabled>
               Connect your bank
             </Button>
           </div>
-          <FileDrop accept=".csv,.txt,.pdf" label="Drop a PDF or CSV" onFile={(file) => void onFile(file)} />
+          <FileDrop
+            accept=".csv,.txt,.pdf"
+            label="Drop a PDF or CSV"
+            onFile={(file) => void onFile(file)}
+          />
         </div>
       ) : null}
 
       {source.kind === "trial_balance" ? (
         <div className="form-card">
           <h2>Trial balance</h2>
-          <p className="muted">Use two columns: account, then amount. The kernel stores the file once.</p>
-          <FileDrop accept=".csv,.txt,.xlsx" label="Drop an Excel or CSV trial balance" onFile={(file) => void onFile(file)} />
+          <p className="muted">
+            Use two columns: account, then amount. The kernel stores the file once.
+          </p>
+          <FileDrop
+            accept=".csv,.txt,.xlsx"
+            label="Drop an Excel or CSV trial balance"
+            onFile={(file) => void onFile(file)}
+          />
         </div>
       ) : null}
 
@@ -299,8 +339,15 @@ export function UploadMap({
             ))}
           </fieldset>
           <StatementChecklist pair={source.statementPair} />
-          <p className="muted small">Excel (.xlsx), CSV, or PDF. A scanned PDF with no text is refused. A cash flow page in a file is not the calculated cash flow.</p>
-          <FileDrop accept=".xlsx,.xls,.csv,.pdf" label="Drop an Excel, CSV, or PDF statement" onFile={(file) => void onFile(file)} />
+          <p className="muted small">
+            Excel (.xlsx), CSV, or PDF. A scanned PDF with no text is refused. A cash flow page in a
+            file is not the calculated cash flow.
+          </p>
+          <FileDrop
+            accept=".xlsx,.xls,.csv,.pdf"
+            label="Drop an Excel, CSV, or PDF statement"
+            onFile={(file) => void onFile(file)}
+          />
         </div>
       ) : null}
 
@@ -309,22 +356,47 @@ export function UploadMap({
           {fileNote}
         </p>
       ) : null}
-      {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+      {action.state.error ? (
+        <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+      ) : null}
       {source.fileName ? <p className="muted small">Last file: {source.fileName}</p> : null}
     </section>
   );
 }
 
-function SourceCard({ title, body, active, onSelect }: { title: string; body: string; active: boolean; onSelect: () => void }) {
+function SourceCard({
+  title,
+  body,
+  active,
+  onSelect,
+}: {
+  title: string;
+  body: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <button type="button" className={active ? "source-card source-card-active" : "source-card"} aria-pressed={active} onClick={onSelect}>
+    <button
+      type="button"
+      className={active ? "source-card source-card-active" : "source-card"}
+      aria-pressed={active}
+      onClick={onSelect}
+    >
       <strong>{title}</strong>
       <span>{body}</span>
     </button>
   );
 }
 
-function FileDrop({ accept, label, onFile }: { accept: string; label: string; onFile: (file: File) => void }) {
+function FileDrop({
+  accept,
+  label,
+  onFile,
+}: {
+  accept: string;
+  label: string;
+  onFile: (file: File) => void;
+}) {
   return (
     <label className="file-drop">
       <span>{label}</span>
@@ -357,7 +429,12 @@ interface FileImportView {
   readonly importBatchId: string | null;
   readonly reason: string | null;
   readonly fileHash: string;
-  readonly bankRows: readonly { rowNo: number; date: string; description: string; amount: string }[];
+  readonly bankRows: readonly {
+    rowNo: number;
+    date: string;
+    description: string;
+    amount: string;
+  }[];
   readonly skippedCount: number;
   readonly totalChecks: readonly {
     label: string;
@@ -380,7 +457,9 @@ interface FileImportView {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function text(record: Record<string, unknown>, key: string): string | null {
@@ -394,7 +473,9 @@ function count(record: Record<string, unknown>, key: string): number {
 }
 
 function list(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.map(asRecord).filter((item): item is Record<string, unknown> => item !== null) : [];
+  return Array.isArray(value)
+    ? value.map(asRecord).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
 }
 
 function decodeFileImport(data: Record<string, unknown>): FileImportView | null {
@@ -445,17 +526,36 @@ function decodeFileImport(data: Record<string, unknown>): FileImportView | null 
 function StatementChecklist({ pair }: { pair: DataSourceState["statementPair"] }) {
   return (
     <ul className="statement-set">
-      <StatementSlotRow label="Income statement" slot={pair.incomeStatement} missing="Required. Not uploaded yet." />
-      <StatementSlotRow label="Balance sheet" slot={pair.balanceSheet} missing="Required. Not uploaded yet." />
+      <StatementSlotRow
+        label="Income statement"
+        slot={pair.incomeStatement}
+        missing="Required. Not uploaded yet."
+      />
+      <StatementSlotRow
+        label="Balance sheet"
+        slot={pair.balanceSheet}
+        missing="Required. Not uploaded yet."
+      />
       <li>
         <strong>Cash flow</strong>
-        <span>Not an upload. The kernel calculates it after the income statement and the balance sheet are stored for the same cadence.</span>
+        <span>
+          Not an upload. The kernel calculates it after the income statement and the balance sheet
+          are stored for the same cadence.
+        </span>
       </li>
     </ul>
   );
 }
 
-function StatementSlotRow({ label, slot, missing }: { label: string; slot: StatementSlot | null; missing: string }) {
+function StatementSlotRow({
+  label,
+  slot,
+  missing,
+}: {
+  label: string;
+  slot: StatementSlot | null;
+  missing: string;
+}) {
   const detail = slot
     ? `${slot.fileName} · ${slot.cadence} · ${slot.firstPeriod ?? "period"} to ${slot.lastPeriod ?? "period"}`
     : missing;

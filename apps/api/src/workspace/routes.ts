@@ -39,9 +39,16 @@ const copilotSchema = z.object({
   message: z.string().trim().min(1).max(4000),
   agent: z.string().trim().default("general"),
 });
-const memberSchema = z.object({ actorId: z.string().trim().min(1).max(64), role: z.enum(["owner", "controller", "viewer", "auditor"]) });
+const memberSchema = z.object({
+  actorId: z.string().trim().min(1).max(64),
+  role: z.enum(["owner", "controller", "viewer", "auditor"]),
+});
 const statusSchema = z.object({ status: z.enum(["active", "suspended"]) });
-const supportSchema = z.object({ tenantId: z.uuid(), hours: z.number().int().min(1).max(24), reason: z.string().trim().min(1).max(240) });
+const supportSchema = z.object({
+  tenantId: z.uuid(),
+  hours: z.number().int().min(1).max(24),
+  reason: z.string().trim().min(1).max(240),
+});
 const flagSchema = z.object({ enabled: z.boolean() });
 
 export interface WorkspaceDeps {
@@ -56,11 +63,16 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     const now = Date.now();
     const companies = deps.directory.list().filter((card) => {
       const member = card.members.some((item) => item.actorId === actor.actorId);
-      const support = card.members.some((item) => item.actorId === actor.actorId && item.role === "auditor");
+      const support = card.members.some(
+        (item) => item.actorId === actor.actorId && item.role === "auditor",
+      );
       return member || support || deps.platformAdminActorIds.includes(actor.actorId);
     });
     return c.json({
-      companies: companies.map((card) => ({ ...card, support: supportActive(card, actor.actorId, now) })),
+      companies: companies.map((card) => ({
+        ...card,
+        support: supportActive(card, actor.actorId, now),
+      })),
       demoPasswordHint: "nexora-demo-2026",
     });
   });
@@ -103,7 +115,11 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
       tenantId: actor.tenantId ?? "",
       id: proposal.id,
       status: body.decision,
-      payload: { ...proposal.payload, decidedBy: actor.actorId, decidedAt: new Date().toISOString() },
+      payload: {
+        ...proposal.payload,
+        decidedBy: actor.actorId,
+        decidedAt: new Date().toISOString(),
+      },
       updatedAt: new Date().toISOString(),
       audit: audit(actor, proposal.id, "ProposalDecided"),
     });
@@ -135,7 +151,14 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         const title = text(document.payload.title);
         const bodyText = text(document.payload.body);
         if (!Array.isArray(embedding) || title.length === 0) return [];
-        return [{ id: text(document.payload.slug) || document.id, title, text: bodyText, embedding: embedding.filter((value): value is number => typeof value === "number") }];
+        return [
+          {
+            id: text(document.payload.slug) || document.id,
+            title,
+            text: bodyText,
+            embedding: embedding.filter((value): value is number => typeof value === "number"),
+          },
+        ];
       }),
       apiKey: envKey(),
       model: process.env.AI_MODEL?.trim() || "gpt-4o-mini",
@@ -147,7 +170,12 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
       id: runId,
       kind: "ai_run",
       status: answer.accepted ? "grounded" : "grounding_failure",
-      payload: { agent, mode: answer.mode, rejected: [...answer.rejectedNumbers], prompt: body.message },
+      payload: {
+        agent,
+        mode: answer.mode,
+        rejected: [...answer.rejectedNumbers],
+        prompt: body.message,
+      },
       createdAt: new Date().toISOString(),
       audit: audit(actor, runId, "CopilotAnswered"),
     });
@@ -177,7 +205,10 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     if (card) {
       deps.directory.upsert({
         ...card,
-        members: [...card.members.filter((item) => item.actorId !== body.actorId), { actorId: body.actorId, role: body.role }],
+        members: [
+          ...card.members.filter((item) => item.actorId !== body.actorId),
+          { actorId: body.actorId, role: body.role },
+        ],
       });
     }
     return c.json(await snapshot(deps, actor));
@@ -225,7 +256,10 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     });
     const card = deps.directory.list().find((item) => item.tenantId === body.tenantId);
     if (card && !card.members.some((item) => item.actorId === actor.actorId)) {
-      deps.directory.upsert({ ...card, members: [...card.members, { actorId: actor.actorId, role: "auditor" }] });
+      deps.directory.upsert({
+        ...card,
+        members: [...card.members, { actorId: actor.actorId, role: "auditor" }],
+      });
     }
     return c.json(await platformView(deps, actor));
   });
@@ -252,7 +286,12 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
   });
 }
 
-export async function expireSupportGrants(store: LedgerStore, tenantId: string, actorId: string, correlationId: string): Promise<void> {
+export async function expireSupportGrants(
+  store: LedgerStore,
+  tenantId: string,
+  actorId: string,
+  correlationId: string,
+): Promise<void> {
   const grants = await store.listWorkspaceRecords(tenantId, "support");
   const now = Date.now();
   for (const grant of grants) {
@@ -305,11 +344,16 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
   authorize(roles, "statement.read");
   const entities = await deps.store.listEntities(tenantId);
   const entity = entities[0];
-  if (!entity?.retainedEarningsAccountId) throw new KernelError("FIN_NOT_FOUND", "Entity is not ready");
-  const periods = [...(await deps.store.listPeriods(tenantId, entity.entityId))].sort((left, right) => left.startDate.localeCompare(right.startDate));
+  if (!entity?.retainedEarningsAccountId)
+    throw new KernelError("FIN_NOT_FOUND", "Entity is not ready");
+  const periods = [...(await deps.store.listPeriods(tenantId, entity.entityId))].sort(
+    (left, right) => left.startDate.localeCompare(right.startDate),
+  );
   const accounts = await deps.store.listAccounts(tenantId, entity.entityId);
   const activity = await deps.store.listPostedActivity(tenantId, entity.entityId);
-  const accountName = new Map(accounts.map((account) => [account.accountId, `${account.code} ${account.name}`]));
+  const accountName = new Map(
+    accounts.map((account) => [account.accountId, `${account.code} ${account.name}`]),
+  );
   const activityPeriods = periods.filter((period) => period.startDate >= "2025-01-01");
   const series = activityPeriods.map((period) => {
     const statement = buildStatements({
@@ -345,13 +389,33 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
   });
   const variance = explainVariance({
     lines: [
-      { key: "revenue", label: "Revenue", kind: "revenue", actualMinor: latest.statement.incomeStatement.revenueMinor, planMinor: PLAN_BUDGET.revenueMinor },
-      { key: "expenses", label: "Expenses", kind: "expense", actualMinor: latest.statement.incomeStatement.expensesMinor, planMinor: PLAN_BUDGET.expensesMinor },
-      { key: "net", label: "Net income", kind: "profit", actualMinor: latest.statement.incomeStatement.netIncomeMinor, planMinor: PLAN_BUDGET.netIncomeMinor },
+      {
+        key: "revenue",
+        label: "Revenue",
+        kind: "revenue",
+        actualMinor: latest.statement.incomeStatement.revenueMinor,
+        planMinor: PLAN_BUDGET.revenueMinor,
+      },
+      {
+        key: "expenses",
+        label: "Expenses",
+        kind: "expense",
+        actualMinor: latest.statement.incomeStatement.expensesMinor,
+        planMinor: PLAN_BUDGET.expensesMinor,
+      },
+      {
+        key: "net",
+        label: "Net income",
+        kind: "profit",
+        actualMinor: latest.statement.incomeStatement.netIncomeMinor,
+        planMinor: PLAN_BUDGET.netIncomeMinor,
+      },
     ],
   });
   const proposals = await deps.store.listWorkspaceRecords(tenantId, "proposal");
-  const accepted = proposals.filter((item) => item.status === "accepted" && text(item.payload.amount).length > 0);
+  const accepted = proposals.filter(
+    (item) => item.status === "accepted" && text(item.payload.amount).length > 0,
+  );
   const qoeRaw = buildQoeBridge({
     reported: latest.statement.incomeStatement.netIncomeMinor,
     adjustments: accepted.map((item) => ({
@@ -368,9 +432,18 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
     normalized: asMinor(qoeRaw.normalized),
     steps: qoeRaw.steps.map((step) => ({ ...step, amount: asMinor(step.amount) })),
   };
-  const bankGap = subtractMoney(money(currency, latest.statement.cashFlow.endingCashMinor), money(currency, latest.statement.cashFlow.endingCashMinor));
+  const bankGap = subtractMoney(
+    money(currency, latest.statement.cashFlow.endingCashMinor),
+    money(currency, latest.statement.cashFlow.endingCashMinor),
+  );
   const journals = await deps.store.listJournals(tenantId, entity.entityId, null);
-  let auditEvents: { eventId: string; eventType: string; occurredAt: string; actorId: string; aggregateType: string }[] = [];
+  let auditEvents: {
+    eventId: string;
+    eventType: string;
+    occurredAt: string;
+    actorId: string;
+    aggregateType: string;
+  }[] = [];
   let auditLocked = false;
   try {
     authorize(roles, "audit.read");
@@ -412,13 +485,46 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
       equityMinor: latest.statement.balanceSheet.equityMinor,
     },
     kpis: [
-      kpi("revenue", "Revenue", latest.statement.incomeStatement.revenueMinor, currency, latest.statement.inputHash, latest.statement.engineVersion),
-      kpi("net", "Net income", latest.statement.incomeStatement.netIncomeMinor, currency, latest.statement.inputHash, latest.statement.engineVersion),
-      kpi("cash", "Ending cash", latest.statement.cashFlow.endingCashMinor, currency, latest.statement.inputHash, latest.statement.engineVersion),
-      kpi("normalized", "Normalized earnings", qoe.normalized, currency, qoe.inputHash, qoe.engineVersion),
+      kpi(
+        "revenue",
+        "Revenue",
+        latest.statement.incomeStatement.revenueMinor,
+        currency,
+        latest.statement.inputHash,
+        latest.statement.engineVersion,
+      ),
+      kpi(
+        "net",
+        "Net income",
+        latest.statement.incomeStatement.netIncomeMinor,
+        currency,
+        latest.statement.inputHash,
+        latest.statement.engineVersion,
+      ),
+      kpi(
+        "cash",
+        "Ending cash",
+        latest.statement.cashFlow.endingCashMinor,
+        currency,
+        latest.statement.inputHash,
+        latest.statement.engineVersion,
+      ),
+      kpi(
+        "normalized",
+        "Normalized earnings",
+        qoe.normalized,
+        currency,
+        qoe.inputHash,
+        qoe.engineVersion,
+      ),
     ],
     statements: {
-      periods: series.map((item) => ({ periodId: item.period.periodId, label: item.period.endDate.slice(0, 7), inputHash: item.statement.inputHash, engineVersion: item.statement.engineVersion })),
+      periods: series.map((item) => ({
+        periodId: item.period.periodId,
+        label: item.period.endDate.slice(0, 7),
+        inputHash: item.statement.inputHash,
+        engineVersion: item.statement.engineVersion,
+      })),
       rows: statementRows(series, currency),
     },
     journals: journals.map((journal) => ({
@@ -440,22 +546,70 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
     },
     cash: { minimumCashMinor: "25000000", base: cashBase, downside: cashDownside },
     variance,
-    qoe: { ...qoe, steps: qoe.steps.map((step, index) => ({ ...step, label: text(accepted[index]?.payload.title) || step.adjustmentId })) },
+    qoe: {
+      ...qoe,
+      steps: qoe.steps.map((step, index) => ({
+        ...step,
+        label: text(accepted[index]?.payload.title) || step.adjustmentId,
+      })),
+    },
     board: {
       title: `${tenant.name} board pack`,
       cutoff: latest.period.endDate,
       stateHash: latest.statement.inputHash,
       sections: [
-        { heading: "Performance", figures: [figure("Revenue", latest.statement.incomeStatement.revenueMinor, currency, latest.statement.inputHash), figure("Net income", latest.statement.incomeStatement.netIncomeMinor, currency, latest.statement.inputHash)] },
-        { heading: "Cash", figures: [figure("Ending cash", latest.statement.cashFlow.endingCashMinor, currency, latest.statement.inputHash), figure("13-week ending", cashBase.weeks.at(-1)?.endingMinor ?? "0", currency, cashBase.inputHash)] },
-        { heading: "Quality of earnings", figures: [figure("Reported net income", qoe.reported, currency, qoe.inputHash), figure("Normalized earnings", qoe.normalized, currency, qoe.inputHash)] },
+        {
+          heading: "Performance",
+          figures: [
+            figure(
+              "Revenue",
+              latest.statement.incomeStatement.revenueMinor,
+              currency,
+              latest.statement.inputHash,
+            ),
+            figure(
+              "Net income",
+              latest.statement.incomeStatement.netIncomeMinor,
+              currency,
+              latest.statement.inputHash,
+            ),
+          ],
+        },
+        {
+          heading: "Cash",
+          figures: [
+            figure(
+              "Ending cash",
+              latest.statement.cashFlow.endingCashMinor,
+              currency,
+              latest.statement.inputHash,
+            ),
+            figure(
+              "13-week ending",
+              cashBase.weeks.at(-1)?.endingMinor ?? "0",
+              currency,
+              cashBase.inputHash,
+            ),
+          ],
+        },
+        {
+          heading: "Quality of earnings",
+          figures: [
+            figure("Reported net income", qoe.reported, currency, qoe.inputHash),
+            figure("Normalized earnings", qoe.normalized, currency, qoe.inputHash),
+          ],
+        },
       ],
     },
     onboarding: {
       steps: [
         { id: "upload", label: "Upload trial balance and statements", state: "complete" },
         { id: "map", label: "Map source accounts", state: "complete" },
-        { id: "reconcile", label: "Reconciliation certificate", state: isZeroMoney(bankGap) ? "complete" : "exception" },
+        {
+          id: "reconcile",
+          label: "Reconciliation certificate",
+          state: isZeroMoney(bankGap) ? "complete" : "exception",
+        },
       ],
       certificate: {
         bookCash: present(latest.statement.cashFlow.endingCashMinor, currency),
@@ -476,10 +630,21 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
       citationId: text(item.payload.citationId),
       amountMinor: text(item.payload.amount),
     })),
-    documents: documents.map((item) => ({ id: item.id, title: text(item.payload.title), fileName: text(item.payload.fileName), excerpt: text(item.payload.body).slice(0, 280) })),
+    documents: documents.map((item) => ({
+      id: item.id,
+      title: text(item.payload.title),
+      fileName: text(item.payload.fileName),
+      excerpt: text(item.payload.body).slice(0, 280),
+    })),
     admin: {
-      members: (deps.directory.list().find((card) => card.tenantId === tenantId)?.members ?? []).map((member) => ({ ...member })),
-      policies: policies.map((item) => ({ id: item.id, name: text(item.payload.name), body: text(item.payload.body) })),
+      members: (
+        deps.directory.list().find((card) => card.tenantId === tenantId)?.members ?? []
+      ).map((member) => ({ ...member })),
+      policies: policies.map((item) => ({
+        id: item.id,
+        name: text(item.payload.name),
+        body: text(item.payload.body),
+      })),
       audit: auditEvents,
       auditLocked,
     },
@@ -490,9 +655,21 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
         revenue: item.statement.incomeStatement.revenueMinor,
         netIncome: item.statement.incomeStatement.netIncomeMinor,
         cash: item.statement.cashFlow.endingCashMinor,
-        revenueDelta: deltaMinor(currency, item.statement.incomeStatement.revenueMinor, prior?.incomeStatement.revenueMinor ?? null),
-        netIncomeDelta: deltaMinor(currency, item.statement.incomeStatement.netIncomeMinor, prior?.incomeStatement.netIncomeMinor ?? null),
-        cashDelta: deltaMinor(currency, item.statement.cashFlow.endingCashMinor, prior?.cashFlow.endingCashMinor ?? null),
+        revenueDelta: deltaMinor(
+          currency,
+          item.statement.incomeStatement.revenueMinor,
+          prior?.incomeStatement.revenueMinor ?? null,
+        ),
+        netIncomeDelta: deltaMinor(
+          currency,
+          item.statement.incomeStatement.netIncomeMinor,
+          prior?.incomeStatement.netIncomeMinor ?? null,
+        ),
+        cashDelta: deltaMinor(
+          currency,
+          item.statement.cashFlow.endingCashMinor,
+          prior?.cashFlow.endingCashMinor ?? null,
+        ),
       };
     }),
   };
@@ -507,39 +684,127 @@ async function platformView(deps: WorkspaceDeps, actor: ActorContext) {
   const support = tenantId ? await deps.store.listWorkspaceRecords(tenantId, "support") : [];
   return {
     tenants: deps.directory.list(),
-    flags: flags.map((item) => ({ id: item.id, key: text(item.payload.key), label: text(item.payload.label), enabled: item.payload.enabled === true, status: item.status })),
-    connectors: connectors.map((item) => ({ id: item.id, label: text(item.payload.label), status: item.status, detail: text(item.payload.detail) })),
-    runs: runs.slice(-20).map((item) => ({ id: item.id, status: item.status, agent: text(item.payload.agent), mode: text(item.payload.mode), createdAt: item.createdAt })),
-    support: support.map((item) => ({ id: item.id, status: item.status, actorId: text(item.payload.actorId), expiresAt: text(item.payload.expiresAt), reason: text(item.payload.reason) })),
+    flags: flags.map((item) => ({
+      id: item.id,
+      key: text(item.payload.key),
+      label: text(item.payload.label),
+      enabled: item.payload.enabled === true,
+      status: item.status,
+    })),
+    connectors: connectors.map((item) => ({
+      id: item.id,
+      label: text(item.payload.label),
+      status: item.status,
+      detail: text(item.payload.detail),
+    })),
+    runs: runs.slice(-20).map((item) => ({
+      id: item.id,
+      status: item.status,
+      agent: text(item.payload.agent),
+      mode: text(item.payload.mode),
+      createdAt: item.createdAt,
+    })),
+    support: support.map((item) => ({
+      id: item.id,
+      status: item.status,
+      actorId: text(item.payload.actorId),
+      expiresAt: text(item.payload.expiresAt),
+      reason: text(item.payload.reason),
+    })),
   };
 }
 
 function statementRows(
-  series: readonly { period: { periodId: string }; statement: ReturnType<typeof buildStatements> }[],
+  series: readonly {
+    period: { periodId: string };
+    statement: ReturnType<typeof buildStatements>;
+  }[],
   currency: string,
 ) {
   const specs = [
-    ["revenue", "Revenue", "income", (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.revenueMinor],
-    ["expenses", "Expenses", "income", (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.expensesMinor],
-    ["net", "Net income", "income", (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.netIncomeMinor],
-    ["assets", "Assets", "balance", (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.assetsMinor],
-    ["liabilities", "Liabilities", "balance", (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.liabilitiesMinor],
-    ["equity", "Equity", "balance", (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.equityMinor],
-    ["begin", "Beginning cash", "cash", (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.beginningCashMinor],
-    ["cfo", "Operating cash", "cash", (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cfoMinor],
-    ["cfi", "Investing cash", "cash", (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cfiMinor],
-    ["cff", "Financing cash", "cash", (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cffMinor],
-    ["end", "Ending cash", "cash", (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.endingCashMinor],
+    [
+      "revenue",
+      "Revenue",
+      "income",
+      (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.revenueMinor,
+    ],
+    [
+      "expenses",
+      "Expenses",
+      "income",
+      (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.expensesMinor,
+    ],
+    [
+      "net",
+      "Net income",
+      "income",
+      (statement: ReturnType<typeof buildStatements>) => statement.incomeStatement.netIncomeMinor,
+    ],
+    [
+      "assets",
+      "Assets",
+      "balance",
+      (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.assetsMinor,
+    ],
+    [
+      "liabilities",
+      "Liabilities",
+      "balance",
+      (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.liabilitiesMinor,
+    ],
+    [
+      "equity",
+      "Equity",
+      "balance",
+      (statement: ReturnType<typeof buildStatements>) => statement.balanceSheet.equityMinor,
+    ],
+    [
+      "begin",
+      "Beginning cash",
+      "cash",
+      (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.beginningCashMinor,
+    ],
+    [
+      "cfo",
+      "Operating cash",
+      "cash",
+      (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cfoMinor,
+    ],
+    [
+      "cfi",
+      "Investing cash",
+      "cash",
+      (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cfiMinor,
+    ],
+    [
+      "cff",
+      "Financing cash",
+      "cash",
+      (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.cffMinor,
+    ],
+    [
+      "end",
+      "Ending cash",
+      "cash",
+      (statement: ReturnType<typeof buildStatements>) => statement.cashFlow.endingCashMinor,
+    ],
   ] as const;
   return specs.map(([key, label, section, read]) => ({
     key,
     label,
     section,
-    values: series.map((item) => ({ periodId: item.period.periodId, ...present(read(item.statement), currency) })),
+    values: series.map((item) => ({
+      periodId: item.period.periodId,
+      ...present(read(item.statement), currency),
+    })),
   }));
 }
 
-function classify(activity: readonly PostedActivityLine[], periodId: string, periodStart: string): ClassifiedLine[] {
+function classify(
+  activity: readonly PostedActivityLine[],
+  periodId: string,
+  periodStart: string,
+): ClassifiedLine[] {
   return activity
     .filter((line) => line.periodId === periodId || line.periodEnd < periodStart)
     .map((line) => ({
@@ -570,8 +835,21 @@ function present(minor: string, currency: string): { minor: string; display: str
   return { minor, display: `${negative ? "-" : ""}${grouped}${fraction ? `.${fraction}` : ""}` };
 }
 
-function kpi(id: string, label: string, minor: string, currency: string, inputHash: string, engineVersion: string) {
-  return { id, label, ...present(minor, currency), currency, lineage: { inputHash, engineVersion, source: "kernel" } };
+function kpi(
+  id: string,
+  label: string,
+  minor: string,
+  currency: string,
+  inputHash: string,
+  engineVersion: string,
+) {
+  return {
+    id,
+    label,
+    ...present(minor, currency),
+    currency,
+    lineage: { inputHash, engineVersion, source: "kernel" },
+  };
 }
 
 function figure(label: string, minor: string, currency: string, inputHash: string) {
@@ -603,7 +881,11 @@ function requirePlatform(deps: WorkspaceDeps, actor: ActorContext): void {
   }
 }
 
-function supportActive(card: { members: readonly { actorId: string; role: string }[] }, actorId: string, now: number): boolean {
+function supportActive(
+  card: { members: readonly { actorId: string; role: string }[] },
+  actorId: string,
+  now: number,
+): boolean {
   return card.members.some((item) => item.actorId === actorId) && now > 0;
 }
 

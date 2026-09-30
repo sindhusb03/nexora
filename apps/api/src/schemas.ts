@@ -88,7 +88,9 @@ export const groupSchema = z.object({
 
 export const modelSchema = z.object({ name: z.string().trim().min(1).max(200) });
 
-export const calcNodeSchema = z.object({ id: z.string().min(1), type: z.string().min(1) }).passthrough();
+export const calcNodeSchema = z
+  .object({ id: z.string().min(1), type: z.string().min(1) })
+  .passthrough();
 
 export const modelVersionSchema = z.object({ nodes: z.array(calcNodeSchema).min(1) });
 
@@ -100,11 +102,15 @@ export const scenarioSchema = z.object({
 });
 
 export const sensitivitySchema = z.object({
-  shocks: z.array(z.object({
-    id: z.string().min(1),
-    wacc: signedAmount.optional(),
-    terminalGrowth: signedAmount.optional(),
-  })).min(1),
+  shocks: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        wacc: signedAmount.optional(),
+        terminalGrowth: signedAmount.optional(),
+      }),
+    )
+    .min(1),
 });
 
 export const reportPackSchema = z.object({
@@ -123,17 +129,25 @@ export const debtSchema = z.object({
 
 export const capTableSchema = z.object({
   entityId: uuid,
-  holdings: z.array(z.object({
-    holderId: z.string().min(1),
-    commonShares: z.string().regex(/^\d+$/),
-    options: z.string().regex(/^\d+$/),
-    convertibles: z.string().regex(/^\d+$/),
-  })).min(1),
+  holdings: z
+    .array(
+      z.object({
+        holderId: z.string().min(1),
+        commonShares: z.string().regex(/^\d+$/),
+        options: z.string().regex(/^\d+$/),
+        convertibles: z.string().regex(/^\d+$/),
+      }),
+    )
+    .min(1),
 });
 
 export const sourcesUsesSchema = z.object({
-  sources: z.array(z.object({ label: z.string().min(1), amountMinor: z.string().regex(/^\d+$/) })).min(1),
-  uses: z.array(z.object({ label: z.string().min(1), amountMinor: z.string().regex(/^\d+$/) })).min(1),
+  sources: z
+    .array(z.object({ label: z.string().min(1), amountMinor: z.string().regex(/^\d+$/) }))
+    .min(1),
+  uses: z
+    .array(z.object({ label: z.string().min(1), amountMinor: z.string().regex(/^\d+$/) }))
+    .min(1),
 });
 
 export const lboSchema = z.object({
@@ -143,20 +157,26 @@ export const lboSchema = z.object({
 });
 
 export const importSchema = z.object({
-  rows: z.array(z.object({
-    rowNo: z.number().int().positive(),
-    account: z.string().min(1),
-    amount: signedAmount,
-  })).min(1),
+  rows: z
+    .array(
+      z.object({
+        rowNo: z.number().int().positive(),
+        account: z.string().min(1),
+        amount: signedAmount,
+      }),
+    )
+    .min(1),
 });
 
 export const qoeSchema = z.object({
   reported: signedAmount,
-  adjustments: z.array(z.object({
-    adjustmentId: z.string().min(1),
-    sourceRowId: z.string().min(1),
-    amount: signedAmount,
-  })),
+  adjustments: z.array(
+    z.object({
+      adjustmentId: z.string().min(1),
+      sourceRowId: z.string().min(1),
+      amount: signedAmount,
+    }),
+  ),
 });
 
 export const proposalSchema = z.object({
@@ -167,11 +187,15 @@ export const acceptProposalSchema = z.object({
   entityId: uuid,
   periodId: uuid,
   currency: z.string().regex(/^[A-Z]{3}$/),
-  lines: z.array(z.object({
-    accountId: uuid,
-    debitMinor: z.string().regex(/^\d+$/),
-    creditMinor: z.string().regex(/^\d+$/),
-  })).min(2),
+  lines: z
+    .array(
+      z.object({
+        accountId: uuid,
+        debitMinor: z.string().regex(/^\d+$/),
+        creditMinor: z.string().regex(/^\d+$/),
+      }),
+    )
+    .min(2),
 });
 
 export const dealSchema = z.object({
@@ -182,8 +206,12 @@ export const dealSchema = z.object({
 
 export const basisSchema = z.object({
   basisVersion: z.string().min(1),
-  localBalances: z.array(z.object({ accountId: z.string().min(1), debitPositiveMinor: z.string().regex(/^-?\d+$/) })),
-  mappings: z.array(z.object({ localAccountId: z.string().min(1), groupAccountId: z.string().min(1) })),
+  localBalances: z.array(
+    z.object({ accountId: z.string().min(1), debitPositiveMinor: z.string().regex(/^-?\d+$/) }),
+  ),
+  mappings: z.array(
+    z.object({ localAccountId: z.string().min(1), groupAccountId: z.string().min(1) }),
+  ),
 });
 
 export const ownershipSchema = z.object({
@@ -199,11 +227,15 @@ export const ownershipSchema = z.object({
 export const translateSchema = z.object({
   sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
   ctaAccountId: z.string().min(1),
-  lines: z.array(z.object({
-    accountId: z.string().min(1),
-    rateType: z.enum(["closing", "historical", "average"]),
-    debitPositiveMinor: z.string().regex(/^-?\d+$/),
-  })).min(1),
+  lines: z
+    .array(
+      z.object({
+        accountId: z.string().min(1),
+        rateType: z.enum(["closing", "historical", "average"]),
+        debitPositiveMinor: z.string().regex(/^-?\d+$/),
+      }),
+    )
+    .min(1),
   rates: z.object({
     closing: fxRateSchema(),
     historical: fxRateSchema(),
@@ -213,23 +245,31 @@ export const translateSchema = z.object({
 
 export const eliminationSchema = z.object({
   evidenceId: z.string().min(1),
-  balances: z.array(z.object({ accountId: z.string().min(1), debitPositiveMinor: z.string().regex(/^-?\d+$/) })),
-  eliminations: z.array(z.object({
-    accountId: z.string().min(1),
-    debitMinor: z.string().regex(/^\d+$/),
-    creditMinor: z.string().regex(/^\d+$/),
-    evidenceId: z.string().min(1),
-  })),
+  balances: z.array(
+    z.object({ accountId: z.string().min(1), debitPositiveMinor: z.string().regex(/^-?\d+$/) }),
+  ),
+  eliminations: z.array(
+    z.object({
+      accountId: z.string().min(1),
+      debitMinor: z.string().regex(/^\d+$/),
+      creditMinor: z.string().regex(/^\d+$/),
+      evidenceId: z.string().min(1),
+    }),
+  ),
 });
 
 export const fxSetSchema = z.object({
   label: z.string().min(1),
-  rates: z.array(z.object({
-    base: z.string().regex(/^[A-Z]{3}$/),
-    quote: z.string().regex(/^[A-Z]{3}$/),
-    rateType: z.enum(["closing", "historical", "average"]),
-    rate: amount,
-  })).min(1),
+  rates: z
+    .array(
+      z.object({
+        base: z.string().regex(/^[A-Z]{3}$/),
+        quote: z.string().regex(/^[A-Z]{3}$/),
+        rateType: z.enum(["closing", "historical", "average"]),
+        rate: amount,
+      }),
+    )
+    .min(1),
 });
 
 function fxRateSchema() {

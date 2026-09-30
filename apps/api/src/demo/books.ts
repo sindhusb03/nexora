@@ -15,21 +15,99 @@ export interface BookJournal {
 
 export const DEMO_ACCOUNTS = [
   { code: "1000", name: "Cash", report: "asset", cashFlow: "cash", retainedEarnings: false },
-  { code: "1100", name: "Accounts receivable", report: "asset", cashFlow: "cfo", retainedEarnings: false },
+  {
+    code: "1100",
+    name: "Accounts receivable",
+    report: "asset",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
   { code: "1500", name: "Equipment", report: "asset", cashFlow: "cfi", retainedEarnings: false },
-  { code: "2000", name: "Accounts payable", report: "liability", cashFlow: "cfo", retainedEarnings: false },
-  { code: "2100", name: "Deferred revenue", report: "liability", cashFlow: "cfo", retainedEarnings: false },
-  { code: "2500", name: "Term loan", report: "liability", cashFlow: "cff", retainedEarnings: false },
-  { code: "3000", name: "Common stock", report: "equity", cashFlow: "cff", retainedEarnings: false },
-  { code: "3100", name: "Retained earnings", report: "equity", cashFlow: "non_cash", retainedEarnings: true },
-  { code: "3200", name: "Distributions", report: "equity", cashFlow: "distribution", retainedEarnings: false },
-  { code: "4000", name: "Patient services", report: "revenue", cashFlow: "cfo", retainedEarnings: false },
-  { code: "4100", name: "Device sales", report: "revenue", cashFlow: "cfo", retainedEarnings: false },
-  { code: "5000", name: "Clinical supplies", report: "expense", cashFlow: "cfo", retainedEarnings: false },
-  { code: "6100", name: "Clinical payroll", report: "expense", cashFlow: "cfo", retainedEarnings: false },
+  {
+    code: "2000",
+    name: "Accounts payable",
+    report: "liability",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "2100",
+    name: "Deferred revenue",
+    report: "liability",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "2500",
+    name: "Term loan",
+    report: "liability",
+    cashFlow: "cff",
+    retainedEarnings: false,
+  },
+  {
+    code: "3000",
+    name: "Common stock",
+    report: "equity",
+    cashFlow: "cff",
+    retainedEarnings: false,
+  },
+  {
+    code: "3100",
+    name: "Retained earnings",
+    report: "equity",
+    cashFlow: "non_cash",
+    retainedEarnings: true,
+  },
+  {
+    code: "3200",
+    name: "Distributions",
+    report: "equity",
+    cashFlow: "distribution",
+    retainedEarnings: false,
+  },
+  {
+    code: "4000",
+    name: "Patient services",
+    report: "revenue",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "4100",
+    name: "Device sales",
+    report: "revenue",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "5000",
+    name: "Clinical supplies",
+    report: "expense",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "6100",
+    name: "Clinical payroll",
+    report: "expense",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
   { code: "6200", name: "Occupancy", report: "expense", cashFlow: "cfo", retainedEarnings: false },
-  { code: "6300", name: "Software and systems", report: "expense", cashFlow: "cfo", retainedEarnings: false },
-  { code: "6400", name: "Professional fees", report: "expense", cashFlow: "cfo", retainedEarnings: false },
+  {
+    code: "6300",
+    name: "Software and systems",
+    report: "expense",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
+  {
+    code: "6400",
+    name: "Professional fees",
+    report: "expense",
+    cashFlow: "cfo",
+    retainedEarnings: false,
+  },
 ] as const;
 
 export const PLANNING_DRIVERS = {
@@ -46,8 +124,20 @@ export const PLAN_BUDGET = {
 } as const;
 
 export const QOE_ADJUSTMENTS = [
-  { adjustmentId: "adj-owner-travel", sourceRowId: "src-owner-travel", amount: "450000", label: "Owner personal travel", taxonomy: "owner" },
-  { adjustmentId: "adj-litigation", sourceRowId: "src-litigation", amount: "1200000", label: "One-time litigation", taxonomy: "one-time" },
+  {
+    adjustmentId: "adj-owner-travel",
+    sourceRowId: "src-owner-travel",
+    amount: "450000",
+    label: "Owner personal travel",
+    taxonomy: "owner",
+  },
+  {
+    adjustmentId: "adj-litigation",
+    sourceRowId: "src-litigation",
+    amount: "1200000",
+    label: "One-time litigation",
+    taxonomy: "one-time",
+  },
 ] as const;
 
 const ACTIVITY_MONTHS = 21;

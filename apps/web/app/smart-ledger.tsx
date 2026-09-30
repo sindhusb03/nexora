@@ -43,7 +43,9 @@ export function SmartLedger({
         <h1>Smart Ledger</h1>
         <div className="notice notice-locked" role="status">
           <strong>Smart Ledger not applicable.</strong>
-          <p>Choose Bank or Trial balance in Upload and Map. Financial statements stay structured.</p>
+          <p>
+            Choose Bank or Trial balance in Upload and Map. Financial statements stay structured.
+          </p>
         </div>
       </section>
     );
@@ -72,7 +74,10 @@ export function SmartLedger({
       return;
     }
     const refusal = typeof data.refusal === "string" ? data.refusal : null;
-    setAnswer(refusal ?? "The kernel accepted the wording. A number still needs a citation before it can be shown as a figure.");
+    setAnswer(
+      refusal ??
+        "The kernel accepted the wording. A number still needs a citation before it can be shown as a figure.",
+    );
   }
 
   const dated = source.rows.some((row) => typeof row.date === "string");
@@ -92,7 +97,10 @@ export function SmartLedger({
           <h1>
             Smart Ledger <SuggestedBadge />
           </h1>
-          <p>Re-map any category. Suggestions stay labeled until you change them. This screen does not post journals.</p>
+          <p>
+            Re-map any category. Suggestions stay labeled until you change them. This screen does
+            not post journals.
+          </p>
         </div>
       </header>
       <div className="notice notice-info" role="status">
@@ -115,7 +123,8 @@ export function SmartLedger({
           </thead>
           <tbody>
             {source.rows.map((row) => {
-              const suggested = row.suggestedCategory !== null && row.category === row.suggestedCategory;
+              const suggested =
+                row.suggestedCategory !== null && row.category === row.suggestedCategory;
               const duplicate = duplicateAccounts.has(row.account.toLowerCase());
               return (
                 <tr key={row.rowNo}>
@@ -127,7 +136,11 @@ export function SmartLedger({
                     <label className="sr-only" htmlFor={`cat-${row.rowNo}`}>
                       Category for {row.account}
                     </label>
-                    <select id={`cat-${row.rowNo}`} value={row.category} onChange={(event) => setCategory(row.rowNo, event.target.value)}>
+                    <select
+                      id={`cat-${row.rowNo}`}
+                      value={row.category}
+                      onChange={(event) => setCategory(row.rowNo, event.target.value)}
+                    >
                       <option value="">Unmapped</option>
                       {CATEGORIES.map((category) => (
                         <option key={category} value={category}>
@@ -148,18 +161,28 @@ export function SmartLedger({
       <form className="form-card" onSubmit={(event) => void ask(event)}>
         <h2>Ask about these rows</h2>
         <Field label="Question">
-          <Input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should I review?" />
+          <Input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="What should I review?"
+          />
         </Field>
         <Button type="submit" disabled={action.state.pending || session.tenantId.length === 0}>
           Ask
         </Button>
-        {session.tenantId.length === 0 ? <p className="muted small">Provision a company before the kernel can accept a question.</p> : null}
+        {session.tenantId.length === 0 ? (
+          <p className="muted small">
+            Provision a company before the kernel can accept a question.
+          </p>
+        ) : null}
         {answer ? (
           <p className="suggested">
             <SuggestedBadge /> {answer}
           </p>
         ) : null}
-        {action.state.error ? <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} /> : null}
+        {action.state.error ? (
+          <ErrorNotice error={action.state.error} httpStatus={action.state.httpStatus} />
+        ) : null}
       </form>
     </section>
   );

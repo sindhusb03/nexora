@@ -66,7 +66,9 @@ export const account = pgTable(
     active: boolean("active").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [uniqueIndex("account_entity_code").on(table.tenantId, table.legalEntityId, table.code)],
+  (table) => [
+    uniqueIndex("account_entity_code").on(table.tenantId, table.legalEntityId, table.code),
+  ],
 );
 
 export const accountingPeriod = pgTable(
@@ -85,7 +87,12 @@ export const accountingPeriod = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
-    uniqueIndex("period_entity_range").on(table.tenantId, table.legalEntityId, table.startDate, table.endDate),
+    uniqueIndex("period_entity_range").on(
+      table.tenantId,
+      table.legalEntityId,
+      table.startDate,
+      table.endDate,
+    ),
     index("ix_period_tenant_entity_status").on(table.tenantId, table.legalEntityId, table.status),
     check("period_range", sql`${table.endDate} >= ${table.startDate}`),
   ],

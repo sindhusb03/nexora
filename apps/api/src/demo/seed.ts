@@ -41,7 +41,10 @@ export async function seedDemo(
   await ledger.grantMembership(owner, { actorId: "controller", role: "controller" });
   await ledger.grantMembership(owner, { actorId: "viewer", role: "viewer" });
 
-  const entity = await ledger.createEntity(owner, { legalName: "Nazareno Services LLC", functionalCurrency: "USD" });
+  const entity = await ledger.createEntity(owner, {
+    legalName: "Nazareno Services LLC",
+    functionalCurrency: "USD",
+  });
   const accounts = new Map<string, string>();
   for (const account of DEMO_ACCOUNTS) {
     const created = await ledger.createAccount(owner, { entityId: entity.entityId, ...account });
@@ -80,7 +83,10 @@ export async function seedDemo(
     membershipId: supportMembershipId,
     actorId: "platform-admin",
     role: "auditor",
-    audit: audit(admin, tenant.tenantId, "MembershipGranted", supportMembershipId, { role: "auditor", reason: "support-access" }),
+    audit: audit(admin, tenant.tenantId, "MembershipGranted", supportMembershipId, {
+      role: "auditor",
+      reason: "support-access",
+    }),
   });
 
   await insertRecord(store, owner, "drivers", "active", { ...PLANNING_DRIVERS });
@@ -92,12 +98,36 @@ export async function seedDemo(
     name: "AI policy",
     body: "Agents may propose mappings, variance notes, normalization adjustments, and board drafts. They cannot post journals or publish numbers. Supervised autonomy.",
   });
-  await insertRecord(store, owner, "flag", "active", { key: "copilot", enabled: true, label: "Copilot drawer" });
-  await insertRecord(store, owner, "flag", "active", { key: "board_export", enabled: true, label: "Board pack export" });
-  await insertRecord(store, owner, "flag", "off", { key: "excel_addin", enabled: false, label: "Excel add-in" });
-  await insertRecord(store, owner, "connector", "healthy", { key: "statements_xlsx", label: "Monthly statement workbooks", detail: "Nazareno income and balance sheet files staged" });
-  await insertRecord(store, owner, "connector", "healthy", { key: "bank_pdf", label: "Bank statement PDFs", detail: "Twelve operating-account PDFs staged" });
-  await insertRecord(store, owner, "connector", "unavailable", { key: "tally", label: "Tally", detail: "India connector is not connected in this build" });
+  await insertRecord(store, owner, "flag", "active", {
+    key: "copilot",
+    enabled: true,
+    label: "Copilot drawer",
+  });
+  await insertRecord(store, owner, "flag", "active", {
+    key: "board_export",
+    enabled: true,
+    label: "Board pack export",
+  });
+  await insertRecord(store, owner, "flag", "off", {
+    key: "excel_addin",
+    enabled: false,
+    label: "Excel add-in",
+  });
+  await insertRecord(store, owner, "connector", "healthy", {
+    key: "statements_xlsx",
+    label: "Monthly statement workbooks",
+    detail: "Nazareno income and balance sheet files staged",
+  });
+  await insertRecord(store, owner, "connector", "healthy", {
+    key: "bank_pdf",
+    label: "Bank statement PDFs",
+    detail: "Twelve operating-account PDFs staged",
+  });
+  await insertRecord(store, owner, "connector", "unavailable", {
+    key: "tally",
+    label: "Tally",
+    detail: "India connector is not connected in this build",
+  });
   await insertRecord(store, owner, "support", "active", {
     actorId: "platform-admin",
     membershipId: supportMembershipId,
@@ -118,13 +148,15 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "suggested", {
     agent: "mapping",
     title: "Map Piezas to patient services",
-    summary: "4001.1 Piezas from the Nazareno income workbook maps to account 4000. Suggested, not posted.",
+    summary:
+      "4001.1 Piezas from the Nazareno income workbook maps to account 4000. Suggested, not posted.",
     citationId: "nazareno-income",
   });
   await insertRecord(store, owner, "proposal", "suggested", {
     agent: "variance",
     title: "September revenue variance",
-    summary: "Revenue is ahead of the $150,000.00 plan. Commentary is suggested until you accept it.",
+    summary:
+      "Revenue is ahead of the $150,000.00 plan. Commentary is suggested until you accept it.",
     citationId: "variance",
   });
   await insertRecord(store, owner, "proposal", "suggested", {
@@ -136,7 +168,8 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "accepted", {
     agent: "normalization",
     title: "Owner travel add-back",
-    summary: "Owner personal travel of $4,500.00. Accepted as a bridge line. Posted actuals are unchanged.",
+    summary:
+      "Owner personal travel of $4,500.00. Accepted as a bridge line. Posted actuals are unchanged.",
     citationId: "adj-owner-travel",
     amount: "450000",
     sourceRowId: "src-owner-travel",
@@ -144,7 +177,8 @@ export async function seedDemo(
   await insertRecord(store, owner, "proposal", "accepted", {
     agent: "normalization",
     title: "One-time litigation",
-    summary: "One-time litigation of $12,000.00. Accepted as a bridge line. Posted actuals are unchanged.",
+    summary:
+      "One-time litigation of $12,000.00. Accepted as a bridge line. Posted actuals are unchanged.",
     citationId: "adj-litigation",
     amount: "1200000",
     sourceRowId: "src-litigation",
@@ -172,7 +206,13 @@ function requiredAccount(accounts: ReadonlyMap<string, string>, code: string): s
   return accountId;
 }
 
-async function insertRecord(store: LedgerStore, actor: ActorContext, kind: string, status: string, payload: Record<string, unknown>) {
+async function insertRecord(
+  store: LedgerStore,
+  actor: ActorContext,
+  kind: string,
+  status: string,
+  payload: Record<string, unknown>,
+) {
   const id = crypto.randomUUID();
   await store.insertWorkspaceRecord({
     tenantId: actor.tenantId ?? "",
@@ -185,7 +225,11 @@ async function insertRecord(store: LedgerStore, actor: ActorContext, kind: strin
   });
 }
 
-function actor(actorId: string, tenantId: string | null, idempotencyKey: string | null = null): ActorContext {
+function actor(
+  actorId: string,
+  tenantId: string | null,
+  idempotencyKey: string | null = null,
+): ActorContext {
   return {
     actorId,
     tenantId,
@@ -197,7 +241,13 @@ function actor(actorId: string, tenantId: string | null, idempotencyKey: string 
   };
 }
 
-function audit(actor: ActorContext, tenantId: string, eventType: string, aggregateId: string, payload: Record<string, unknown>) {
+function audit(
+  actor: ActorContext,
+  tenantId: string,
+  eventType: string,
+  aggregateId: string,
+  payload: Record<string, unknown>,
+) {
   return {
     eventId: crypto.randomUUID(),
     eventType,

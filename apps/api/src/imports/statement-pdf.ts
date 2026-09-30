@@ -1,11 +1,22 @@
 import { statementAmountToDecimal } from "./decimal-text.js";
 import type { PdfLine, PdfText } from "./bank-pdf.js";
-import type { StatementLine, StatementPeriod, StatementSheet, StatementType, StatementWorkbook } from "./statement-xlsx.js";
+import type {
+  StatementLine,
+  StatementPeriod,
+  StatementSheet,
+  StatementType,
+  StatementWorkbook,
+} from "./statement-xlsx.js";
 
 const TITLES: readonly { readonly pattern: RegExp; readonly type: StatementType }[] = [
-  { pattern: /^(balance sheet|statement of financial position|estado de situaci[oó]n(?: financiera)?)$/i, type: "balance_sheet" },
   {
-    pattern: /^(income statement|statement of (loss and comprehensive income|comprehensive income|loss|income|operations)|estados? de ingresos(?: y gastos)?(?: y cambio en participacion)?)$/i,
+    pattern:
+      /^(balance sheet|statement of financial position|estado de situaci[oó]n(?: financiera)?)$/i,
+    type: "balance_sheet",
+  },
+  {
+    pattern:
+      /^(income statement|statement of (loss and comprehensive income|comprehensive income|loss|income|operations)|estados? de ingresos(?: y gastos)?(?: y cambio en participacion)?)$/i,
     type: "income_statement",
   },
   { pattern: /^(statement of cash flows|estados? de flujos de efectivo)$/i, type: "cash_flow" },
@@ -30,7 +41,8 @@ export function parseStatementPdf(text: PdfText, fileName: string): StatementWor
   if (sheets.length === 0 && skippedSheets.length === 0) {
     skippedSheets.push({
       sheetName: fileName,
-      reason: "No balance sheet, income statement, cash flow, or equity statement heading was found",
+      reason:
+        "No balance sheet, income statement, cash flow, or equity statement heading was found",
     });
   }
   return { sheets, skippedSheets };
@@ -45,7 +57,8 @@ interface Section {
 
 function collectSections(lines: readonly PdfLine[]): Section[] {
   const sections: Section[] = [];
-  let current: { title: string; type: StatementType; preamble: string[]; lines: PdfLine[] } | null = null;
+  let current: { title: string; type: StatementType; preamble: string[]; lines: PdfLine[] } | null =
+    null;
   const before: string[] = [];
   for (const line of lines) {
     const title = titleOf(line);
@@ -68,11 +81,15 @@ function collectSections(lines: readonly PdfLine[]): Section[] {
 }
 
 function sectionToSheet(section: Section, index: number): StatementSheet | { reason: string } {
-  const dated = [...section.preamble, ...section.lines.slice(0, 8).map(lineText)].map(findDate).find((date) => date !== null) ?? null;
+  const dated =
+    [...section.preamble, ...section.lines.slice(0, 8).map(lineText)]
+      .map(findDate)
+      .find((date) => date !== null) ?? null;
   const split = section.lines.map(splitLine);
   const amountXs = split.flatMap((line) => line.amounts.map((amount) => amount.x));
   const centers = cluster(amountXs);
-  if (centers.length === 0) return { reason: "The statement heading has no printed amounts under it" };
+  if (centers.length === 0)
+    return { reason: "The statement heading has no printed amounts under it" };
 
   const headerLines = split.filter((line) => line.amounts.length === 0).slice(0, 8);
   const periods: StatementPeriod[] = centers.map((center, column) => ({
@@ -113,7 +130,9 @@ function sectionToSheet(section: Section, index: number): StatementSheet | { rea
     lines.push({ sheetRow: lines.length + 1, label: line.label, kind, values });
   }
   if (!lines.some((line) => line.values.length > 0)) {
-    return { reason: "The statement heading has labels but no amount columns this parser could keep" };
+    return {
+      reason: "The statement heading has labels but no amount columns this parser could keep",
+    };
   }
   return {
     sheetName: section.title || `Statement ${index + 1}`,
@@ -125,16 +144,29 @@ function sectionToSheet(section: Section, index: number): StatementSheet | { rea
   };
 }
 
-function columnLabel(center: number, headers: readonly Split[], singleDate: string | null, column: number): string {
+function columnLabel(
+  center: number,
+  headers: readonly Split[],
+  singleDate: string | null,
+  column: number,
+): string {
   const phrases: string[] = [];
   for (const header of headers) {
     const phrase = header.items
-      .filter((item) => item.text !== "$" && statementAmountToDecimal(item.text) === null && Math.abs(item.x - center) <= 55)
+      .filter(
+        (item) =>
+          item.text !== "$" &&
+          statementAmountToDecimal(item.text) === null &&
+          Math.abs(item.x - center) <= 55,
+      )
       .map((item) => item.text)
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
-    if (/^(current month|year to date)( (this year|last year))?$/i.test(phrase) || /^(this year|last year|ytd|(19|20)\d{2})$/i.test(phrase)) {
+    if (
+      /^(current month|year to date)( (this year|last year))?$/i.test(phrase) ||
+      /^(this year|last year|ytd|(19|20)\d{2})$/i.test(phrase)
+    ) {
       phrases.push(phrase);
     }
   }
@@ -170,7 +202,11 @@ function titleOf(line: PdfLine): { type: StatementType } | null {
 }
 
 function lineText(line: PdfLine): string {
-  return line.items.map((item) => item.text).join(" ").replace(/\s+/g, " ").trim();
+  return line.items
+    .map((item) => item.text)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function findDate(text: string): string | null {

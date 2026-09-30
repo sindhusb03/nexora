@@ -27,7 +27,7 @@ export function excelNumberToDecimal(raw: string): string | null {
   point -= leading;
 
   if (digits.length > EXCEL_SIGNIFICANT_DIGITS) {
-    const roundUp = (digits.charCodeAt(EXCEL_SIGNIFICANT_DIGITS) - 48) >= 5;
+    const roundUp = digits.charCodeAt(EXCEL_SIGNIFICANT_DIGITS) - 48 >= 5;
     digits = digits.slice(0, EXCEL_SIGNIFICANT_DIGITS);
     if (roundUp) {
       digits = incrementDigits(digits);

@@ -1,0 +1,9 @@
+node_modules
+.agents
+dist
+.next
+coverage
+test-results
+playwright-report
+pnpm-lock.yaml
+*.tsbuildinfo

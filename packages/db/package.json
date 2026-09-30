@@ -13,7 +13,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
     "@nexora/kernel": "workspace:*",
-    "drizzle-orm": "^0.44.5",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },
   "devDependencies": {

@@ -60,9 +60,13 @@ export function useAction(): {
   readonly run: <T>(action: () => Promise<ApiResult<T>>) => Promise<T | null>;
   readonly clear: () => void;
 } {
-  const [state, setState] = useState<ActionState>({ pending: false, error: null, httpStatus: null });
+  const [state, setState] = useState<ActionState>({
+    pending: false,
+    error: null,
+    httpStatus: null,
+  });
 
-  const run = useCallback(async <T,>(action: () => Promise<ApiResult<T>>): Promise<T | null> => {
+  const run = useCallback(async <T>(action: () => Promise<ApiResult<T>>): Promise<T | null> => {
     setState({ pending: true, error: null, httpStatus: null });
     const result = await action();
     if (result.ok) {
@@ -133,7 +137,10 @@ export function readStoredSelection(tenantId: string): Selection {
 
 export function writeStoredSelection(tenantId: string, selection: Selection): void {
   try {
-    window.sessionStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify({ tenantId, ...selection }));
+    window.sessionStorage.setItem(
+      SELECTION_STORAGE_KEY,
+      JSON.stringify({ tenantId, ...selection }),
+    );
   } catch {
     // Selection memory is a convenience; the screen still works without it.
   }
@@ -147,7 +154,12 @@ export interface ProgramProgress {
   readonly publishedValuationId: string | null;
 }
 
-const EMPTY_PROGRESS: ProgramProgress = { stateId: null, publishedStateId: null, valuationId: null, publishedValuationId: null };
+const EMPTY_PROGRESS: ProgramProgress = {
+  stateId: null,
+  publishedStateId: null,
+  valuationId: null,
+  publishedValuationId: null,
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function progressKey(tenantId: string): string {

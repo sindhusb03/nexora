@@ -95,7 +95,9 @@ export function suggestCategory(account: string): string | null {
   return match ? match.category : null;
 }
 
-export function parseSourceTable(text: string): readonly { rowNo: number; account: string; amount: string }[] {
+export function parseSourceTable(
+  text: string,
+): readonly { rowNo: number; account: string; amount: string }[] {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -119,7 +121,10 @@ function isDataSource(value: unknown): value is DataSourceState {
   const kind = record.kind;
   const cadence = record.cadence;
   return (
-    (kind === null || kind === "bank" || kind === "trial_balance" || kind === "financial_statements") &&
+    (kind === null ||
+      kind === "bank" ||
+      kind === "trial_balance" ||
+      kind === "financial_statements") &&
     (cadence === "monthly" || cadence === "quarterly" || cadence === "yearly") &&
     Array.isArray(record.rows)
   );
@@ -127,7 +132,7 @@ function isDataSource(value: unknown): value is DataSourceState {
 
 function withStatementPair(state: DataSourceState): DataSourceState {
   const pair = state.statementPair;
-  if (pair && ("incomeStatement" in pair) && ("balanceSheet" in pair)) return state;
+  if (pair && "incomeStatement" in pair && "balanceSheet" in pair) return state;
   return { ...state, statementPair: EMPTY_STATEMENT_PAIR };
 }
 
@@ -142,12 +147,19 @@ interface UploadedSheet {
 /** Fills the income statement, the balance sheet, or both. A cash flow sheet never fills either slot. */
 export function applyStatementUpload(
   pair: StatementPair,
-  upload: { fileName: string; fileHash: string; cadence: StatementCadence; sheets: readonly UploadedSheet[] },
+  upload: {
+    fileName: string;
+    fileHash: string;
+    cadence: StatementCadence;
+    sheets: readonly UploadedSheet[];
+  },
 ): { pair: StatementPair; cashFlowInFile: boolean } {
   const income = richest(upload.sheets, "income_statement");
   const balance = richest(upload.sheets, "balance_sheet");
   return {
-    cashFlowInFile: upload.sheets.some((sheet) => sheet.statementType === "cash_flow" && sheet.valuedLineCount > 0),
+    cashFlowInFile: upload.sheets.some(
+      (sheet) => sheet.statementType === "cash_flow" && sheet.valuedLineCount > 0,
+    ),
     pair: {
       incomeStatement: income ? toSlot(upload, income) : pair.incomeStatement,
       balanceSheet: balance ? toSlot(upload, balance) : pair.balanceSheet,
@@ -160,27 +172,44 @@ export function statementPairNote(pair: StatementPair, cashFlowInFile: boolean):
   const balance = pair.balanceSheet;
   const sentences: string[] = [];
   if (cashFlowInFile) {
-    sentences.push("A cash flow in this file is not used. Cash flow is calculated from the income statement and the balance sheet.");
+    sentences.push(
+      "A cash flow in this file is not used. Cash flow is calculated from the income statement and the balance sheet.",
+    );
   }
   if (!income && !balance) {
     sentences.push("The income statement and the balance sheet are both still required.");
   } else if (income && !balance) {
-    sentences.push(`Income statement is in (${income.fileName}). The balance sheet is still required. Cash flow waits for both.`);
+    sentences.push(
+      `Income statement is in (${income.fileName}). The balance sheet is still required. Cash flow waits for both.`,
+    );
   } else if (!income && balance) {
-    sentences.push(`Balance sheet is in (${balance.fileName}). The income statement is still required. Cash flow waits for both.`);
+    sentences.push(
+      `Balance sheet is in (${balance.fileName}). The income statement is still required. Cash flow waits for both.`,
+    );
   } else if (income && balance && income.cadence !== balance.cadence) {
-    sentences.push(`The income statement is ${income.cadence} and the balance sheet is ${balance.cadence}. Cash flow waits until both use the same cadence.`);
+    sentences.push(
+      `The income statement is ${income.cadence} and the balance sheet is ${balance.cadence}. Cash flow waits until both use the same cadence.`,
+    );
   } else if (income && balance) {
-    sentences.push(`Income statement and balance sheet are both stored (${income.cadence}). Cash flow is not taken from the file. The kernel calculates it from classified activity for that cadence.`);
+    sentences.push(
+      `Income statement and balance sheet are both stored (${income.cadence}). Cash flow is not taken from the file. The kernel calculates it from classified activity for that cadence.`,
+    );
   }
   return sentences.join(" ");
 }
 
 function richest(sheets: readonly UploadedSheet[], type: string): UploadedSheet | null {
-  return sheets.filter((sheet) => sheet.statementType === type && sheet.valuedLineCount > 0).sort((a, b) => b.valuedLineCount - a.valuedLineCount)[0] ?? null;
+  return (
+    sheets
+      .filter((sheet) => sheet.statementType === type && sheet.valuedLineCount > 0)
+      .sort((a, b) => b.valuedLineCount - a.valuedLineCount)[0] ?? null
+  );
 }
 
-function toSlot(upload: { fileName: string; fileHash: string; cadence: StatementCadence }, sheet: UploadedSheet): StatementSlot {
+function toSlot(
+  upload: { fileName: string; fileHash: string; cadence: StatementCadence },
+  sheet: UploadedSheet,
+): StatementSlot {
   return {
     fileName: upload.fileName,
     fileHash: upload.fileHash,

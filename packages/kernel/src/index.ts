@@ -66,4 +66,10 @@ export { buildStatements } from "./statements.js";
 export type { CashFlowClass, ClassifiedLine, ReportClass, StatementSet } from "./statements.js";
 export { translateTrialBalance } from "./translation.js";
 export type { RateType, TranslatedTrialBalance, TrialBalanceLine } from "./translation.js";
-export { ANALYTICAL_SCALE, ENGINE_VERSION, MAX_GRAPH_DEPTH, MAX_GRAPH_NODES, MAX_JOURNAL_LINES } from "./version.js";
+export {
+  ANALYTICAL_SCALE,
+  ENGINE_VERSION,
+  MAX_GRAPH_DEPTH,
+  MAX_GRAPH_NODES,
+  MAX_JOURNAL_LINES,
+} from "./version.js";

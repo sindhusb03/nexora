@@ -21,7 +21,11 @@ export function embedText(text: string): number[] {
   return vector.map((value) => value / norm);
 }
 
-export function hybridSearch(query: string, chunks: readonly Chunk[], limit = 4): readonly (Chunk & { readonly score: string })[] {
+export function hybridSearch(
+  query: string,
+  chunks: readonly Chunk[],
+  limit = 4,
+): readonly (Chunk & { readonly score: string })[] {
   const queryVector = embedText(query);
   const queryTokens = new Set(tokens(query));
   return chunks

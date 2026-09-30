@@ -29,7 +29,11 @@ export interface StatementRow {
   readonly key: string;
   readonly label: string;
   readonly section: string;
-  readonly values: readonly { readonly periodId: string; readonly minor: string; readonly display: string }[];
+  readonly values: readonly {
+    readonly periodId: string;
+    readonly minor: string;
+    readonly display: string;
+  }[];
 }
 
 export interface JournalLine {
@@ -79,7 +83,11 @@ export interface CashCase {
   readonly openingCashMinor: string;
   readonly minimumCashMinor: string;
   readonly weeks: readonly CashWeek[];
-  readonly alerts: readonly { readonly weekIndex: string; readonly endingMinor: string; readonly shortfallMinor: string }[];
+  readonly alerts: readonly {
+    readonly weekIndex: string;
+    readonly endingMinor: string;
+    readonly shortfallMinor: string;
+  }[];
 }
 
 export interface VarianceLine {
@@ -95,7 +103,11 @@ export interface VarianceLine {
 
 export interface Workspace {
   readonly engineVersion: string;
-  readonly permissions: { readonly roles: readonly string[]; readonly canWrite: boolean; readonly auditLocked: boolean };
+  readonly permissions: {
+    readonly roles: readonly string[];
+    readonly canWrite: boolean;
+    readonly auditLocked: boolean;
+  };
   readonly context: {
     readonly tenantId: string;
     readonly tenantName: string;
@@ -118,7 +130,10 @@ export interface Workspace {
     readonly equityMinor: string;
   };
   readonly kpis: readonly Kpi[];
-  readonly statements: { readonly periods: readonly StatementPeriod[]; readonly rows: readonly StatementRow[] };
+  readonly statements: {
+    readonly periods: readonly StatementPeriod[];
+    readonly rows: readonly StatementRow[];
+  };
   readonly journals: readonly JournalView[];
   readonly forecast: {
     readonly drivers: {
@@ -131,8 +146,16 @@ export interface Workspace {
     readonly base: ForecastResult;
     readonly scenario: ForecastResult;
   };
-  readonly cash: { readonly minimumCashMinor: string; readonly base: CashCase; readonly downside: CashCase };
-  readonly variance: { readonly engineVersion: string; readonly inputHash: string; readonly lines: readonly VarianceLine[] };
+  readonly cash: {
+    readonly minimumCashMinor: string;
+    readonly base: CashCase;
+    readonly downside: CashCase;
+  };
+  readonly variance: {
+    readonly engineVersion: string;
+    readonly inputHash: string;
+    readonly lines: readonly VarianceLine[];
+  };
   readonly qoe: {
     readonly engineVersion: string;
     readonly inputHash: string;
@@ -152,11 +175,20 @@ export interface Workspace {
     readonly stateHash: string;
     readonly sections: readonly {
       readonly heading: string;
-      readonly figures: readonly { readonly label: string; readonly minor: string; readonly display: string; readonly inputHash: string }[];
+      readonly figures: readonly {
+        readonly label: string;
+        readonly minor: string;
+        readonly display: string;
+        readonly inputHash: string;
+      }[];
     }[];
   };
   readonly onboarding: {
-    readonly steps: readonly { readonly id: string; readonly label: string; readonly state: string }[];
+    readonly steps: readonly {
+      readonly id: string;
+      readonly label: string;
+      readonly state: string;
+    }[];
     readonly certificate: {
       readonly bookCash: MoneyCell;
       readonly bankCash: MoneyCell;
@@ -176,10 +208,19 @@ export interface Workspace {
     readonly citationId: string;
     readonly amountMinor: string;
   }[];
-  readonly documents: readonly { readonly id: string; readonly title: string; readonly fileName: string; readonly excerpt: string }[];
+  readonly documents: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly fileName: string;
+    readonly excerpt: string;
+  }[];
   readonly admin: {
     readonly members: readonly { readonly actorId: string; readonly role: string }[];
-    readonly policies: readonly { readonly id: string; readonly name: string; readonly body: string }[];
+    readonly policies: readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly body: string;
+    }[];
     readonly audit: readonly {
       readonly eventId: string;
       readonly eventType: string;
@@ -217,11 +258,39 @@ export interface CompanyCard {
 }
 
 export interface PlatformView {
-  readonly tenants: readonly { readonly tenantId: string; readonly name: string; readonly region: string; readonly status: string }[];
-  readonly flags: readonly { readonly id: string; readonly key: string; readonly label: string; readonly enabled: boolean; readonly status: string }[];
-  readonly connectors: readonly { readonly id: string; readonly label: string; readonly status: string; readonly detail: string }[];
-  readonly runs: readonly { readonly id: string; readonly status: string; readonly agent: string; readonly mode: string; readonly createdAt: string }[];
-  readonly support: readonly { readonly id: string; readonly status: string; readonly actorId: string; readonly expiresAt: string; readonly reason: string }[];
+  readonly tenants: readonly {
+    readonly tenantId: string;
+    readonly name: string;
+    readonly region: string;
+    readonly status: string;
+  }[];
+  readonly flags: readonly {
+    readonly id: string;
+    readonly key: string;
+    readonly label: string;
+    readonly enabled: boolean;
+    readonly status: string;
+  }[];
+  readonly connectors: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly status: string;
+    readonly detail: string;
+  }[];
+  readonly runs: readonly {
+    readonly id: string;
+    readonly status: string;
+    readonly agent: string;
+    readonly mode: string;
+    readonly createdAt: string;
+  }[];
+  readonly support: readonly {
+    readonly id: string;
+    readonly status: string;
+    readonly actorId: string;
+    readonly expiresAt: string;
+    readonly reason: string;
+  }[];
 }
 
 export interface CopilotReply {
@@ -243,11 +312,17 @@ export function isWorkspace(value: unknown): value is Workspace {
 export function isSession(value: unknown): value is SessionView {
   if (typeof value !== "object" || value === null) return false;
   const record = value as { actorId?: unknown; csrfToken?: unknown; platformAdmin?: unknown };
-  return typeof record.actorId === "string" && typeof record.csrfToken === "string" && typeof record.platformAdmin === "boolean";
+  return (
+    typeof record.actorId === "string" &&
+    typeof record.csrfToken === "string" &&
+    typeof record.platformAdmin === "boolean"
+  );
 }
 
 export function isPlatform(value: unknown): value is PlatformView {
   if (typeof value !== "object" || value === null) return false;
   const record = value as { tenants?: unknown; flags?: unknown; connectors?: unknown };
-  return Array.isArray(record.tenants) && Array.isArray(record.flags) && Array.isArray(record.connectors);
+  return (
+    Array.isArray(record.tenants) && Array.isArray(record.flags) && Array.isArray(record.connectors)
+  );
 }

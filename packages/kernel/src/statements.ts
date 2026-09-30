@@ -175,10 +175,7 @@ export function buildStatements(input: {
   }
 
   if (balanceCheck !== 0n) {
-    throw new KernelError(
-      "FIN_STATEMENT_IMBALANCE",
-      "Classified lines are not in balance",
-    );
+    throw new KernelError("FIN_STATEMENT_IMBALANCE", "Classified lines are not in balance");
   }
 
   const netIncome = revenue - expenses;

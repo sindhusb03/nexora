@@ -100,7 +100,12 @@ export function createApp(options: AppOptions) {
     max: http.rateLimit.authMax,
     trustProxy: http.trustProxy,
   });
-  const generalLimit = rateLimit({ name: "API", windowMs: http.rateLimit.windowMs, max: http.rateLimit.max, trustProxy: http.trustProxy });
+  const generalLimit = rateLimit({
+    name: "API",
+    windowMs: http.rateLimit.windowMs,
+    max: http.rateLimit.max,
+    trustProxy: http.trustProxy,
+  });
   app.use("/auth/login", credentialLimit);
   app.use("/auth/signup", credentialLimit);
   app.use("/auth/*", generalLimit);
@@ -109,7 +114,15 @@ export function createApp(options: AppOptions) {
   const limitBody = bodyLimit({
     maxSize: http.bodyLimitBytes,
     onError: (c) =>
-      c.json({ error: { code: "PAYLOAD_TOO_LARGE", message: `Request body exceeds ${http.bodyLimitBytes} bytes` } }, 413),
+      c.json(
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: `Request body exceeds ${http.bodyLimitBytes} bytes`,
+          },
+        },
+        413,
+      ),
   });
   app.use("/v1/*", limitBody);
   app.use("/auth/*", limitBody);
@@ -121,7 +134,10 @@ export function createApp(options: AppOptions) {
     await next();
     c.header("cache-control", "no-store");
   });
-  app.use("/v1/*", requireIdentity({ store: options.store, auth: options.auth, webOrigins: http.webOrigins }));
+  app.use(
+    "/v1/*",
+    requireIdentity({ store: options.store, auth: options.auth, webOrigins: http.webOrigins }),
+  );
 
   app.onError((error, c) => {
     if (error instanceof ApiError) {
@@ -129,7 +145,12 @@ export function createApp(options: AppOptions) {
     }
     if (error instanceof ZodError) {
       return c.json(
-        { error: { code: "VALIDATION_FAILED", message: error.issues[0]?.message ?? "Invalid request" } },
+        {
+          error: {
+            code: "VALIDATION_FAILED",
+            message: error.issues[0]?.message ?? "Invalid request",
+          },
+        },
         400,
       );
     }
@@ -137,7 +158,10 @@ export function createApp(options: AppOptions) {
       return c.json({ error: { code: error.code, message: error.message } }, statusFor(error.code));
     }
     if (error instanceof SyntaxError) {
-      return c.json({ error: { code: "VALIDATION_FAILED", message: "Request body must be valid JSON" } }, 400);
+      return c.json(
+        { error: { code: "VALIDATION_FAILED", message: "Request body must be valid JSON" } },
+        400,
+      );
     }
     if (error instanceof HTTPException) {
       return error.getResponse();
@@ -161,7 +185,11 @@ export function createApp(options: AppOptions) {
       if (!gate.ready) {
         return c.json({ status: "not_ready", reason: gate.reason ?? "gate_failed" }, 503);
       }
-      return c.json({ status: "ready", store: options.storeKind ?? "pglite", engineVersion: ENGINE_VERSION });
+      return c.json({
+        status: "ready",
+        store: options.storeKind ?? "pglite",
+        engineVersion: ENGINE_VERSION,
+      });
     } catch (error) {
       logger.warn("ready.failed", { requestId: c.get("requestId"), ...errorFields(error) });
       return c.json({ status: "not_ready", reason: "store_unreachable" }, 503);
@@ -205,7 +233,9 @@ export function createApp(options: AppOptions) {
   app.get("/v1/entities/:entityId/journals", async (c) => {
     const periodQuery = c.req.query("periodId");
     const periodId = periodQuery ? z.uuid().parse(periodQuery) : null;
-    return c.json(await service.listJournals(readActor(c), z.uuid().parse(c.req.param("entityId")), periodId));
+    return c.json(
+      await service.listJournals(readActor(c), z.uuid().parse(c.req.param("entityId")), periodId),
+    );
   });
 
   app.post("/v1/accounts", async (c) => {

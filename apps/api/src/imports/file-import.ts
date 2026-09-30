@@ -1,12 +1,23 @@
 import { createHash } from "node:crypto";
 
 import type { LedgerStore } from "@nexora/db";
-import { assertSameRegion, assertTenantActive, authorize, hashMaterial, KernelError } from "@nexora/kernel";
+import {
+  assertSameRegion,
+  assertTenantActive,
+  authorize,
+  hashMaterial,
+  KernelError,
+} from "@nexora/kernel";
 import type { Hono } from "hono";
 import { z } from "zod";
 
 import { ApiError, readActor, type ActorContext, type AppEnv } from "../http.js";
-import { extractPdfText, parseBankStatement, PdfReadError, type BankStatement } from "./bank-pdf.js";
+import {
+  extractPdfText,
+  parseBankStatement,
+  PdfReadError,
+  type BankStatement,
+} from "./bank-pdf.js";
 import { parseStatementCsv } from "./statement-csv.js";
 import { parseStatementPdf } from "./statement-pdf.js";
 import { parseStatementWorkbook, type StatementWorkbook } from "./statement-xlsx.js";
@@ -39,15 +50,26 @@ export function registerFileImportRoutes(app: Hono<AppEnv>, store: LedgerStore):
 export async function importFile(store: LedgerStore, actor: ActorContext, input: FileImportInput) {
   const bytes = new Uint8Array(Buffer.from(input.contentBase64, "base64"));
   if (bytes.length === 0) {
-    throw new ApiError(400, "IMPORT_EMPTY_FILE", `${input.fileName} is empty (0 bytes). Nothing was read or stored.`);
+    throw new ApiError(
+      400,
+      "IMPORT_EMPTY_FILE",
+      `${input.fileName} is empty (0 bytes). Nothing was read or stored.`,
+    );
   }
   if (input.kind === "financial_statements" && !input.cadence) {
-    throw new ApiError(400, "VALIDATION_FAILED", "Choose a statement cadence before uploading statements");
+    throw new ApiError(
+      400,
+      "VALIDATION_FAILED",
+      "Choose a statement cadence before uploading statements",
+    );
   }
   const format = sniffFormat(bytes, input.fileName);
   const fileHash = createHash("sha256").update(bytes).digest("hex");
 
-  const parsed = input.kind === "bank" ? await readBank(bytes, format, input.fileName) : await readStatements(bytes, format, input.fileName);
+  const parsed =
+    input.kind === "bank"
+      ? await readBank(bytes, format, input.fileName)
+      : await readStatements(bytes, format, input.fileName);
   const summary = {
     kind: input.kind,
     format,
@@ -61,16 +83,31 @@ export async function importFile(store: LedgerStore, actor: ActorContext, input:
   };
 
   if (!actor.tenantId) {
-    return { stored: false as const, replayed: false, importBatchId: null, reason: "No company is selected, so the kernel did not store this file.", ...summary };
+    return {
+      stored: false as const,
+      replayed: false,
+      importBatchId: null,
+      reason: "No company is selected, so the kernel did not store this file.",
+      ...summary,
+    };
   }
   const tenant = await scope(store, actor);
   const key = `file:${input.kind}:${summary.cadence ?? "-"}:${fileHash}`;
   const existing = await store.findImportBatch(tenant.tenantId, key);
   if (existing) {
     if (existing.stateHash !== fileHash) {
-      throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "This file key was already used for different content");
+      throw new KernelError(
+        "FIN_IDEMPOTENCY_MISMATCH",
+        "This file key was already used for different content",
+      );
     }
-    return { stored: true as const, replayed: true, importBatchId: existing.id, reason: null, ...summary };
+    return {
+      stored: true as const,
+      replayed: true,
+      importBatchId: existing.id,
+      reason: null,
+      ...summary,
+    };
   }
 
   const now = new Date().toISOString();
@@ -81,7 +118,11 @@ export async function importFile(store: LedgerStore, actor: ActorContext, input:
     idempotencyKey: key,
     fileHash,
     payload: { source: "file", ...summary },
-    rows: parsed.sourceRows.map((row) => ({ id: crypto.randomUUID(), rowNo: row.rowNo, payload: row.payload })),
+    rows: parsed.sourceRows.map((row) => ({
+      id: crypto.randomUUID(),
+      rowNo: row.rowNo,
+      payload: row.payload,
+    })),
     createdAt: now,
     audit: {
       eventId: crypto.randomUUID(),
@@ -110,21 +151,36 @@ function sniffFormat(bytes: Uint8Array, fileName: string): Format {
   if (head.subarray(0, 5).toString("latin1") === "%PDF-") return "pdf";
   if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) return "xlsx";
   if (head.toString("hex") === "d0cf11e0a1b11ae1") {
-    throw new ApiError(400, "IMPORT_FORMAT_UNSUPPORTED", `${fileName} is a legacy .xls workbook. Save it as .xlsx and upload again.`);
+    throw new ApiError(
+      400,
+      "IMPORT_FORMAT_UNSUPPORTED",
+      `${fileName} is a legacy .xls workbook. Save it as .xlsx and upload again.`,
+    );
   }
   const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   if (!text.includes("\u0000") && looksLikeDelimitedText(text)) return "csv";
-  throw new ApiError(400, "IMPORT_FORMAT_UNSUPPORTED", `${fileName} is not a PDF, an .xlsx workbook, or a CSV statement.`);
+  throw new ApiError(
+    400,
+    "IMPORT_FORMAT_UNSUPPORTED",
+    `${fileName} is not a PDF, an .xlsx workbook, or a CSV statement.`,
+  );
 }
 
 function looksLikeDelimitedText(text: string): boolean {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0).slice(0, 8);
+  const lines = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .slice(0, 8);
   return lines.length >= 2 && lines.some((line) => /[,;\t]/.test(line));
 }
 
 async function readBank(bytes: Uint8Array, format: Format, fileName: string) {
   if (format !== "pdf") {
-    throw new ApiError(400, "IMPORT_FORMAT_UNSUPPORTED", `Bank uploads read PDF statements here. Save ${fileName} as CSV to use the CSV path.`);
+    throw new ApiError(
+      400,
+      "IMPORT_FORMAT_UNSUPPORTED",
+      `Bank uploads read PDF statements here. Save ${fileName} as CSV to use the CSV path.`,
+    );
   }
   const text = await readPdf(bytes, fileName);
   const statement = parseBankStatement(text);
@@ -167,14 +223,18 @@ async function readStatements(bytes: Uint8Array, format: Format, fileName: strin
   let book: StatementWorkbook;
   try {
     if (format === "pdf") book = parseStatementPdf(await readPdf(bytes, fileName), fileName);
-    else if (format === "csv") book = parseStatementCsv(new TextDecoder("utf-8", { fatal: false }).decode(bytes), fileName);
+    else if (format === "csv")
+      book = parseStatementCsv(new TextDecoder("utf-8", { fatal: false }).decode(bytes), fileName);
     else book = parseStatementWorkbook(readWorkbook(bytes), fileName);
   } catch (error) {
-    if (error instanceof WorkbookError) throw new ApiError(400, "IMPORT_UNREADABLE", `${fileName}: ${error.message}`);
+    if (error instanceof WorkbookError)
+      throw new ApiError(400, "IMPORT_UNREADABLE", `${fileName}: ${error.message}`);
     throw error;
   }
   if (book.sheets.length === 0) {
-    const reasons = book.skippedSheets.map((sheet) => `${sheet.sheetName}: ${sheet.reason}`).join("; ");
+    const reasons = book.skippedSheets
+      .map((sheet) => `${sheet.sheetName}: ${sheet.reason}`)
+      .join("; ");
     throw new ApiError(
       400,
       "IMPORT_NO_STATEMENT",
@@ -194,7 +254,10 @@ async function readStatements(bytes: Uint8Array, format: Format, fileName: strin
     rowNo: String(row.rowNo),
     sheetName: String(row.payload.sheetName),
     label: String(row.payload.label),
-    values: (row.payload.values as readonly { period: string; amount: string }[]).map((value) => ({ period: value.period, amount: value.amount })),
+    values: (row.payload.values as readonly { period: string; amount: string }[]).map((value) => ({
+      period: value.period,
+      amount: value.amount,
+    })),
   }));
   return {
     rowsHash: hashMaterial(hashable),
@@ -209,7 +272,9 @@ async function readStatements(bytes: Uint8Array, format: Format, fileName: strin
             periodCount: sheet.periods.length,
             firstPeriod: sheet.periods[0]?.label ?? null,
             lastPeriod: sheet.periods[sheet.periods.length - 1]?.label ?? null,
-            derivedPeriods: sheet.periods.filter((period) => period.derived).map((period) => period.label),
+            derivedPeriods: sheet.periods
+              .filter((period) => period.derived)
+              .map((period) => period.label),
             lineCount: sheet.lines.length,
             valuedLineCount: valued.length,
             valueCount: valued.reduce((sum, line) => sum + line.values.length, 0),
@@ -235,7 +300,8 @@ async function readPdf(bytes: Uint8Array, fileName: string) {
     }
     return text;
   } catch (error) {
-    if (error instanceof PdfReadError) throw new ApiError(400, "IMPORT_UNREADABLE", `${fileName}: ${error.message}`);
+    if (error instanceof PdfReadError)
+      throw new ApiError(400, "IMPORT_UNREADABLE", `${fileName}: ${error.message}`);
     throw error;
   }
 }

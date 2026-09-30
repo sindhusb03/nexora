@@ -5,7 +5,14 @@ export interface CommandItem {
   readonly group: string;
 }
 
-export const NAV_GROUPS = ["Overview", "Books", "Planning", "Diligence", "Governance", "Admin"] as const;
+export const NAV_GROUPS = [
+  "Overview",
+  "Books",
+  "Planning",
+  "Diligence",
+  "Governance",
+  "Admin",
+] as const;
 
 export const STUDIO_COMMANDS: readonly CommandItem[] = [
   { id: "dashboard", label: "Dashboard", hint: "KPIs and trend", group: "Overview" },
@@ -22,8 +29,13 @@ export const STUDIO_COMMANDS: readonly CommandItem[] = [
   { id: "copilot", label: "Open copilot", hint: "Ask with citations", group: "Actions" },
 ];
 
-export function filterCommands<T extends { readonly label: string; readonly hint: string }>(commands: readonly T[], query: string): T[] {
+export function filterCommands<T extends { readonly label: string; readonly hint: string }>(
+  commands: readonly T[],
+  query: string,
+): T[] {
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) return [...commands];
-  return commands.filter((command) => `${command.label} ${command.hint}`.toLowerCase().includes(needle));
+  return commands.filter((command) =>
+    `${command.label} ${command.hint}`.toLowerCase().includes(needle),
+  );
 }

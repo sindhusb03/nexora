@@ -6,26 +6,28 @@ Start from the risk class in the pull request. The class definitions are in [sdl
 
 ## Who reviews
 
-| Class | Approvals | Constraint |
-| --- | --- | --- |
-| R0 | 1 | Anyone other than the author |
-| R1 | 1 | Reviewer confirms the client does not calculate financial truth |
-| R2 | 1 | Reviewer traces tenant, role, and region from identity, not from client-supplied scope alone |
-| R3 | 2 | Author cannot be either approver. At least one approver reads the golden tests line by line |
+| Class | Approvals | Constraint                                                                                   |
+| ----- | --------- | -------------------------------------------------------------------------------------------- |
+| R0    | 1         | Anyone other than the author                                                                 |
+| R1    | 1         | Reviewer confirms the client does not calculate financial truth                              |
+| R2    | 1         | Reviewer traces tenant, role, and region from identity, not from client-supplied scope alone |
+| R3    | 2         | Author cannot be either approver. At least one approver reads the golden tests line by line  |
 
-A push that changes calculation, schema, auth, or money handling dismisses prior approval. Re-review the new diff. Cosmetic pushes do not reset the financial reading if the reviewer says so on the PR.
+Origin's `main merge` ruleset, once the owner applies `.origin/rulesets/main-merge.json`, requires one approval and an up-to-date branch. It does not exclude the author from that count, and it cannot require a second approval only for R3. The second R3 approval, and the rule that the author is not an approver, stay with the people merging. The merger confirms both before squash-merging an R3 change.
+
+A push that changes calculation, schema, auth, or money handling needs a fresh reading. Say so on the pull request. Origin does not dismiss stale reviews: that GitHub policy fails merge evaluation with `unsupported_policy`, so it is not enabled.
 
 ## Order of reading
 
-1. PR summary, risk class, and named invariants.
+1. PR summary, risk class, linked issue, and named invariants.
 2. Tests, especially `*.golden.test.ts` and rejection cases.
 3. Domain code. For R3, the pure function before the SQL or HTTP adapter.
 4. Authorization, idempotency, period lock, and audit emission.
-5. UI last, against [UI-UX.md](../UI-UX.md).
+5. UI last, against [UI-UX.md](../UI-UX.md). Screenshots in the template are part of this reading.
 
 ## Financial checklist
 
-Complete this for every R3 change, and for any R2 change that writes. The author checks the attestation box in the pull request. CI enforces the box when the diff touches `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows`. The box does not replace this reading.
+Complete this for every R3 change, and for any R2 change that writes. The author checks the attestation box in the pull request. The `financial-attestation` job enforces the box when the diff touches `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows`, once that workflow runs. The box does not replace this reading.
 
 - Invariants affected are named in the PR.
 - Golden tests state inputs, formula or method version, and expected outputs.
@@ -60,16 +62,16 @@ Complete this for every R3 change, and for any R2 change that writes. The author
 
 - Tie the comment to an invariant or a test, not to taste.
 - Request changes when a golden case is missing, a posted record can change, a client total is trusted, or tenant scope is client-controlled.
-- Approve only after CI is green or after you have said which required check is still running and will block merge.
+- Approve only after required CI is green, or after you have said which required check is still running and will block merge. Until an Origin CI app is connected, say which local commands you ran.
 - Leave a short note of which golden tests you read when approving R3.
 
 ## Merge
 
 Merge is squash to `main` after:
 
-- `verify` passed
-- `financial-attestation` passed
 - the approval count for the risk class is met
 - the branch is up to date with `main`
+- `financial-attestation` would pass (the attestation line is present when the diff touches a protected path)
+- lint, typecheck, test, kernel coverage, build, and Playwright have passed locally or in CI
 
-The merger confirms the approvals are from reviewers who are not the author when the class is R3.
+The merger confirms the approvals are from reviewers who are not the author when the class is R3. Rollback is the plan in the pull request. Do not rewrite posted journals to undo a release.
