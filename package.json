@@ -1,0 +1,19 @@
+{
+  "name": "financial-ecosystem",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "dev:api": "pnpm --filter @nexora/api dev",
+    "dev:web": "pnpm --filter @nexora/web dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.6",
+    "typescript": "^5.9.2"
+  }
+}

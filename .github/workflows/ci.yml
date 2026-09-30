@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test (kernel, db, api on in-memory PGlite)
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  postgres:
+    name: postgres-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: nexora
+          POSTGRES_USER: nexora_owner
+          POSTGRES_PASSWORD: ci-owner-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexora_owner -d nexora"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PGPASSWORD: ci-owner-password
+      DATABASE_MIGRATION_URL: postgres://nexora_owner:ci-owner-password@localhost:5432/nexora
+      NEXORA_API_LOGIN_ROLE: nexora_api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Create the API login role
+        run: |
+          psql -h localhost -U nexora_owner -d nexora -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE nexora_api LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS PASSWORD 'ci-api-password'"
+
+      - name: Migrate twice (idempotent)
+        run: |
+          pnpm --filter @nexora/api migrate
+          pnpm --filter @nexora/api migrate
+
+      - name: Boot in production mode as the API login role
+        env:
+          NODE_ENV: production
+          DATABASE_URL: postgres://nexora_api:ci-api-password@localhost:5432/nexora
+          AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
+          WEB_ORIGIN: http://localhost:3000
+          PORT: "8787"
+        run: |
+          set -euo pipefail
+          pnpm --filter @nexora/api start > api.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8787/ready; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:8787/ready
+          status="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/v1/entities -H 'x-actor-id: owner-1' -H 'x-region: us-east-1')"
+          test "$status" = "401"
+          kill %1
+          cat api.log
+
+      - name: Refuse to boot as the schema owner in production
+        env:
+          NODE_ENV: production
+          DATABASE_URL: postgres://nexora_owner:ci-owner-password@localhost:5432/nexora
+          AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
+          PORT: "8788"
+        run: |
+          if timeout 60 pnpm --filter @nexora/api start; then
+            echo "The API started with a superuser login in production"; exit 1
+          fi
+
+      - name: Refuse to boot in production without DATABASE_URL
+        env:
+          NODE_ENV: production
+          AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
+          PORT: "8789"
+        run: |
+          if timeout 60 pnpm --filter @nexora/api start; then
+            echo "The API started in production without a database"; exit 1
+          fi
+
+  images:
+    name: docker-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile -t nexora-api:ci .
+
+      - name: Build web image
+        run: docker build -f apps/web/Dockerfile -t nexora-web:ci .
+
+  financial-attestation:
+    name: financial-attestation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require attestation on financial paths
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          body="$(printf '%s\n' "$PR_BODY" | tr -d '\r')"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(packages/kernel/|packages/db/|apps/api/|\.github/workflows/)'; then
+            if ! printf '%s\n' "$body" | grep -Eq '^- \[[xX]\] I completed the financial review checklist in docs/review-workflow\.md$'; then
+              echo "This pull request changes the kernel, database, API, or CI gates."
+              echo "Check the financial review attestation in the pull request body."
+              echo "The required line is in .github/pull_request_template.md."
+              exit 1
+            fi
+          fi

@@ -1,0 +1,74 @@
+# Local production-shaped stack: Postgres, a one-off migration job, the API, and the web app.
+#   AUTH_SECRET=$(openssl rand -base64 48) POSTGRES_PASSWORD=... NEXORA_API_DB_PASSWORD=... docker compose up --build
+# Create the first account with:
+#   docker compose run --rm -e NEXORA_NEW_USER_PASSWORD=... api node_modules/.bin/tsx src/create-user.ts platform-admin
+# and list it in PLATFORM_ADMIN_ACTOR_IDS.
+name: nexora
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: nexora
+      POSTGRES_USER: nexora_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      NEXORA_API_DB_PASSWORD: ${NEXORA_API_DB_PASSWORD:?set NEXORA_API_DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexora_owner -d nexora"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: nexora-api
+    command: ["node_modules/.bin/tsx", "src/migrate.ts"]
+    environment:
+      DATABASE_MIGRATION_URL: postgres://nexora_owner:${POSTGRES_PASSWORD}@postgres:5432/nexora
+      NEXORA_API_LOGIN_ROLE: nexora_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: nexora-api
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+      DATABASE_URL: postgres://nexora_api:${NEXORA_API_DB_PASSWORD}@postgres:5432/nexora
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET to at least 32 random characters}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      PLATFORM_ADMIN_ACTOR_IDS: ${PLATFORM_ADMIN_ACTOR_IDS:-}
+      AUTH_ALLOW_SIGNUP: ${AUTH_ALLOW_SIGNUP:-false}
+      NEXORA_REGION: ${NEXORA_REGION:-us-east-1}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports:
+      - "8787:8787"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8787}
+    environment:
+      API_URL: http://api:8787
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

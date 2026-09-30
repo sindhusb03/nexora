@@ -1,0 +1,36 @@
+# Financial Ecosystem — Cursor Rules
+
+You are building a high-stakes financial operating system. Correctness > speed.
+
+## Core Directives
+- Follow CLAUDE.md strictly. It is the constitution of this project.
+- Always refer to every document in `docs/Financial_Ecosystem_V1_V13_Master.zip` before product, architecture, UX, or implementation decisions. The whole archive is the specification: V1 through V13, the manifests, and `MASTER_INDEX.txt`. Read every document that bears on the decision and cite it. Do not treat one file, including the user-flow PDF, as a substitute for the rest of the pack. Do not invent product behavior the pack does not specify.
+- If the zip and CLAUDE.md conflict, CLAUDE.md wins. Say so and propose the compliant design.
+- Financial Kernel is sacred. All material numbers must come from deterministic server-side calculation with full lineage.
+- Never let the client or AI become the source of financial truth.
+- Prefer pure functions for calculations. Side effects only at persistence boundaries.
+- Use integer minor units or Decimal for money. Never number/float.
+- Every write path that touches financial state must be auditable and authorization-checked.
+
+## When generating code
+1. Check against CLAUDE.md non-negotiables first.
+2. Prefer small diffs.
+3. Write/update golden tests for any calculation change.
+4. Explicitly call out lineage and versioning.
+5. Use Zod for all inputs.
+6. Reject any design that creates dual sources of truth.
+
+## Preferred patterns
+- propose → validate → approve → post/publish lifecycle
+- Immutable versions + explicit snapshots
+- Result types for domain errors
+- Tenant resolved from auth context only
+
+## Refuse
+- Client-side final financial calculations that bypass the kernel
+- Mutable posted journals
+- AI directly writing published numbers
+- Floating point money
+- Missing audit events on material actions
+
+If a user request conflicts with CLAUDE.md, stop and say so. Propose the compliant design instead.

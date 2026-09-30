@@ -1,0 +1,25 @@
+{
+  "name": "@nexora/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@nexora/kernel": "workspace:*",
+    "drizzle-orm": "^0.44.5",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

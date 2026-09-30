@@ -1,0 +1,30 @@
+{
+  "name": "@nexora/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "migrate": "tsx src/migrate.ts",
+    "user:create": "tsx src/create-user.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@nexora/db": "workspace:*",
+    "@nexora/kernel": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
+    "fflate": "^0.8.3",
+    "hono": "^4.9.8",
+    "unpdf": "^1.8.1",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
