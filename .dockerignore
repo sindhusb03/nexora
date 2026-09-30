@@ -6,6 +6,7 @@
 **/*.tsbuildinfo
 **/coverage
 docs/*.zip
+deploy/render/Dockerfile
 .git
 .cursor
 .agents
