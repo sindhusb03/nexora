@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.3.14",
+    "@electric-sql/pglite": "^0.5.8",
     "@nexora/kernel": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
