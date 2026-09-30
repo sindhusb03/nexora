@@ -40,6 +40,6 @@ services:
       - key: TRUST_PROXY
         value: "true"
       - key: TRUST_PROXY_HOPS
-        value: "2"
+        value: "1"
       - key: API_PROXY_TARGET
         value: http://127.0.0.1:8787

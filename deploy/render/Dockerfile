@@ -17,7 +17,9 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_NEXORA_DEV_HEADERS=false \
     API_PROXY_TARGET=http://127.0.0.1:8787 \
     NODE_ENV=production
-RUN pnpm --filter @nexora/web build && pnpm prune --prod
+RUN pnpm --filter @nexora/web build
+# prune re-runs the root prepare script. Husky is a devDependency and is gone by then.
+RUN pnpm prune --prod --ignore-scripts
 
 FROM node:22-bookworm-slim AS runner
 

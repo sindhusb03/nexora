@@ -19,7 +19,7 @@ One Docker web service, `nexora-staging`, region `singapore`, plan `free`.
 1. In Render, create a Blueprint from https://github.com/sindhusb03/nexora (`render.yaml` on `main`).
 2. Leave every variable as written. `AUTH_SECRET` uses `generateValue: true` (base64 256-bit). No other secret is required.
 3. `start.sh` appends `RENDER_EXTERNAL_URL` to `WEB_ORIGIN` when Render sets it, so both `https://staging.nexafi.io` and `https://<service>.onrender.com` are allowed. The session cookie has no `Domain` attribute (`SameSite=Lax`, `Secure` via `AUTH_COOKIE_SECURE=true`).
-4. `TRUST_PROXY=true` and `TRUST_PROXY_HOPS=2`: Render appends one `X-Forwarded-For` hop and the Next rewrite appends the second. Sign-in rate limits use the client address before those hops.
+4. `TRUST_PROXY=true` and `TRUST_PROXY_HOPS=1`. Render appends one `X-Forwarded-For` hop. Next.js 15's rewrite proxy forwards that header and does not set `xfwd`, so it does not append another hop. The API then uses the address Render appended. A missing or shorter header falls back to the socket address (`127.0.0.1` from Next), which would share one rate-limit bucket.
 5. Health check: `/api/readyz` (public port, proxied to the API). It returns 200 only after the store is ready.
 
 ## Custom domain
