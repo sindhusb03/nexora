@@ -1,4 +1,4 @@
-import type { IdentityStore } from "@nexora/db";
+import { runWithRlsSession, type IdentityStore } from "@nexora/db";
 import type { MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
@@ -41,6 +41,12 @@ export async function lookupSession(
   if (!cookie) return { status: "none" };
   const sessionId = readSignedSessionId(auth.secret, cookie);
   if (!sessionId) return { status: "invalid" };
+  const state = await store.sessionState(sessionId);
+  if (state === "revoked") {
+    await store.revokeSessionFamily(sessionId, new Date().toISOString());
+    return { status: "invalid" };
+  }
+  if (state !== "active") return { status: "invalid" };
   const session = await store.getActiveSession(sessionId);
   if (!session) return { status: "invalid" };
   return {
@@ -55,6 +61,14 @@ export async function lookupSession(
   };
 }
 
+/** Rejects a browser Origin that is not on the allow-list. A missing Origin is allowed for non-browser clients. */
+export function assertOrigin(c: AppContext, webOrigins: readonly string[]): void {
+  const origin = c.req.header("origin");
+  if (origin && !webOrigins.includes(origin)) {
+    throw new ApiError(403, "AUTH_ORIGIN_REJECTED", "Request origin is not allowed");
+  }
+}
+
 /** Cookie-authenticated writes must echo the session's CSRF token and, when the browser sends one, an allowed Origin. */
 export function assertCsrf(
   c: AppContext,
@@ -63,10 +77,7 @@ export function assertCsrf(
   sessionId: string,
 ): void {
   if (SAFE_METHODS.has(c.req.method)) return;
-  const origin = c.req.header("origin");
-  if (origin && !webOrigins.includes(origin)) {
-    throw new ApiError(403, "AUTH_ORIGIN_REJECTED", "Request origin is not allowed");
-  }
+  assertOrigin(c, webOrigins);
   const token = c.req.header("x-csrf-token")?.trim() ?? "";
   if (token.length === 0 || !csrfTokenMatches(auth.secret, sessionId, token)) {
     throw new ApiError(
@@ -121,6 +132,8 @@ export function requireIdentity(deps: {
       throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
     }
     c.set("identity", identity);
-    await next();
+    await runWithRlsSession({ actorId: identity.actorId, tenantId: identity.tenantId }, () =>
+      next(),
+    );
   };
 }

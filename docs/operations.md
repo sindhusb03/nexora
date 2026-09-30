@@ -35,14 +35,18 @@ The API reads only the process environment. It does not load `.env`. Local scrip
 | `API_BODY_LIMIT_BYTES`                                          | 1 KiB – 50 MiB                                                     | 8388608                                       |
 | `TRUST_PROXY`                                                   | `true` only behind a proxy that sets `X-Forwarded-For`             | `false`                                       |
 | `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX` | Tune per deployment                                                | 60000, 600, 20                                |
+| `DEMO_MODE`                                                     | Refused when `true`. Default `false`                               | `true` when unset                             |
+| `OIDC_PROVIDERS`                                                | Optional JSON array. No provider is required (section 5)           | Unset                                         |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`                                   | Optional (section 6)                                               | Unset                                         |
+| `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`                 | `otlp` or `none`. `otlp` requires the endpoint                     | Follow the endpoint when unset                |
+| `SENTRY_DSN`                                                    | Optional `https://key@host/project`. Unset is a no-op              | Unset                                         |
 | `API_URL`                                                       | Server-side API URL for the web app                                | `http://localhost:8787`                       |
 | `NEXT_PUBLIC_API_URL`                                           | Browser API URL. Compiled into the web bundle at build time        | `http://localhost:8787`                       |
 | `NEXT_PUBLIC_NEXORA_DEV_HEADERS`                                | `false`. Compiled in at build time                                 | `false`                                       |
 
 Blank values are treated as unset.
 
-Production refuses to start when `DATABASE_URL` or `AUTH_SECRET` is missing, `NEXORA_DEV_HEADERS=true`, the cookie is not secure, or the database login is privileged.
+Production refuses to start when `DATABASE_URL` or `AUTH_SECRET` is missing, `NEXORA_DEV_HEADERS=true`, `DEMO_MODE=true`, the cookie is not secure, or the database login is privileged.
 
 ## 3. Database roles
 
@@ -80,13 +84,15 @@ The baseline records the checksums of migrations whose objects already exist. It
 
 ## 4. Docker and compose
 
-- `apps/api/Dockerfile` runs as `node` with a healthcheck on `/ready`. Setting `NEXORA_MIGRATE_ON_START=true` runs migrations before the server. Prefer a separate migration job so the runtime login never needs DDL.
-- `apps/web/Dockerfile` takes `NEXT_PUBLIC_API_URL` as a build argument and forces `NEXT_PUBLIC_NEXORA_DEV_HEADERS=false`.
-- `docker-compose.yml` starts Postgres 17, creates `nexora_api` (`deploy/postgres/10-api-login-role.sh`), runs `migrate` as the owner, then starts the API as `nexora_api` and the web app.
+- `apps/api/Dockerfile` is a multi-stage `turbo prune` build. It runs as `node` with a healthcheck on `/readyz` (`/ready` stays as an alias). Setting `NEXORA_MIGRATE_ON_START=true` runs migrations before the server. Prefer a separate migration job so the runtime login never needs DDL.
+- `apps/web/Dockerfile` is the same prune shape, takes `NEXT_PUBLIC_API_URL` as a build argument, and forces `NEXT_PUBLIC_NEXORA_DEV_HEADERS=false`.
+- `docker-compose.yml` starts Postgres 17 with pgvector (`deploy/postgres/20-pgvector.sql` creates the extension only in that local image), MinIO as a local upload stand-in, creates `nexora_api` (`deploy/postgres/10-api-login-role.sh`), runs `migrate` as the owner, then starts the API as `nexora_api` and the web app. `DEMO_MODE` is `false`. Do not point the compose file at a cloud account.
 
 ```
-AUTH_SECRET=... POSTGRES_PASSWORD=... NEXORA_API_DB_PASSWORD=... docker compose up --build
+AUTH_SECRET=... POSTGRES_PASSWORD=... NEXORA_API_DB_PASSWORD=... MINIO_ROOT_PASSWORD=... docker compose up --build
 ```
+
+AWS `ap-south-1` templates and residency notes are in [hosting.md](hosting.md). Those templates are not applied.
 
 Compose serves plain HTTP on localhost with production settings, including a secure cookie. Browsers accept secure cookies on `http://localhost`, and ports 3000 and 8787 are same-site. In any real deployment, put TLS in front of both services.
 
@@ -109,10 +115,15 @@ None of this needs Neon credentials.
 
 ## 5. Identity
 
-- Sessions are an HMAC-signed session id in an HttpOnly cookie. The cookie is `__Host-nexora_session` when secure and `nexora_session` otherwise. Each session is backed by an `auth_session` row, so logout and expiry revoke it on the server.
-- Actor, tenant, and region come from the session. `POST /auth/session/tenant` selects a tenant only when the actor has a membership, and only in the tenant's home region.
+- Sessions are an HMAC-signed session id in an HttpOnly `SameSite` cookie. The cookie is `__Host-nexora_session` when secure and `nexora_session` otherwise. Each session is an `auth_session` row with a family id. Logout revokes that row. `POST /auth/session/rotate` and tenant selection issue a new row and revoke the old one. Presenting a revoked cookie revokes the whole family. Expiry does not.
+- Actor, tenant, and region come from the session. `POST /auth/session/tenant` selects a tenant only when the actor has a membership, and only in the tenant's home region. The request sets `app.tenant_id` and `app.actor_id` for RLS.
 - Writes need `x-csrf-token` (an HMAC of the session id returned by `/auth/session`) and an allowed `Origin`.
-- Passwords are hashed with scrypt. `/auth/*` has its own rate limit.
+- Passwords are argon2id (memory 19456 KiB, time 2, parallelism 1). Existing scrypt hashes still verify. New passwords are argon2id.
+- Email magic links and optional TOTP (QR enroll, recovery codes) are available. The email sender is an interface; the shipped transport logs a redacted recipient and keeps the token in a dev mailbox. `GET /auth/dev/mailbox` exists only outside production.
+- Login and magic-link requests share a credential rate limit. Five failures in 15 minutes lock that subject for 15 minutes. Errors stay generic (`AUTH_INVALID_CREDENTIALS`, then `AUTH_LOCKED`) so an identifier is not confirmed.
+- `DEMO_MODE` defaults on outside production and is refused when `NODE_ENV=production`. It keeps the seeded company and `sindhu` / `nexora-demo-2026`.
+- OIDC is optional. `OIDC_PROVIDERS` is a JSON array of `{id, label, issuer, clientId, clientSecret, redirectUri, scopes}`. Start and callback routes exist. The callback does not exchange a code or open a session.
+- Auth events (login success and failure, magic link sent and used, 2FA enroll and verify, session revoke, role change) append to `auth_audit_event` under forced RLS.
 - The header seam (`x-actor-id`, `x-tenant-id`, `x-region`) exists only when `NEXORA_DEV_HEADERS=true`, and production refuses that flag. Local dev-header use needs both `NEXORA_DEV_HEADERS=true` on the API and `NEXT_PUBLIC_NEXORA_DEV_HEADERS=true` on the web app.
 
 ### Bootstrap in production
@@ -124,17 +135,17 @@ None of this needs Neon credentials.
 
 ### Not built
 
-- SSO, OAuth, MFA, and password reset.
+- A live email provider, a completed OIDC token exchange, and password reset.
 - A platform role table. `PLATFORM_ADMIN_ACTOR_IDS` is still an allow-list.
 
 ## 6. Observability
 
-- Logs are one JSON object per line with `requestId`, method, route, status, and duration.
-- Errors log their name and SQLSTATE code only. Request bodies, cookies, CSRF tokens, passwords, and financial payloads are never logged.
+- Logs are pino JSON, one object per line, with `requestId`, `actorId`, `userId`, `tenantId`, `orgId`, method, route, status, and duration.
+- Redaction covers passwords, tokens, cookies, CSRF values, email addresses, and secrets. Errors log their name and SQLSTATE code only. Financial payloads are not logged.
 - Every response carries `x-request-id`. A well-formed incoming id is reused.
-- `GET /health` is liveness. `GET /ready` pings the store and returns 503 without leaking details when the store is down.
-- Spans use `@opentelemetry/api`, which does nothing until an SDK registers. With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the API loads `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http`.
-- **Those two packages are not installed.** Until you add them to `@nexora/api`, the API logs `telemetry.unavailable` and no traces are exported.
+- `GET /health` and `GET /healthz` are liveness. `GET /ready` and `GET /readyz` ping the store and compare applied migrations with the known set. A failure returns 503 without a connection string.
+- With `OTEL_EXPORTER_OTLP_ENDPOINT` set, the API exports traces and metrics over OTLP HTTP unless `OTEL_TRACES_EXPORTER` or `OTEL_METRICS_EXPORTER` is `none`. Unset endpoint means the OpenTelemetry API stays a no-op.
+- `SENTRY_DSN` posts a Sentry-compatible envelope whose exception value is `Unexpected failure`. Unset DSN is a no-op.
 
 ## 7. Known limits
 

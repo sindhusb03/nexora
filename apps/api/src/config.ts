@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 
 import { z } from "zod";
 
+import type { OidcProviderConfig } from "./auth/oidc.js";
+
 export interface ApiConfig {
   readonly production: boolean;
   readonly port: number;
@@ -10,6 +12,12 @@ export interface ApiConfig {
   readonly auth: AuthConfig;
   readonly http: HttpConfig;
   readonly otelEndpoint: string | null;
+  readonly otelTraces: boolean;
+  readonly otelMetrics: boolean;
+  readonly sentryDsn: string | null;
+  /** Keeps the seeded demo company and sindhu / nexora-demo-2026. Off in production. */
+  readonly demoMode: boolean;
+  readonly oidcProviders: readonly OidcProviderConfig[];
   /** Human-readable notes about development-only defaults that are in effect. */
   readonly warnings: readonly string[];
 }
@@ -60,6 +68,21 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100_000).default(600),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_TRACES_EXPORTER: z.enum(["otlp", "none"]).optional(),
+  OTEL_METRICS_EXPORTER: z.enum(["otlp", "none"]).optional(),
+  SENTRY_DSN: z.string().optional(),
+  DEMO_MODE: z.enum(["true", "false"]).optional(),
+  OIDC_PROVIDERS: z.string().optional(),
+});
+
+const oidcProviderSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/),
+  label: z.string().trim().min(1).max(80),
+  issuer: z.string().url(),
+  clientId: z.string().trim().min(1).max(200),
+  clientSecret: z.string().min(1).max(500).optional(),
+  redirectUri: z.string().url(),
+  scopes: z.array(z.string().trim().min(1)).min(1).default(["openid", "email"]),
 });
 
 /** Reads the environment and fails closed on anything unsafe for production. */
@@ -123,6 +146,67 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
     );
   }
 
+  const demoMode = values.DEMO_MODE ? values.DEMO_MODE === "true" : !production;
+  if (production && demoMode) {
+    throw new ConfigError(
+      "DEMO_MODE=true is refused when NODE_ENV=production. The demo password is a local seed credential.",
+    );
+  }
+  if (demoMode) {
+    warnings.push(
+      "DEMO_MODE is on. The seeded company and demo password are available. Turn this off outside local development.",
+    );
+  }
+
+  const sentryDsn = values.SENTRY_DSN ?? null;
+  if (sentryDsn && !/^https:\/\/[^@\s]+@[^/\s]+\/\d+$/.test(sentryDsn)) {
+    throw new ConfigError("SENTRY_DSN must be an https Sentry DSN (https://key@host/project).");
+  }
+
+  let oidcProviders: OidcProviderConfig[] = [];
+  if (values.OIDC_PROVIDERS) {
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(values.OIDC_PROVIDERS);
+    } catch {
+      throw new ConfigError("OIDC_PROVIDERS must be a JSON array.");
+    }
+    const parsedProviders = z.array(oidcProviderSchema).safeParse(parsedJson);
+    if (!parsedProviders.success) {
+      const issue = parsedProviders.error.issues[0];
+      throw new ConfigError(
+        `Invalid OIDC_PROVIDERS ${issue?.path.join(".") ?? ""}: ${issue?.message ?? "unknown"}`,
+      );
+    }
+    const ids = new Set<string>();
+    oidcProviders = parsedProviders.data.map((provider) => {
+      if (ids.has(provider.id)) {
+        throw new ConfigError(`OIDC provider id ${provider.id} is duplicated.`);
+      }
+      ids.add(provider.id);
+      return {
+        id: provider.id,
+        label: provider.label,
+        issuer: provider.issuer,
+        clientId: provider.clientId,
+        clientSecret: provider.clientSecret ?? null,
+        redirectUri: provider.redirectUri,
+        scopes: provider.scopes,
+      };
+    });
+  }
+
+  const tracesFlag = values.OTEL_TRACES_EXPORTER;
+  const metricsFlag = values.OTEL_METRICS_EXPORTER;
+  const otelEndpoint = values.OTEL_EXPORTER_OTLP_ENDPOINT ?? null;
+  const otelTraces = tracesFlag ? tracesFlag === "otlp" : otelEndpoint !== null;
+  const otelMetrics = metricsFlag ? metricsFlag === "otlp" : otelEndpoint !== null;
+  if ((otelTraces || otelMetrics) && !otelEndpoint) {
+    throw new ConfigError(
+      "OTEL_TRACES_EXPORTER or OTEL_METRICS_EXPORTER=otlp requires OTEL_EXPORTER_OTLP_ENDPOINT.",
+    );
+  }
+
   const webOrigins = values.WEB_ORIGIN.split(",")
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
@@ -159,7 +243,12 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
         authMax: values.AUTH_RATE_LIMIT_MAX,
       },
     },
-    otelEndpoint: values.OTEL_EXPORTER_OTLP_ENDPOINT ?? null,
+    otelEndpoint,
+    otelTraces,
+    otelMetrics,
+    sentryDsn,
+    demoMode,
+    oidcProviders,
     warnings,
   };
 }

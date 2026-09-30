@@ -571,6 +571,41 @@ html.dark {
   font-size: 0.75rem;
 }
 
+.nx-text-btn {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.nx-factor {
+  margin: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  max-width: 28rem;
+}
+
+.nx-factor img {
+  width: 12rem;
+  height: 12rem;
+  background: white;
+}
+
+.nx-secret {
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
 .nx-demo-actors {
   display: flex;
   gap: 0.4rem;

@@ -1,8 +1,9 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 
+import { appTx, createAuthStore } from "./auth-store.js";
 import type { AppDatabase } from "./client.js";
 import { authSession, authUser } from "./identity-schema.js";
-import type { IdentityStore } from "./records.js";
+import type { AuthUserRecord, IdentityStore } from "./records.js";
 import { isUniqueViolation } from "./store.js";
 
 const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
@@ -15,6 +16,7 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
           await tx.insert(authUser).values({
             actorId: input.actorId,
             passwordHash: input.passwordHash,
+            email: input.email ?? null,
             createdAt: input.createdAt,
             disabled: false,
           });
@@ -22,24 +24,26 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
         return "created";
       } catch (error) {
         if (isUniqueViolation(error)) {
-          return "exists";
+          const existing = await appTx(db, (tx) => readUser(tx, input.actorId));
+          return existing ? "exists" : "email_taken";
         }
         throw error;
       }
     },
 
     findUser(actorId) {
+      return appTx(db, (tx) => readUser(tx, actorId));
+    },
+
+    findUserByEmail(email) {
       return appTx(db, async (tx) => {
         const rows = await tx
-          .select({
-            actorId: authUser.actorId,
-            passwordHash: authUser.passwordHash,
-            disabled: authUser.disabled,
-          })
+          .select({ actorId: authUser.actorId })
           .from(authUser)
-          .where(eq(authUser.actorId, actorId))
+          .where(sql`lower(${authUser.email}) = ${email}`)
           .limit(1);
-        return rows[0] ?? null;
+        const actorId = rows[0]?.actorId;
+        return actorId ? readUser(tx, actorId) : null;
       });
     },
 
@@ -48,11 +52,13 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
         await tx.insert(authSession).values({
           sessionId: input.sessionId,
           actorId: input.actorId,
-          tenantId: null,
+          tenantId: input.tenantId ?? null,
           region: input.region,
           createdAt: input.createdAt,
           expiresAt: input.expiresAt,
           revokedAt: null,
+          familyId: input.familyId ?? crypto.randomUUID(),
+          ...(input.rotatedFrom ? { rotatedFrom: input.rotatedFrom } : {}),
         });
       });
     },
@@ -111,12 +117,28 @@ export function createIdentityStore(db: AppDatabase): IdentityStore {
     async ping() {
       await db.execute(sql`SELECT 1`);
     },
+
+    ...createAuthStore(db),
   };
 }
 
-async function appTx<T>(db: AppDatabase, fn: (tx: AppDatabase) => Promise<T>): Promise<T> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));
-    return fn(tx as unknown as AppDatabase);
-  });
+async function readUser(tx: AppDatabase, actorId: string): Promise<AuthUserRecord | null> {
+  const rows = await tx
+    .select({
+      actorId: authUser.actorId,
+      passwordHash: authUser.passwordHash,
+      disabled: authUser.disabled,
+      email: authUser.email,
+    })
+    .from(authUser)
+    .where(eq(authUser.actorId, actorId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    actorId: row.actorId,
+    passwordHash: row.passwordHash,
+    disabled: row.disabled,
+    email: row.email,
+  };
 }

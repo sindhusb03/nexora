@@ -50,14 +50,146 @@ export async function fetchSession(): Promise<SessionView | null> {
   }
 }
 
-export async function login(actorId: string, password: string): Promise<SessionView> {
+export interface AuthConfigView {
+  readonly demoMode: boolean;
+  readonly signupAllowed: boolean;
+  readonly oidcProviders: readonly { readonly id: string; readonly label: string }[];
+}
+
+export type LoginResult =
+  | { readonly kind: "session"; readonly session: SessionView }
+  | { readonly kind: "mfa"; readonly challengeId: string };
+
+export async function fetchAuthConfig(): Promise<AuthConfigView> {
+  const body = await request("/auth/config", { method: "GET" }, null);
+  if (typeof body !== "object" || body === null) {
+    return { demoMode: false, signupAllowed: false, oidcProviders: [] };
+  }
+  const record = body as {
+    demoMode?: unknown;
+    signupAllowed?: unknown;
+    oidcProviders?: unknown;
+  };
+  const providers = Array.isArray(record.oidcProviders)
+    ? record.oidcProviders.flatMap((item) => {
+        if (typeof item !== "object" || item === null) return [];
+        const provider = item as { id?: unknown; label?: unknown };
+        return typeof provider.id === "string" && typeof provider.label === "string"
+          ? [{ id: provider.id, label: provider.label }]
+          : [];
+      })
+    : [];
+  return {
+    demoMode: record.demoMode === true,
+    signupAllowed: record.signupAllowed === true,
+    oidcProviders: providers,
+  };
+}
+
+function readLogin(body: unknown): LoginResult {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { mfaRequired?: unknown }).mfaRequired === true
+  ) {
+    const challengeId = (body as { challengeId?: unknown }).challengeId;
+    if (typeof challengeId !== "string") {
+      throw new ApiFailure(500, "The second-factor challenge was not readable");
+    }
+    return { kind: "mfa", challengeId };
+  }
+  if (!isSession(body)) throw new ApiFailure(500, "The session response was not readable");
+  return { kind: "session", session: body };
+}
+
+export async function login(actorId: string, password: string): Promise<LoginResult> {
   const body = await request(
     "/auth/login",
     { method: "POST", body: JSON.stringify({ actorId, password, region: "us-east-1" }) },
     null,
   );
-  if (!isSession(body)) throw new ApiFailure(500, "The session response was not readable");
-  return body;
+  return readLogin(body);
+}
+
+export async function requestMagicLink(email: string): Promise<string> {
+  const body = await request(
+    "/auth/magic-link",
+    { method: "POST", body: JSON.stringify({ email }) },
+    null,
+  );
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    typeof (body as { message?: unknown }).message === "string"
+  ) {
+    return (body as { message: string }).message;
+  }
+  return "If an account exists for that address, a sign-in link was sent.";
+}
+
+export async function consumeMagicLink(token: string): Promise<LoginResult> {
+  const body = await request(
+    "/auth/magic-link/consume",
+    { method: "POST", body: JSON.stringify({ token, region: "us-east-1" }) },
+    null,
+  );
+  return readLogin(body);
+}
+
+export async function verifySecondFactor(
+  challengeId: string,
+  code: string,
+  recovery: boolean,
+): Promise<SessionView> {
+  const body = await request(
+    "/auth/2fa/verify",
+    {
+      method: "POST",
+      body: JSON.stringify(recovery ? { challengeId, recoveryCode: code } : { challengeId, code }),
+    },
+    null,
+  );
+  const result = readLogin(body);
+  if (result.kind !== "session") throw new ApiFailure(500, "The session response was not readable");
+  return result.session;
+}
+
+export async function enrollTotp(
+  csrf: string,
+): Promise<{ readonly secret: string; readonly qrDataUrl: string; readonly otpauthUrl: string }> {
+  const body = await request("/auth/2fa/enroll", { method: "POST" }, csrf);
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as { secret?: unknown }).secret !== "string" ||
+    typeof (body as { qrDataUrl?: unknown }).qrDataUrl !== "string"
+  ) {
+    throw new ApiFailure(500, "Two-factor enrollment was not readable");
+  }
+  const record = body as { secret: string; qrDataUrl: string; otpauthUrl?: unknown };
+  return {
+    secret: record.secret,
+    qrDataUrl: record.qrDataUrl,
+    otpauthUrl: typeof record.otpauthUrl === "string" ? record.otpauthUrl : "",
+  };
+}
+
+export async function confirmTotp(csrf: string, code: string): Promise<readonly string[]> {
+  const body = await request(
+    "/auth/2fa/confirm",
+    { method: "POST", body: JSON.stringify({ code }) },
+    csrf,
+  );
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !Array.isArray((body as { recoveryCodes?: unknown }).recoveryCodes)
+  ) {
+    throw new ApiFailure(500, "Recovery codes were not readable");
+  }
+  return (body as { recoveryCodes: unknown[] }).recoveryCodes.filter(
+    (code): code is string => typeof code === "string",
+  );
 }
 
 export async function logout(csrf: string): Promise<void> {

@@ -7,6 +7,8 @@ export type {
   AccountRecord,
   AuditRecord,
   AuditWrite,
+  AuthAuditEventType,
+  AuthAuditRecord,
   AuthSessionRecord,
   AuthUserRecord,
   CalculationRunRecord,
@@ -14,10 +16,14 @@ export type {
   IdentityStore,
   JournalRecord,
   LedgerStore,
+  LockoutRecord,
   PeriodRecord,
   PostedActivityLine,
+  SessionState,
   StoredJournalLine,
   TenantRecord,
 } from "./records.js";
+export { currentRlsSession, runWithRlsSession } from "./session-context.js";
+export type { RlsSessionContext } from "./session-context.js";
 export { schema } from "./schema.js";
 export { createLedgerStore, isUniqueViolation } from "./store.js";

@@ -1,8 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { Writable } from "node:stream";
 
 import type { MiddlewareHandler } from "hono";
+import { metrics } from "@opentelemetry/api";
+import pino from "pino";
 
 import type { AppEnv } from "./http.js";
+
+const httpRequests = metrics
+  .getMeter("@nexora/api", "0.1.0")
+  .createCounter("nexora.http.requests", {
+    description: "HTTP requests observed by the API",
+  });
 
 export type LogFields = Readonly<Record<string, string | number | boolean | null>>;
 
@@ -16,20 +25,59 @@ export interface Logger {
 export function jsonLogger(
   write: (line: string) => void = (line) => process.stdout.write(`${line}\n`),
 ): Logger {
-  const emit = (level: string, event: string, fields?: LogFields) =>
-    write(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        level,
-        event,
-        service: "financial-kernel",
-        ...fields,
-      }),
-    );
+  const stream = new Writable({
+    write(chunk, _encoding, callback) {
+      write(String(chunk).trimEnd());
+      callback();
+    },
+  });
+  const log = pino(
+    {
+      base: { service: "financial-kernel" },
+      messageKey: "event",
+      timestamp: () => `,"ts":"${new Date().toISOString()}"`,
+      formatters: {
+        level(label) {
+          return { level: label };
+        },
+      },
+      redact: {
+        paths: [
+          "password",
+          "passwordHash",
+          "secret",
+          "token",
+          "cookie",
+          "csrfToken",
+          "authorization",
+          "email",
+          "clientSecret",
+          "to",
+          "*.password",
+          "*.passwordHash",
+          "*.secret",
+          "*.token",
+          "*.cookie",
+          "*.csrfToken",
+          "*.authorization",
+          "*.email",
+          "*.clientSecret",
+        ],
+        censor: "[redacted]",
+      },
+    },
+    stream,
+  );
   return {
-    info: (event, fields) => emit("info", event, fields),
-    warn: (event, fields) => emit("warn", event, fields),
-    error: (event, fields) => emit("error", event, fields),
+    info: (event, fields) => {
+      log.info(fields ?? {}, event);
+    },
+    warn: (event, fields) => {
+      log.warn(fields ?? {}, event);
+    },
+    error: (event, fields) => {
+      log.error(fields ?? {}, event);
+    },
   };
 }
 
@@ -52,14 +100,22 @@ export function requestLog(logger: Logger): MiddlewareHandler<AppEnv> {
     const started = performance.now();
     await next();
     const identity = c.get("identity");
+    const durationMs = Math.round((performance.now() - started) * 10) / 10;
+    httpRequests.add(1, {
+      method: c.req.method,
+      path: c.req.path,
+      status: String(c.res.status),
+    });
     logger.info("http.request", {
       requestId,
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,
-      durationMs: Math.round((performance.now() - started) * 10) / 10,
+      durationMs,
       actorId: identity?.actorId ?? null,
+      userId: identity?.actorId ?? null,
       tenantId: identity?.tenantId ?? null,
+      orgId: identity?.tenantId ?? null,
       identitySource: identity?.source ?? null,
     });
   };
@@ -101,36 +157,66 @@ interface NodeSdkLike {
  * With OTEL_EXPORTER_OTLP_ENDPOINT set, this loads @opentelemetry/sdk-node and the OTLP HTTP exporter
  * if they are installed. Without them, it logs that traces are not exported and keeps the no-op tracer.
  */
-export async function startTelemetry(endpoint: string | null, logger: Logger): Promise<Telemetry> {
+export interface TelemetryOptions {
+  readonly endpoint: string | null;
+  readonly traces: boolean;
+  readonly metrics: boolean;
+}
+
+export async function startTelemetry(
+  options: TelemetryOptions,
+  logger: Logger,
+): Promise<Telemetry> {
   const disabled: Telemetry = { exporting: false, shutdown: async () => undefined };
-  if (!endpoint) {
+  if (!options.endpoint || (!options.traces && !options.metrics)) {
     logger.info("telemetry.disabled", {
-      reason: "OTEL_EXPORTER_OTLP_ENDPOINT is unset; spans stay in-process no-ops",
+      reason: "OTLP export is off; spans and metrics stay in-process no-ops",
     });
     return disabled;
   }
-  const sdkModule = "@opentelemetry/sdk-node";
-  const exporterModule = "@opentelemetry/exporter-trace-otlp-http";
+  const endpoint = options.endpoint.replace(/\/$/, "");
   try {
-    const sdkExports: unknown = await import(sdkModule);
-    const exporterExports: unknown = await import(exporterModule);
+    const sdkExports: unknown = await import("@opentelemetry/sdk-node");
+    const traceExports: unknown = await import("@opentelemetry/exporter-trace-otlp-http");
+    const metricExports: unknown = await import("@opentelemetry/exporter-metrics-otlp-http");
+    const readerExports: unknown = await import("@opentelemetry/sdk-metrics");
     const NodeSDK = constructorFrom(sdkExports, "NodeSDK");
-    const OTLPTraceExporter = constructorFrom(exporterExports, "OTLPTraceExporter");
-    if (!NodeSDK || !OTLPTraceExporter) {
-      throw new Error("OpenTelemetry modules did not expose NodeSDK and OTLPTraceExporter");
+    const OTLPTraceExporter = constructorFrom(traceExports, "OTLPTraceExporter");
+    const OTLPMetricExporter = constructorFrom(metricExports, "OTLPMetricExporter");
+    const PeriodicExportingMetricReader = constructorFrom(
+      readerExports,
+      "PeriodicExportingMetricReader",
+    );
+    if (!NodeSDK || !OTLPTraceExporter || !OTLPMetricExporter || !PeriodicExportingMetricReader) {
+      throw new Error("OpenTelemetry modules did not expose the expected constructors");
     }
-    const exporter = new OTLPTraceExporter({ url: `${endpoint.replace(/\/$/, "")}/v1/traces` });
     const sdk = new NodeSDK({
       serviceName: "financial-kernel",
-      traceExporter: exporter,
+      ...(options.traces
+        ? { traceExporter: new OTLPTraceExporter({ url: `${endpoint}/v1/traces` }) }
+        : {}),
+      ...(options.metrics
+        ? {
+            metricReaders: [
+              new PeriodicExportingMetricReader({
+                exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics` }),
+                exportIntervalMillis: 60_000,
+              }),
+            ],
+          }
+        : {}),
     }) as NodeSdkLike;
     sdk.start();
-    logger.info("telemetry.started", { endpoint });
+    logger.info("telemetry.started", {
+      endpoint,
+      traces: options.traces,
+      metrics: options.metrics,
+    });
     return { exporting: true, shutdown: () => sdk.shutdown() };
   } catch {
     logger.warn("telemetry.unavailable", {
       endpoint,
-      reason: `Install ${sdkModule} and ${exporterModule} in @nexora/api to export traces; spans remain no-ops`,
+      reason: "OpenTelemetry SDK failed to start; spans and metrics remain no-ops",
     });
     return disabled;
   }

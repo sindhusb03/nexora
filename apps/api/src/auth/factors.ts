@@ -1,0 +1,404 @@
+import type { LedgerStore } from "@nexora/db";
+import type { Hono } from "hono";
+import QRCode from "qrcode";
+import { z } from "zod";
+
+import type { AuthConfig } from "../config.js";
+import { ApiError, type AppContext, type AppEnv } from "../http.js";
+import type { Logger } from "../observability.js";
+import type { EmailSender, MemoryMailbox } from "./email.js";
+import { issueSession, recordAuth } from "./issue.js";
+import { lockoutStatus, lockoutSubject, nextLockout } from "./lockout.js";
+import { sha256, startOidc, type OidcProviderConfig } from "./oidc.js";
+import { openSecret, sealSecret } from "./secret-box.js";
+import { assertCsrf, assertOrigin, clearSessionCookie, lookupSession } from "./session.js";
+import {
+  generateRecoveryCodes,
+  generateTotpSecret,
+  hashRecoveryCode,
+  totpAuthUrl,
+  verifyTotp,
+} from "./totp.js";
+
+const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+const MAGIC_TTL_MS = 15 * 60 * 1000;
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+const magicSchema = z.object({
+  email: z.string().trim().toLowerCase().regex(EMAIL, "Enter a valid email address"),
+});
+const consumeSchema = z.object({
+  token: z.string().trim().min(20).max(200),
+  region: z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2}(-[a-z]+)+-\d$/)
+    .optional(),
+});
+const confirmSchema = z.object({
+  code: z.string().trim().min(6).max(8),
+});
+const verifySchema = z
+  .object({
+    challengeId: z.uuid(),
+    code: z.string().trim().min(6).max(12).optional(),
+    recoveryCode: z.string().trim().min(8).max(32).optional(),
+  })
+  .refine((value) => value.code !== undefined || value.recoveryCode !== undefined, {
+    message: "Enter an authenticator code or a recovery code",
+  });
+
+export interface FactorDeps {
+  readonly store: LedgerStore;
+  readonly auth: AuthConfig;
+  readonly webOrigins: readonly string[];
+  readonly logger: Logger;
+  readonly email: EmailSender;
+  readonly devMailbox: MemoryMailbox | null;
+  readonly oidcProviders: readonly OidcProviderConfig[];
+  readonly platformAdminActorIds: readonly string[];
+  readonly regionFor: (requested: string | undefined) => string;
+}
+
+export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void {
+  const { store, auth, logger } = deps;
+
+  app.post("/auth/magic-link", async (c) => {
+    assertOrigin(c, deps.webOrigins);
+    const body = magicSchema.parse(await c.req.json());
+    const subject = lockoutSubject("magic", body.email);
+    const now = new Date();
+    const current = await store.readLockout(subject);
+    const status = lockoutStatus(current, now);
+    if (status.locked) {
+      c.header("retry-after", String(status.retryAfterSeconds));
+      throw new ApiError(
+        429,
+        "AUTH_LOCKED",
+        "Sign-in is temporarily unavailable. Try again later.",
+      );
+    }
+    const user = await store.findUserByEmail(body.email);
+    if (!user || user.disabled) {
+      await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
+      await recordAuth(store, logger, {
+        eventType: "magic_link_sent",
+        outcome: "failure",
+        actorId: user?.actorId ?? null,
+        tenantId: null,
+        requestId: c.get("requestId"),
+      });
+      return c.json(
+        { message: "If an account exists for that address, a sign-in link was sent." },
+        202,
+      );
+    }
+    const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
+    const createdAt = now.toISOString();
+    await store.createMagicLink({
+      tokenHash: sha256(token),
+      actorId: user.actorId,
+      createdAt,
+      expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
+    });
+    const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
+    await deps.email.send({
+      to: body.email,
+      subject: "Your Nexora sign-in link",
+      text: `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`,
+    });
+    await store.clearLockout(subject);
+    await recordAuth(store, logger, {
+      eventType: "magic_link_sent",
+      outcome: "success",
+      actorId: user.actorId,
+      tenantId: null,
+      requestId: c.get("requestId"),
+    });
+    return c.json(
+      { message: "If an account exists for that address, a sign-in link was sent." },
+      202,
+    );
+  });
+
+  app.post("/auth/magic-link/consume", async (c) => {
+    assertOrigin(c, deps.webOrigins);
+    const body = consumeSchema.parse(await c.req.json());
+    const region = deps.regionFor(body.region);
+    const actorId = await store.consumeMagicLink(sha256(body.token), new Date().toISOString());
+    if (!actorId) {
+      await recordAuth(store, logger, {
+        eventType: "magic_link_used",
+        outcome: "failure",
+        actorId: null,
+        tenantId: null,
+        requestId: c.get("requestId"),
+      });
+      throw new ApiError(
+        401,
+        "AUTH_INVALID_CREDENTIALS",
+        "That sign-in link is invalid or expired.",
+      );
+    }
+    const user = await store.findUser(actorId);
+    if (!user || user.disabled) {
+      throw new ApiError(
+        401,
+        "AUTH_INVALID_CREDENTIALS",
+        "That sign-in link is invalid or expired.",
+      );
+    }
+    const totp = await store.getTotp(actorId);
+    if (totp?.enabled) {
+      const challenge = await openChallenge(deps, actorId, region);
+      await recordAuth(store, logger, {
+        eventType: "magic_link_used",
+        outcome: "success",
+        actorId,
+        tenantId: null,
+        requestId: c.get("requestId"),
+        payload: { mfa: "required" },
+      });
+      return c.json({ mfaRequired: true, challengeId: challenge }, 200);
+    }
+    const session = await issueSession(c, store, auth, { actorId, region });
+    await recordAuth(store, logger, {
+      eventType: "magic_link_used",
+      outcome: "success",
+      actorId,
+      tenantId: null,
+      requestId: c.get("requestId"),
+    });
+    await recordAuth(store, logger, {
+      eventType: "login_success",
+      outcome: "success",
+      actorId,
+      tenantId: null,
+      requestId: c.get("requestId"),
+      payload: { method: "magic_link" },
+    });
+    return c.json(await sessionView(deps, actorId, null, region, session), 200);
+  });
+
+  app.post("/auth/2fa/enroll", async (c) => {
+    const session = await requireActor(c, deps);
+    const secret = generateTotpSecret();
+    const saved = await store.saveTotp({
+      actorId: session.actorId,
+      secretCipher: sealSecret(auth.secret, secret),
+      createdAt: new Date().toISOString(),
+    });
+    if (saved === "locked") {
+      throw new ApiError(409, "AUTH_TOTP_ENABLED", "Two-factor authentication is already enabled.");
+    }
+    const account = session.email ?? session.actorId;
+    const otpauthUrl = totpAuthUrl("Nexora", account, secret);
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 192 });
+    return c.json({ otpauthUrl, qrDataUrl, secret });
+  });
+
+  app.post("/auth/2fa/confirm", async (c) => {
+    const session = await requireActor(c, deps);
+    const body = confirmSchema.parse(await c.req.json());
+    const totp = await store.getTotp(session.actorId);
+    const secret = totp ? openSecret(auth.secret, totp.secretCipher) : null;
+    if (!totp || totp.enabled || !secret || !verifyTotp(secret, body.code)) {
+      await recordAuth(store, logger, {
+        eventType: "totp_enroll",
+        outcome: "failure",
+        actorId: session.actorId,
+        tenantId: session.tenantId,
+        requestId: c.get("requestId"),
+      });
+      throw new ApiError(
+        401,
+        "AUTH_INVALID_CREDENTIALS",
+        "That authenticator code was not accepted.",
+      );
+    }
+    const enabled = await store.confirmTotp(session.actorId, new Date().toISOString());
+    if (!enabled) {
+      throw new ApiError(409, "AUTH_TOTP_ENABLED", "Two-factor authentication is already enabled.");
+    }
+    const recoveryCodes = generateRecoveryCodes();
+    await store.saveRecoveryCodes(
+      session.actorId,
+      recoveryCodes.map((code) => hashRecoveryCode(code)),
+    );
+    await recordAuth(store, logger, {
+      eventType: "totp_enroll",
+      outcome: "success",
+      actorId: session.actorId,
+      tenantId: session.tenantId,
+      requestId: c.get("requestId"),
+    });
+    return c.json({ recoveryCodes });
+  });
+
+  app.post("/auth/2fa/verify", async (c) => {
+    assertOrigin(c, deps.webOrigins);
+    const body = verifySchema.parse(await c.req.json());
+    const challenge = await store.consumeMfaChallenge(body.challengeId, new Date().toISOString());
+    if (!challenge) {
+      await recordAuth(store, logger, {
+        eventType: "totp_verify",
+        outcome: "failure",
+        actorId: null,
+        tenantId: null,
+        requestId: c.get("requestId"),
+      });
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
+    }
+    const totp = await store.getTotp(challenge.actorId);
+    const secret = totp?.enabled ? openSecret(auth.secret, totp.secretCipher) : null;
+    const codeOk = body.code !== undefined && secret !== null && verifyTotp(secret, body.code);
+    const recoveryOk =
+      !codeOk && body.recoveryCode !== undefined
+        ? await store.consumeRecoveryCode(
+            challenge.actorId,
+            hashRecoveryCode(body.recoveryCode),
+            new Date().toISOString(),
+          )
+        : false;
+    if (!codeOk && !recoveryOk) {
+      await recordAuth(store, logger, {
+        eventType: "totp_verify",
+        outcome: "failure",
+        actorId: challenge.actorId,
+        tenantId: null,
+        requestId: c.get("requestId"),
+      });
+      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
+    }
+    const session = await issueSession(c, store, auth, {
+      actorId: challenge.actorId,
+      region: challenge.region,
+    });
+    await recordAuth(store, logger, {
+      eventType: "totp_verify",
+      outcome: "success",
+      actorId: challenge.actorId,
+      tenantId: null,
+      requestId: c.get("requestId"),
+      payload: { method: recoveryOk ? "recovery" : "totp" },
+    });
+    await recordAuth(store, logger, {
+      eventType: "login_success",
+      outcome: "success",
+      actorId: challenge.actorId,
+      tenantId: null,
+      requestId: c.get("requestId"),
+      payload: { method: recoveryOk ? "recovery" : "totp" },
+    });
+    return c.json(await sessionView(deps, challenge.actorId, null, challenge.region, session), 200);
+  });
+
+  app.get("/auth/audit", async (c) => {
+    const session = await requireActor(c, deps);
+    const roles = session.tenantId ? await store.listRoles(session.tenantId, session.actorId) : [];
+    const includeTenant = roles.includes("owner") || roles.includes("auditor");
+    const events = await store.listAuthAudit({
+      actorId: session.actorId,
+      tenantId: session.tenantId,
+      includeTenant,
+    });
+    return c.json({ events });
+  });
+
+  app.get("/auth/oidc/:provider/start", async (c) => {
+    const provider = deps.oidcProviders.find((item) => item.id === c.req.param("provider"));
+    if (!provider) {
+      throw new ApiError(404, "AUTH_OIDC_UNKNOWN", "That sign-in provider is not configured.");
+    }
+    const start = startOidc(provider);
+    const now = new Date();
+    await store.saveOidcState({
+      stateHash: start.stateHash,
+      providerId: provider.id,
+      nonceHash: start.nonceHash,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+    });
+    return c.redirect(start.authorizeUrl, 302);
+  });
+
+  app.get("/auth/oidc/:provider/callback", async (c) => {
+    const provider = deps.oidcProviders.find((item) => item.id === c.req.param("provider"));
+    if (!provider) {
+      throw new ApiError(404, "AUTH_OIDC_UNKNOWN", "That sign-in provider is not configured.");
+    }
+    const state = c.req.query("state")?.trim() ?? "";
+    const code = c.req.query("code")?.trim() ?? "";
+    if (!state || !code) {
+      throw new ApiError(
+        400,
+        "AUTH_OIDC_STATE",
+        "The sign-in provider did not return a state and code.",
+      );
+    }
+    const consumed = await store.consumeOidcState(sha256(state), new Date().toISOString());
+    if (!consumed || consumed.providerId !== provider.id) {
+      throw new ApiError(400, "AUTH_OIDC_STATE", "The sign-in state is invalid or expired.");
+    }
+    throw new ApiError(
+      501,
+      "AUTH_OIDC_NOT_COMPLETED",
+      "The provider is configured, but token exchange is not enabled on this deployment.",
+    );
+  });
+
+  if (deps.devMailbox) {
+    const mailbox = deps.devMailbox;
+    app.get("/auth/dev/mailbox", (c) => c.json({ messages: mailbox.list() }));
+  }
+}
+
+async function openChallenge(deps: FactorDeps, actorId: string, region: string): Promise<string> {
+  const now = new Date();
+  const challengeId = crypto.randomUUID();
+  await deps.store.createMfaChallenge({
+    challengeId,
+    actorId,
+    region,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + CHALLENGE_TTL_MS).toISOString(),
+  });
+  return challengeId;
+}
+
+async function requireActor(c: AppContext, deps: FactorDeps) {
+  const session = await lookupSession(c, deps.store, deps.auth);
+  if (session.status !== "active") {
+    clearSessionCookie(c, deps.auth);
+    throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
+  }
+  assertCsrf(c, deps.auth, deps.webOrigins, session.identity.sessionId);
+  const user = await deps.store.findUser(session.identity.actorId);
+  return {
+    actorId: session.identity.actorId,
+    tenantId: session.identity.tenantId,
+    region: session.identity.region,
+    email: user?.email ?? null,
+  };
+}
+
+async function sessionView(
+  deps: FactorDeps,
+  actorId: string,
+  tenantId: string | null,
+  region: string,
+  session: { sessionId: string; expiresAt: string; csrfToken: string },
+) {
+  const roles = tenantId ? await deps.store.listRoles(tenantId, actorId) : [];
+  return {
+    actorId,
+    tenantId,
+    region,
+    roles,
+    platformAdmin: deps.platformAdminActorIds.includes(actorId),
+    expiresAt: session.expiresAt,
+    csrfToken: session.csrfToken,
+  };
+}
+
+export { openChallenge };

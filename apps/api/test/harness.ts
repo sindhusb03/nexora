@@ -106,6 +106,12 @@ class SessionClient {
         },
       });
       if (selected.status !== 200) return selected;
+      const rotated = {
+        cookie: cookieFrom(selected),
+        csrfToken: ((await selected.json()) as { csrfToken: string }).csrfToken,
+      };
+      this.sessions.set(key, rotated);
+      return rotated;
     }
     this.sessions.set(key, session);
     return session;

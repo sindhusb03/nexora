@@ -23,7 +23,9 @@ import type {
   StoredJournalLine,
   TenantRecord,
 } from "./records.js";
+import { writeRoleChangeAudit } from "./auth-store.js";
 import { createIdentityStore } from "./identity-store.js";
+import { currentRlsSession } from "./session-context.js";
 import { createProgramStore } from "./program-store.js";
 import { createWorkspaceStore } from "./workspace-store.js";
 import {
@@ -66,6 +68,14 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           createdAt: input.tenant.createdAt,
         });
         await writeAudit(tx, input.tenant.tenantId, input.audit);
+        await writeRoleChangeAudit(tx, {
+          actorId: input.ownerActorId,
+          tenantId: input.tenant.tenantId,
+          role: "owner",
+          grantedBy: input.audit.actorId,
+          requestId: input.audit.correlationId,
+          occurredAt: input.tenant.createdAt,
+        });
         return input.tenant;
       });
     },
@@ -80,6 +90,14 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           createdAt: input.audit.occurredAt,
         });
         await writeAudit(tx, input.tenantId, input.audit);
+        await writeRoleChangeAudit(tx, {
+          actorId: input.actorId,
+          tenantId: input.tenantId,
+          role: input.role,
+          grantedBy: input.audit.actorId,
+          requestId: input.audit.correlationId,
+          occurredAt: input.audit.occurredAt,
+        });
       });
     },
 
@@ -528,6 +546,9 @@ export async function tenantTx<T>(
     return await db.transaction(async (tx) => {
       await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));
       await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`);
+      await tx.execute(
+        sql`SELECT set_config('app.actor_id', ${currentRlsSession()?.actorId ?? ""}, true)`,
+      );
       return fn(tx as unknown as AppDatabase);
     });
   } catch (error) {

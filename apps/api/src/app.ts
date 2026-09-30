@@ -1,5 +1,5 @@
 import { ENGINE_VERSION, KernelError, isKernelError } from "@nexora/kernel";
-import type { LedgerStore } from "@nexora/db";
+import { MIGRATION_NAMES, type LedgerStore } from "@nexora/db";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -8,12 +8,15 @@ import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
 import { z, ZodError } from "zod";
 
+import type { EmailSender, MemoryMailbox } from "./auth/email.js";
+import type { OidcProviderConfig } from "./auth/oidc.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { requireIdentity } from "./auth/session.js";
 import type { AuthConfig, HttpConfig } from "./config.js";
-import { ApiError, readActor, statusFor, type AppEnv } from "./http.js";
+import { ApiError, readActor, statusFor, type AppContext, type AppEnv } from "./http.js";
 import { registerFileImportRoutes } from "./imports/file-import.js";
 import { errorFields, jsonLogger, requestLog, type Logger } from "./observability.js";
+import { noopReporter, type ErrorReporter } from "./reporting.js";
 import {
   accountSchema,
   dcfSchema,
@@ -53,11 +56,17 @@ export interface AppOptions {
   /** Extra readiness gate beyond a store round trip, such as a migration check. */
   readonly readiness?: () => Promise<{ readonly ready: boolean; readonly reason?: string }>;
   readonly directory?: CompanyDirectory;
+  readonly demoMode?: boolean;
+  readonly email?: EmailSender;
+  readonly devMailbox?: MemoryMailbox | null;
+  readonly oidcProviders?: readonly OidcProviderConfig[];
+  readonly errorReporter?: ErrorReporter;
 }
 
 export function createApp(options: AppOptions) {
   const http = options.http ?? DEFAULT_HTTP;
   const logger = options.logger ?? jsonLogger();
+  const errorReporter = options.errorReporter ?? noopReporter;
   const service = createLedgerService(options.store, options.platformAdminActorIds);
   const program = createProgramService(options.store);
   const app = new Hono<AppEnv>();
@@ -108,6 +117,8 @@ export function createApp(options: AppOptions) {
   });
   app.use("/auth/login", credentialLimit);
   app.use("/auth/signup", credentialLimit);
+  app.use("/auth/magic-link", credentialLimit);
+  app.use("/auth/2fa/verify", credentialLimit);
   app.use("/auth/*", generalLimit);
   app.use("/v1/*", generalLimit);
 
@@ -167,20 +178,30 @@ export function createApp(options: AppOptions) {
       return error.getResponse();
     }
     logger.error("http.unhandled", { requestId: c.get("requestId"), ...errorFields(error) });
+    errorReporter.captureException(error, {
+      requestId: c.get("requestId"),
+      actorId: c.get("identity")?.actorId ?? null,
+    });
     return c.json({ error: { code: "INTERNAL", message: "Unexpected failure" } }, 500);
   });
 
-  app.get("/health", (c) =>
+  const liveness = (c: AppContext) =>
     c.json({
       status: "ok",
       service: "financial-kernel",
       engineVersion: ENGINE_VERSION,
-    }),
-  );
+    });
+  app.get("/health", liveness);
+  app.get("/healthz", liveness);
 
-  app.get("/ready", async (c) => {
+  const readiness = async (c: AppContext) => {
     try {
       await withTimeout(options.store.ping(), 2_000);
+      const applied = new Set(await options.store.appliedMigrations());
+      const pending = MIGRATION_NAMES.filter((name) => !applied.has(name));
+      if (pending.length > 0) {
+        return c.json({ status: "not_ready", reason: "migrations_pending" }, 503);
+      }
       const gate = options.readiness ? await options.readiness() : { ready: true };
       if (!gate.ready) {
         return c.json({ status: "not_ready", reason: gate.reason ?? "gate_failed" }, 503);
@@ -194,7 +215,9 @@ export function createApp(options: AppOptions) {
       logger.warn("ready.failed", { requestId: c.get("requestId"), ...errorFields(error) });
       return c.json({ status: "not_ready", reason: "store_unreachable" }, 503);
     }
-  });
+  };
+  app.get("/ready", readiness);
+  app.get("/readyz", readiness);
 
   registerAuthRoutes(app, {
     store: options.store,
@@ -203,6 +226,10 @@ export function createApp(options: AppOptions) {
     platformAdminActorIds: options.platformAdminActorIds,
     logger,
     ...(options.passwordCost ? { passwordCost: options.passwordCost } : {}),
+    ...(options.demoMode !== undefined ? { demoMode: options.demoMode } : {}),
+    ...(options.email ? { email: options.email } : {}),
+    devMailbox: options.production ? null : (options.devMailbox ?? null),
+    ...(options.oidcProviders ? { oidcProviders: options.oidcProviders } : {}),
   });
 
   app.post("/v1/tenants", async (c) => {
@@ -302,6 +329,7 @@ export function createApp(options: AppOptions) {
     store: options.store,
     directory: options.directory ?? createDirectory(),
     platformAdminActorIds: options.platformAdminActorIds,
+    ...(options.demoMode !== undefined ? { demoMode: options.demoMode } : {}),
   });
 
   return app;

@@ -34,6 +34,7 @@ const BASELINE_MARKERS: Readonly<Record<string, string>> = {
   "0002_program.sql": "financial_state",
   "0003_identity.sql": "auth_user",
   "0004_workspace.sql": "workspace_record",
+  "0005_auth_hosting.sql": "auth_audit_event",
 };
 
 export async function runMigrations(

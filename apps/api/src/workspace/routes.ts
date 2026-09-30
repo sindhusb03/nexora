@@ -55,6 +55,7 @@ export interface WorkspaceDeps {
   readonly store: LedgerStore;
   readonly directory: CompanyDirectory;
   readonly platformAdminActorIds: readonly string[];
+  readonly demoMode?: boolean;
 }
 
 export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps): void {
@@ -73,7 +74,7 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         ...card,
         support: supportActive(card, actor.actorId, now),
       })),
-      demoPasswordHint: "nexora-demo-2026",
+      demoPasswordHint: deps.demoMode === false ? null : "nexora-demo-2026",
     });
   });
 

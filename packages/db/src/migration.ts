@@ -8,6 +8,7 @@ export const MIGRATION_NAMES = [
   "0002_program.sql",
   "0003_identity.sql",
   "0004_workspace.sql",
+  "0005_auth_hosting.sql",
 ] as const;
 
 export interface Migration {

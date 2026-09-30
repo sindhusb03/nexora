@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   ChevronLeft,
   ChevronRight,
@@ -20,13 +19,17 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ApiFailure,
   askCopilot,
   decideProposal,
   fetchPlatform,
+  confirmTotp,
+  consumeMagicLink,
+  enrollTotp,
+  fetchAuthConfig,
   fetchSession,
   fetchWorkspace,
   grantSupport,
@@ -34,6 +37,8 @@ import {
   listCompanies,
   login,
   logout,
+  requestMagicLink,
+  verifySecondFactor,
   saveForecast,
   selectTenant,
   setFlag,
@@ -54,6 +59,8 @@ import {
   StatementsView,
   VarianceView,
 } from "./studio-views";
+import { SignInScreen, TwoFactorPanel } from "./sign-in";
+import type { AuthConfigView } from "./api";
 import type { CompanyCard, CopilotReply, PlatformView, SessionView, Workspace } from "./types";
 
 const NAV_ICONS: Record<string, typeof Inbox> = {
@@ -90,7 +97,7 @@ type Screen =
   | "admin"
   | "platform";
 
-const DEMO_ACTORS = ["sindhu", "controller", "viewer", "platform-admin"] as const;
+const EMPTY_AUTH: AuthConfigView = { demoMode: false, signupAllowed: false, oidcProviders: [] };
 
 export function StudioApp() {
   const [session, setSession] = useState<SessionView | null>(null);
@@ -116,12 +123,33 @@ export function StudioApp() {
   const [source, setSource] = useState<{ readonly id: string; readonly label: string } | null>(
     null,
   );
+  const [authConfig, setAuthConfig] = useState<AuthConfigView>(EMPTY_AUTH);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [factor, setFactor] = useState<{
+    secret: string;
+    qrDataUrl: string;
+    recoveryCodes: readonly string[];
+  } | null>(null);
 
   const boot = useCallback(async () => {
     setPhase("loading");
     try {
+      const magic = new URLSearchParams(window.location.search).get("magic");
+      if (magic) {
+        window.history.replaceState({}, "", "/studio");
+        const result = await consumeMagicLink(magic);
+        if (result.kind === "mfa") {
+          setChallengeId(result.challengeId);
+          setAuthConfig(await fetchAuthConfig().catch(() => EMPTY_AUTH));
+          setPhase("signed-out");
+          return;
+        }
+        await openCompany(result.session);
+        return;
+      }
       const current = await fetchSession();
       if (!current) {
+        setAuthConfig(await fetchAuthConfig().catch(() => EMPTY_AUTH));
         setPhase("signed-out");
         return;
       }
@@ -176,16 +204,21 @@ export function StudioApp() {
     setPhase("ready");
   }
 
-  async function onSignIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const actorId = String(form.get("actorId") ?? "").trim();
-    const password = String(form.get("password") ?? "");
+  async function acceptLogin(result: Awaited<ReturnType<typeof login>>) {
+    if (result.kind === "mfa") {
+      setChallengeId(result.challengeId);
+      setPhase("signed-out");
+      return;
+    }
+    setChallengeId(null);
+    await openCompany(result.session);
+  }
+
+  async function onPassword(actorId: string, password: string) {
     setBusy(true);
     setNotice(null);
     try {
-      const next = await login(actorId, password);
-      await openCompany(next);
+      await acceptLogin(await login(actorId, password));
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "Sign-in failed");
     } finally {
@@ -193,7 +226,63 @@ export function StudioApp() {
     }
   }
 
+  async function onMagicLink(email: string) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      setNotice(await requestMagicLink(email));
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "The sign-in link could not be sent");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSecondFactor(code: string, recovery: boolean) {
+    if (!challengeId) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      await openCompany(await verifySecondFactor(challengeId, code, recovery));
+      setChallengeId(null);
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "That code was not accepted");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openTwoFactor() {
+    if (!session) return;
+    setMenuOpen(false);
+    setBusy(true);
+    setNotice(null);
+    try {
+      const enrolled = await enrollTotp(session.csrfToken);
+      setFactor({ secret: enrolled.secret, qrDataUrl: enrolled.qrDataUrl, recoveryCodes: [] });
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Two-factor could not be started");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmTwoFactor(code: string) {
+    if (!session || !factor) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const recoveryCodes = await confirmTotp(session.csrfToken, code);
+      setFactor({ ...factor, recoveryCodes });
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "That code was not accepted");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSignOut() {
+    setMenuOpen(false);
     if (session) await logout(session.csrfToken).catch(() => undefined);
     setSession(null);
     setWorkspace(null);
@@ -283,48 +372,15 @@ export function StudioApp() {
   }
   if (phase === "signed-out" || !session) {
     return (
-      <main className="nx-gate">
-        <form className="nx-signin" onSubmit={onSignIn}>
-          <p className="nx-kicker">Nexora</p>
-          <h1>Board-ready and deal-ready, with a person still in charge.</h1>
-          <p>
-            The kernel computes the numbers. Agents only propose. Sign in to the Nazareno Services
-            demo.
-          </p>
-          <label>
-            Actor
-            <Input
-              name="actorId"
-              defaultValue="sindhu"
-              autoComplete="username"
-              data-testid="signin-actor"
-            />
-          </label>
-          <label>
-            Password
-            <Input
-              name="password"
-              type="password"
-              defaultValue="nexora-demo-2026"
-              autoComplete="current-password"
-              data-testid="signin-password"
-            />
-          </label>
-          <Button type="submit" disabled={busy} data-testid="signin-submit">
-            {busy ? "Signing in" : "Open the company"}
-          </Button>
-          {notice ? (
-            <p className="nx-notice" role="alert">
-              {notice}
-            </p>
-          ) : null}
-          <ul className="nx-demo-actors">
-            {DEMO_ACTORS.map((actor) => (
-              <li key={actor}>{actor}</li>
-            ))}
-          </ul>
-        </form>
-      </main>
+      <SignInScreen
+        config={authConfig}
+        busy={busy}
+        notice={notice}
+        challengeId={challengeId}
+        onPassword={onPassword}
+        onMagicLink={onMagicLink}
+        onSecondFactor={onSecondFactor}
+      />
     );
   }
 
@@ -482,6 +538,9 @@ export function StudioApp() {
                 <div className="nx-menu">
                   <p>{session.actorId}</p>
                   <small>{session.roles.join(", ") || "member"}</small>
+                  <button type="button" data-testid="open-2fa" onClick={() => void openTwoFactor()}>
+                    Two-factor
+                  </button>
                   <button type="button" onClick={() => void onSignOut()} data-testid="sign-out">
                     Sign out
                   </button>
@@ -496,6 +555,17 @@ export function StudioApp() {
           </p>
         ) : null}
         <div className="nx-content">
+          {factor ? (
+            <TwoFactorPanel
+              secret={factor.secret}
+              qrDataUrl={factor.qrDataUrl}
+              recoveryCodes={factor.recoveryCodes}
+              busy={busy}
+              notice={notice}
+              onConfirm={confirmTwoFactor}
+              onClose={() => setFactor(null)}
+            />
+          ) : null}
           {!workspace ? (
             <div className="nx-state" role="status">
               <h2>No company yet</h2>

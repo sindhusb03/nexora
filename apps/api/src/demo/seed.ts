@@ -16,7 +16,7 @@ export async function seedDemo(
   store: LedgerStore,
   directory: CompanyDirectory,
   platformAdminActorIds: readonly string[],
-  passwordCost = 32_768,
+  passwordCost = 8_192,
   password = DEMO_PASSWORD,
 ): Promise<void> {
   if (directory.list().some((card) => card.name === DEMO_NAME)) return;

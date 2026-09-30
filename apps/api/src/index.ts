@@ -6,11 +6,13 @@ import {
   type PostgresRuntimeReport,
 } from "@nexora/db";
 
+import { consoleEmailSender, MemoryMailbox } from "./auth/email.js";
 import { createApp } from "./app.js";
 import { ConfigError, loadConfig, type ApiConfig } from "./config.js";
 import { seedDemo } from "./demo/seed.js";
 import { createDirectory } from "./workspace/directory.js";
 import { errorFields, jsonLogger, startTelemetry } from "./observability.js";
+import { createErrorReporter } from "./reporting.js";
 
 const logger = jsonLogger();
 
@@ -27,7 +29,12 @@ for (const warning of config.warnings) {
   logger.warn("config.warning", { message: warning });
 }
 
-const telemetry = await startTelemetry(config.otelEndpoint, logger);
+const telemetry = await startTelemetry(
+  { endpoint: config.otelEndpoint, traces: config.otelTraces, metrics: config.otelMetrics },
+  logger,
+);
+const mailbox = new MemoryMailbox();
+const email = consoleEmailSender(logger, mailbox);
 
 let store: LedgerStore;
 let closeStore: () => Promise<void> = async () => undefined;
@@ -62,7 +69,12 @@ if (config.databaseUrl) {
 }
 
 const directory = createDirectory();
-if (!config.production && process.env.NEXORA_SEED_DEMO !== "false" && !config.databaseUrl) {
+if (
+  config.demoMode &&
+  !config.production &&
+  process.env.NEXORA_SEED_DEMO !== "false" &&
+  !config.databaseUrl
+) {
   await seedDemo(store, directory, config.platformAdminActorIds);
   logger.info("demo.seeded", {
     company: "Nazareno Services",
@@ -79,6 +91,11 @@ const app = createApp({
   logger,
   storeKind: config.databaseUrl ? "postgres" : "pglite",
   directory,
+  demoMode: config.demoMode,
+  email,
+  devMailbox: config.production ? null : mailbox,
+  oidcProviders: config.oidcProviders,
+  errorReporter: createErrorReporter(config.sentryDsn),
 });
 
 const server = serve({ fetch: app.fetch, port: config.port }, () => {

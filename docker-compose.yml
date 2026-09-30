@@ -1,5 +1,6 @@
-# Local production-shaped stack: Postgres, a one-off migration job, the API, and the web app.
-#   AUTH_SECRET=$(openssl rand -base64 48) POSTGRES_PASSWORD=... NEXORA_API_DB_PASSWORD=... docker compose up --build
+# Local production-shaped stack: Postgres (pgvector), MinIO, a one-off migration job, the API, and the web app.
+# Nothing here is deployed. Do not point these variables at a cloud account.
+#   AUTH_SECRET=$(openssl rand -base64 48) POSTGRES_PASSWORD=... NEXORA_API_DB_PASSWORD=... MINIO_ROOT_PASSWORD=... docker compose up --build
 # Create the first account with:
 #   docker compose run --rm -e NEXORA_NEW_USER_PASSWORD=... api node_modules/.bin/tsx src/create-user.ts platform-admin
 # and list it in PLATFORM_ADMIN_ACTOR_IDS.
@@ -7,7 +8,7 @@ name: nexora
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: nexora
       POSTGRES_USER: nexora_owner
@@ -46,8 +47,15 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       PLATFORM_ADMIN_ACTOR_IDS: ${PLATFORM_ADMIN_ACTOR_IDS:-}
       AUTH_ALLOW_SIGNUP: ${AUTH_ALLOW_SIGNUP:-false}
-      NEXORA_REGION: ${NEXORA_REGION:-us-east-1}
+      DEMO_MODE: "false"
+      NEXORA_REGION: ${NEXORA_REGION:-ap-south-1}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: nexora-uploads
+      S3_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-nexora}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
     ports:
       - "8787:8787"
     depends_on:
@@ -70,5 +78,39 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nexora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nexora}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        i=0
+        while [ "$$i" -lt 30 ]; do
+          if mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" && mc mb -p local/nexora-uploads; then
+            exit 0
+          fi
+          i=$$((i + 1))
+          sleep 2
+        done
+        exit 1
+    restart: "no"
+
 volumes:
   pgdata:
+  minio:

@@ -113,6 +113,7 @@ export interface AuthUserRecord {
   readonly actorId: string;
   readonly passwordHash: string;
   readonly disabled: boolean;
+  readonly email: string | null;
 }
 
 export interface AuthSessionRecord {
@@ -124,25 +125,136 @@ export interface AuthSessionRecord {
   readonly expiresAt: string;
 }
 
+export type AuthAuditEventType =
+  | "login_success"
+  | "login_failure"
+  | "magic_link_sent"
+  | "magic_link_used"
+  | "totp_enroll"
+  | "totp_verify"
+  | "session_revoke"
+  | "role_change";
+
+export interface AuthAuditRecord {
+  readonly eventId: string;
+  readonly eventType: AuthAuditEventType;
+  readonly occurredAt: string;
+  readonly actorId: string | null;
+  readonly tenantId: string | null;
+  readonly requestId: string;
+  readonly outcome: "success" | "failure";
+  readonly payload: unknown;
+}
+
+export interface LockoutRecord {
+  readonly subjectHash: string;
+  readonly failures: number;
+  readonly windowStartedAt: string;
+  readonly lockedUntil: string | null;
+}
+
+export type SessionState = "active" | "revoked" | "expired" | "missing";
+
 /** Users and sessions. Runs as nexora_app with no tenant set; tenant data is never read here. */
 export interface IdentityStore {
   createUser(input: {
     actorId: string;
     passwordHash: string;
     createdAt: string;
-  }): Promise<"created" | "exists">;
+    email?: string;
+  }): Promise<"created" | "exists" | "email_taken">;
   findUser(actorId: string): Promise<AuthUserRecord | null>;
+  findUserByEmail(email: string): Promise<AuthUserRecord | null>;
   createSession(input: {
     sessionId: string;
     actorId: string;
     region: string;
     createdAt: string;
     expiresAt: string;
+    familyId?: string;
+    rotatedFrom?: string;
+    tenantId?: string | null;
   }): Promise<void>;
   /** Returns the session only while it is unexpired and unrevoked. */
   getActiveSession(sessionId: string): Promise<AuthSessionRecord | null>;
+  /** Distinguishes a revoked session (reuse must kill the family) from expiry. */
+  sessionState(sessionId: string): Promise<SessionState>;
   selectSessionTenant(sessionId: string, tenantId: string | null): Promise<boolean>;
   revokeSession(sessionId: string, revokedAt: string): Promise<void>;
+  /** Revokes every live session in the family of the given session. */
+  revokeSessionFamily(sessionId: string, revokedAt: string): Promise<void>;
+  rotateSession(input: {
+    sessionId: string;
+    nextSessionId: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean>;
+  createMagicLink(input: {
+    tokenHash: string;
+    actorId: string;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<void>;
+  consumeMagicLink(tokenHash: string, usedAt: string): Promise<string | null>;
+  saveTotp(input: {
+    actorId: string;
+    secretCipher: string;
+    createdAt: string;
+  }): Promise<"saved" | "locked">;
+  confirmTotp(actorId: string, enabledAt: string): Promise<boolean>;
+  getTotp(actorId: string): Promise<{ secretCipher: string; enabled: boolean } | null>;
+  saveRecoveryCodes(actorId: string, codeHashes: readonly string[]): Promise<void>;
+  consumeRecoveryCode(actorId: string, codeHash: string, usedAt: string): Promise<boolean>;
+  readLockout(subjectHash: string): Promise<LockoutRecord | null>;
+  writeLockout(record: LockoutRecord): Promise<void>;
+  clearLockout(subjectHash: string): Promise<void>;
+  createMfaChallenge(input: {
+    challengeId: string;
+    actorId: string;
+    region: string;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<void>;
+  consumeMfaChallenge(
+    challengeId: string,
+    usedAt: string,
+  ): Promise<{ actorId: string; region: string } | null>;
+  insertAuthAudit(input: {
+    eventId: string;
+    eventType: AuthAuditEventType;
+    occurredAt: string;
+    actorId: string | null;
+    tenantId: string | null;
+    requestId: string;
+    outcome: "success" | "failure";
+    payload: Record<string, unknown>;
+  }): Promise<void>;
+  listAuthAudit(input: {
+    actorId: string;
+    tenantId: string | null;
+    includeTenant: boolean;
+  }): Promise<readonly AuthAuditRecord[]>;
+  linkOidcAccount(input: {
+    linkId: string;
+    actorId: string;
+    issuer: string;
+    subject: string;
+    createdAt: string;
+  }): Promise<"linked" | "conflict" | "missing_actor">;
+  findOidcLink(issuer: string, subject: string): Promise<{ actorId: string } | null>;
+  saveOidcState(input: {
+    stateHash: string;
+    providerId: string;
+    nonceHash: string;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<void>;
+  consumeOidcState(
+    stateHash: string,
+    usedAt: string,
+  ): Promise<{ providerId: string; nonceHash: string } | null>;
+  /** Names recorded in schema_migrations. Used by readiness. */
+  appliedMigrations(): Promise<readonly string[]>;
   /** A trivial round trip used by readiness checks. */
   ping(): Promise<void>;
 }

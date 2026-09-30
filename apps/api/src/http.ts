@@ -30,7 +30,7 @@ export interface ActorContext {
   readonly verified: boolean;
 }
 
-export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 503;
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 501 | 503;
 
 /** Failures outside the kernel's vocabulary: authentication, CSRF, limits. */
 export class ApiError extends Error {
