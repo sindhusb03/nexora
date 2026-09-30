@@ -1,4 +1,4 @@
-import type { LedgerStore } from "@nexora/db";
+import type { AuthUserRecord, LedgerStore } from "@nexora/db";
 import type { Hono } from "hono";
 import QRCode from "qrcode";
 import { z } from "zod";
@@ -9,7 +9,14 @@ import type { Logger } from "../observability.js";
 import type { EmailSender, MemoryMailbox } from "./email.js";
 import { verifyPassword } from "./crypto.js";
 import { endPresentedSession, issueSession, recordAuth } from "./issue.js";
-import { lockoutStatus, lockoutSubject, nextLockout } from "./lockout.js";
+import {
+  lockedRetry,
+  lockoutStatus,
+  lockoutSubject,
+  nextLockout,
+  passwordSubjects,
+  strictestLockout,
+} from "./lockout.js";
 import { sha256, startOidc, type OidcProviderConfig } from "./oidc.js";
 import { openSecret, sealSecret } from "./secret-box.js";
 import { assertCsrf, assertOrigin, clearSessionCookie, lookupSession } from "./session.js";
@@ -24,6 +31,8 @@ import {
 
 const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 const MAGIC_TTL_MS = 15 * 60 * 1000;
+/** Both magic-link outcomes wait out this floor so a known address is not faster. */
+const MAGIC_RESPONSE_FLOOR_MS = 40;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const magicSchema = z.object({
@@ -43,15 +52,10 @@ const confirmSchema = z.object({
 const enrollSchema = z.object({
   password: z.string().min(1).max(200),
 });
-const disableSchema = z
-  .object({
-    password: z.string().min(1).max(200),
-    code: z.string().trim().min(6).max(12).optional(),
-    recoveryCode: z.string().trim().min(8).max(32).optional(),
-  })
-  .refine((value) => value.code !== undefined || value.recoveryCode !== undefined, {
-    message: "Enter an authenticator code or a recovery code",
-  });
+const disableSchema = z.object({
+  password: z.string().min(1).max(200),
+  code: z.string().trim().min(6).max(12),
+});
 const verifySchema = z
   .object({
     challengeId: z.uuid(),
@@ -92,43 +96,39 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
         "Sign-in is temporarily unavailable. Try again later.",
       );
     }
-    const user = await store.findUserByEmail(body.email);
-    const live = user && !user.disabled ? user : null;
     await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
-    if (!live) {
-      await recordAuth(store, logger, {
-        eventType: "magic_link_sent",
-        outcome: "failure",
-        actorId: null,
-        tenantId: null,
-        requestId: c.get("requestId"),
-      });
-      return c.json(
-        { message: "If an account exists for that address, a sign-in link was sent." },
-        202,
-      );
-    }
+    const started = performance.now();
     const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
     const createdAt = now.toISOString();
-    await store.createMagicLink({
+    const actorId = await store.createMagicLinkForEmail({
+      email: body.email,
       tokenHash: sha256(token),
-      actorId: live.actorId,
       createdAt,
       expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
     });
-    const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
-    await deps.email.send({
-      to: body.email,
-      subject: "Your Nexora sign-in link",
-      text: `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`,
-    });
+    if (actorId) {
+      const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
+      void deps.email
+        .send({
+          to: body.email,
+          subject: "Your Nexora sign-in link",
+          text: `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`,
+        })
+        .catch((error: unknown) => {
+          logger.error("email.magic_link", {
+            requestId: c.get("requestId"),
+            message: error instanceof Error ? error.message : "sign-in email was not sent",
+          });
+        });
+    }
     await recordAuth(store, logger, {
       eventType: "magic_link_sent",
-      outcome: "success",
-      actorId: live.actorId,
+      outcome: actorId ? "success" : "failure",
+      actorId,
       tenantId: null,
       requestId: c.get("requestId"),
     });
+    await holdMagicResponse(started);
     return c.json(
       { message: "If an account exists for that address, a sign-in link was sent." },
       202,
@@ -200,9 +200,7 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const session = await requireActor(c, deps);
     const body = enrollSchema.parse(await c.req.json());
     const account = await store.findUser(session.actorId);
-    if (!account || !(await verifyPassword(body.password, account.passwordHash))) {
-      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
-    }
+    await requirePassword(c, store, account, session.actorId, body.password);
     const secret = generateTotpSecret();
     const saved = await store.saveTotp({
       actorId: session.actorId,
@@ -260,21 +258,10 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const session = await requireActor(c, deps);
     const body = disableSchema.parse(await c.req.json());
     const account = await store.findUser(session.actorId);
-    if (!account || !(await verifyPassword(body.password, account.passwordHash))) {
-      throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
-    }
+    await requirePassword(c, store, account, session.actorId, body.password);
     const totp = await store.getTotp(session.actorId);
     const secret = totp?.enabled ? openSecret(auth.secret, totp.secretCipher) : null;
-    const codeOk = body.code !== undefined && secret !== null && verifyTotp(secret, body.code);
-    const recoveryOk =
-      !codeOk && body.recoveryCode !== undefined
-        ? await store.consumeRecoveryCode(
-            session.actorId,
-            hashRecoveryCode(body.recoveryCode, auth.secret),
-            new Date().toISOString(),
-          )
-        : false;
-    if (!totp?.enabled || (!codeOk && !recoveryOk)) {
+    if (!totp?.enabled || !secret || !verifyTotp(secret, body.code)) {
       throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "That sign-in code was not accepted.");
     }
     const disabled = await store.disableTotp(session.actorId, new Date().toISOString());
@@ -433,6 +420,43 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const mailbox = deps.devMailbox;
     app.get("/auth/dev/mailbox", (c) => c.json({ messages: mailbox.list() }));
   }
+}
+
+function holdMagicResponse(started: number): Promise<void> {
+  const remaining = MAGIC_RESPONSE_FLOOR_MS - (performance.now() - started);
+  if (remaining <= 0) return Promise.resolve();
+  const end = performance.now() + remaining;
+  while (performance.now() < end) {
+    // Busy wait. A timer would jitter by more than the timing bound.
+  }
+  return Promise.resolve();
+}
+
+async function requirePassword(
+  c: AppContext,
+  store: LedgerStore,
+  account: AuthUserRecord | null,
+  actorId: string,
+  password: string,
+): Promise<void> {
+  const subjects = passwordSubjects(actorId, account?.email);
+  const now = new Date();
+  const states = await Promise.all(subjects.map((subject) => store.readLockout(subject)));
+  const retry = lockedRetry(states, now);
+  if (retry !== null) {
+    c.header("retry-after", String(retry));
+    throw new ApiError(429, "AUTH_LOCKED", "Sign-in is temporarily unavailable. Try again later.");
+  }
+  const valid =
+    account !== null && !account.disabled && (await verifyPassword(password, account.passwordHash));
+  if (!valid) {
+    const snapshot = nextLockout(strictestLockout(states), now);
+    await Promise.all(
+      subjects.map((subjectHash) => store.writeLockout({ subjectHash, ...snapshot })),
+    );
+    throw new ApiError(401, "AUTH_INVALID_CREDENTIALS", "Actor id or password is incorrect");
+  }
+  await Promise.all(subjects.map((subject) => store.clearLockout(subject)));
 }
 
 async function openChallenge(deps: FactorDeps, actorId: string, region: string): Promise<string> {

@@ -41,6 +41,7 @@ export const DEFAULT_HTTP: HttpConfig = {
   webOrigins: ["http://localhost:3000"],
   bodyLimitBytes: 8_388_608,
   trustProxy: false,
+  trustedProxyHops: 1,
   rateLimit: { windowMs: 60_000, max: 600, authMax: 20 },
 };
 
@@ -118,17 +119,21 @@ export function createApp(options: AppOptions) {
     windowMs: http.rateLimit.windowMs,
     max: http.rateLimit.authMax,
     trustProxy: http.trustProxy,
+    trustedHops: http.trustedProxyHops,
   });
   const generalLimit = rateLimit({
     name: "API",
     windowMs: http.rateLimit.windowMs,
     max: http.rateLimit.max,
     trustProxy: http.trustProxy,
+    trustedHops: http.trustedProxyHops,
   });
   app.use("/auth/login", credentialLimit);
   app.use("/auth/signup", credentialLimit);
   app.use("/auth/magic-link", credentialLimit);
   app.use("/auth/2fa/verify", credentialLimit);
+  app.use("/auth/2fa/enroll", credentialLimit);
+  app.use("/auth/2fa/disable", credentialLimit);
   app.use("/auth/*", generalLimit);
   app.use("/v1/*", generalLimit);
 

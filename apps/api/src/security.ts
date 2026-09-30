@@ -8,6 +8,8 @@ export interface RateLimitOptions {
   readonly windowMs: number;
   readonly max: number;
   readonly trustProxy: boolean;
+  /** Rightmost hops appended by our own proxies. Ignored unless trustProxy is set. */
+  readonly trustedHops?: number;
   readonly now?: () => number;
 }
 
@@ -34,19 +36,24 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
         if (window.resetAt <= at) windows.delete(key);
       }
     }
-    const key = clientAddress(c, options.trustProxy);
-    let window = windows.get(key);
-    if (!window || window.resetAt <= at) {
-      window = { count: 0, resetAt: at + options.windowMs };
-      windows.set(key, window);
-    }
-    window.count += 1;
-    const remaining = Math.max(0, options.max - window.count);
-    const resetSeconds = Math.max(1, Math.ceil((window.resetAt - at) / 1000));
+    const keys = [`ip:${clientAddress(c, options.trustProxy, options.trustedHops ?? 1)}`];
+    for (const account of await accountIdentifiers(c)) keys.push(`acct:${account}`);
+    const touched = keys.map((key) => {
+      let window = windows.get(key);
+      if (!window || window.resetAt <= at) {
+        window = { count: 0, resetAt: at + options.windowMs };
+        windows.set(key, window);
+      }
+      window.count += 1;
+      return window;
+    });
+    const tightest = touched.reduce((left, right) => (left.count >= right.count ? left : right));
+    const remaining = Math.max(0, options.max - tightest.count);
+    const resetSeconds = Math.max(1, Math.ceil((tightest.resetAt - at) / 1000));
     c.header("ratelimit-limit", String(options.max));
     c.header("ratelimit-remaining", String(remaining));
     c.header("ratelimit-reset", String(resetSeconds));
-    if (window.count > options.max) {
+    if (tightest.count > options.max) {
       c.header("retry-after", String(resetSeconds));
       return c.json(
         {
@@ -62,14 +69,46 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
   };
 }
 
-export function clientAddress(c: AppContext, trustProxy: boolean): string {
+/**
+ * Client address for rate limits.
+ * With trustProxy, the rightmost `trustedHops` entries were appended by our proxies
+ * (the ALB appends the peer it saw). The address is the entry just before those hops.
+ * A client-supplied leftmost value is ignored.
+ */
+export function clientAddress(c: AppContext, trustProxy: boolean, trustedHops = 1): string {
   if (trustProxy) {
-    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-    if (forwarded) return forwarded;
+    const forwarded = (c.req.header("x-forwarded-for") ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (forwarded.length > 0) {
+      const hops = Math.max(1, trustedHops);
+      const index = Math.max(0, forwarded.length - hops);
+      return forwarded[index] ?? "unknown";
+    }
   }
   try {
     return getConnInfo(c).remote.address ?? "unknown";
   } catch {
     return "local";
+  }
+}
+
+async function accountIdentifiers(c: AppContext): Promise<readonly string[]> {
+  if (c.req.method === "GET" || c.req.method === "OPTIONS" || c.req.method === "HEAD") return [];
+  const type = c.req.header("content-type") ?? "";
+  if (!type.includes("application/json")) return [];
+  try {
+    const body = (await c.req.raw.clone().json()) as unknown;
+    if (typeof body !== "object" || body === null) return [];
+    const record = body as { actorId?: unknown; email?: unknown };
+    const raw = [record.actorId, record.email].filter((value): value is string => {
+      return typeof value === "string" && value.length > 0 && value.length <= 320;
+    });
+    return [...new Set(raw.map((value) => value.normalize("NFKC").trim().toLowerCase()))].filter(
+      (value) => value.length > 0,
+    );
+  } catch {
+    return [];
   }
 }

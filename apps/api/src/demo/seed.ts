@@ -18,6 +18,7 @@ export async function seedDemo(
   platformAdminActorIds: readonly string[],
   passwordCost = 8_192,
   password = DEMO_PASSWORD,
+  homeRegion = DEMO_REGION,
 ): Promise<void> {
   if (directory.list().some((card) => card.name === DEMO_NAME)) return;
   const ledger = createLedgerService(store, platformAdminActorIds);
@@ -31,13 +32,13 @@ export async function seedDemo(
     });
   }
 
-  const admin = actor("platform-admin", null);
+  const admin = actor("platform-admin", null, null, homeRegion);
   const tenant = await ledger.provisionTenant(admin, {
     name: DEMO_NAME,
-    homeRegion: DEMO_REGION,
+    homeRegion,
     ownerActorId: "sindhu",
   });
-  const owner = actor("sindhu", tenant.tenantId);
+  const owner = actor("sindhu", tenant.tenantId, null, homeRegion);
   await ledger.grantMembership(owner, { actorId: "controller", role: "controller" });
   await ledger.grantMembership(owner, { actorId: "viewer", role: "viewer" });
 
@@ -60,17 +61,20 @@ export async function seedDemo(
       endDate: journal.endDate,
     });
     latestPeriodId = period.periodId;
-    await ledger.postJournal(actor("sindhu", tenant.tenantId, `demo-journal-${index}`), {
-      entityId: entity.entityId,
-      periodId: period.periodId,
-      currency: "USD",
-      sourceRef: journal.label,
-      lines: journal.lines.map((line) => ({
-        accountId: requiredAccount(accounts, line.code),
-        debit: centsToMajor(line.debitCents),
-        credit: centsToMajor(line.creditCents),
-      })),
-    });
+    await ledger.postJournal(
+      actor("sindhu", tenant.tenantId, `demo-journal-${index}`, homeRegion),
+      {
+        entityId: entity.entityId,
+        periodId: period.periodId,
+        currency: "USD",
+        sourceRef: journal.label,
+        lines: journal.lines.map((line) => ({
+          accountId: requiredAccount(accounts, line.code),
+          debit: centsToMajor(line.debitCents),
+          credit: centsToMajor(line.creditCents),
+        })),
+      },
+    );
     if (index < journals.length - 1) {
       await ledger.closePeriod(owner, period.periodId);
     }
@@ -187,7 +191,7 @@ export async function seedDemo(
   directory.upsert({
     tenantId: tenant.tenantId,
     name: DEMO_NAME,
-    region: DEMO_REGION,
+    region: homeRegion,
     status: "active",
     entityId: entity.entityId,
     periodId: latestPeriodId,
@@ -229,11 +233,12 @@ function actor(
   actorId: string,
   tenantId: string | null,
   idempotencyKey: string | null = null,
+  region = DEMO_REGION,
 ): ActorContext {
   return {
     actorId,
     tenantId,
-    region: DEMO_REGION,
+    region,
     correlationId: crypto.randomUUID(),
     idempotencyKey,
     expectedVersion: null,

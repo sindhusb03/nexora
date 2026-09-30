@@ -12,7 +12,13 @@ import { burnPasswordCheck, csrfTokenFor, hashPassword, verifyPassword } from ".
 import type { EmailSender, MemoryMailbox } from "./email.js";
 import { openChallenge, registerFactorRoutes } from "./factors.js";
 import { endPresentedSession, issueSession, recordAuth } from "./issue.js";
-import { lockoutStatus, lockoutSubject, nextLockout } from "./lockout.js";
+import {
+  lockedRetry,
+  lockoutSubject,
+  nextLockout,
+  passwordSubjects,
+  strictestLockout,
+} from "./lockout.js";
 import type { OidcProviderConfig } from "./oidc.js";
 import {
   assertCsrf,
@@ -128,27 +134,35 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     const body = loginSchema.parse(await c.req.json());
     const region = resolveRegion(auth, body.region);
     const identifier = body.actorId ?? body.email ?? "";
-    const subject = lockoutSubject("password", identifier);
+    const user = body.actorId
+      ? await store.findUser(body.actorId)
+      : await store.findUserByEmail(body.email ?? "");
+    const subjects = [
+      ...new Set([
+        lockoutSubject("password", identifier),
+        ...(user ? passwordSubjects(user.actorId, user.email) : []),
+      ]),
+    ];
     const now = new Date();
-    const current = await store.readLockout(subject);
-    const locked = lockoutStatus(current, now);
-    if (locked.locked) {
-      c.header("retry-after", String(locked.retryAfterSeconds));
+    const states = await Promise.all(subjects.map((subject) => store.readLockout(subject)));
+    const retry = lockedRetry(states, now);
+    if (retry !== null) {
+      c.header("retry-after", String(retry));
       throw new ApiError(
         429,
         "AUTH_LOCKED",
         "Sign-in is temporarily unavailable. Try again later.",
       );
     }
-    const user = body.actorId
-      ? await store.findUser(body.actorId)
-      : await store.findUserByEmail(body.email ?? "");
     const valid =
       user && !user.disabled
         ? await verifyPassword(body.password, user.passwordHash)
         : await burnPasswordCheck(body.password, deps.passwordCost);
     if (!valid || !user) {
-      await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
+      const snapshot = nextLockout(strictestLockout(states), now);
+      await Promise.all(
+        subjects.map((subjectHash) => store.writeLockout({ subjectHash, ...snapshot })),
+      );
       await recordAuth(store, logger, {
         eventType: "login_failure",
         outcome: "failure",
@@ -183,7 +197,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
       return c.json({ mfaRequired: true, challengeId }, 200);
     }
 
-    await store.clearLockout(subject);
+    await Promise.all(subjects.map((subject) => store.clearLockout(subject)));
     await endPresentedSession(c, store, auth, logger);
     const session = await issueSession(c, store, auth, { actorId: user.actorId, region });
     await recordAuth(store, logger, {

@@ -23,6 +23,7 @@ type AuthMethods = Pick<
   | "revokeSessionFamily"
   | "rotateSession"
   | "createMagicLink"
+  | "createMagicLinkForEmail"
   | "consumeMagicLink"
   | "saveTotp"
   | "confirmTotp"
@@ -108,6 +109,22 @@ export function createAuthStore(db: AppDatabase): AuthMethods {
     createMagicLink(input) {
       return authTx(db, async (tx) => {
         await tx.insert(authMagicLink).values(input);
+      });
+    },
+
+    createMagicLinkForEmail(input) {
+      return authTx(db, async (tx) => {
+        const inserted = await tx.execute(sql`
+          INSERT INTO auth_magic_link (token_hash, actor_id, created_at, expires_at)
+          SELECT ${input.tokenHash}, actor_id, ${input.createdAt}::timestamptz, ${input.expiresAt}::timestamptz
+            FROM auth_user
+           WHERE lower(email) = ${input.email}
+             AND disabled = false
+          RETURNING actor_id
+        `);
+        const row = firstRow(inserted);
+        const actorId = row?.actor_id ?? row?.actorId;
+        return typeof actorId === "string" ? actorId : null;
       });
     },
 
@@ -520,6 +537,24 @@ function rowCount(result: unknown): number {
     if (typeof count === "number") return count;
   }
   return rowsOf(result).length;
+}
+
+function firstRow(result: unknown): { actor_id?: string; actorId?: string } | null {
+  if (Array.isArray(result)) {
+    const row = result[0];
+    return typeof row === "object" && row !== null
+      ? (row as { actor_id?: string; actorId?: string })
+      : null;
+  }
+  if (typeof result === "object" && result !== null && "rows" in result) {
+    const rows = (result as { rows: unknown }).rows;
+    if (!Array.isArray(rows)) return null;
+    const row = rows[0];
+    return typeof row === "object" && row !== null
+      ? (row as { actor_id?: string; actorId?: string })
+      : null;
+  }
+  return null;
 }
 
 function rowsOf(result: unknown): readonly { name: string }[] {

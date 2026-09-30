@@ -20,6 +20,10 @@ Fargate is the choice because the API must reach RDS and object storage without 
 
 The template includes a VPC with public and private subnets, an internet-facing load balancer (TLS listener, certificate, and target groups) as the only public entry, private Fargate services, a one-shot migration task (`aws_ecs_task_definition.migrate`, started with `ecs run-task`, not a service), RDS Postgres with `rds.force_ssl`, 7-day backups (PITR while retention is at least one day), an S3 bucket with SSE-KMS that denies non-TLS access, and Secrets Manager entries for `AUTH_SECRET`, the API database URL, and the migration URL. Images are references only. The template does not build or push them.
 
+The task role may call `kms:GenerateDataKey` and `kms:Decrypt` only on `aws_kms_key.data`, which is the uploads bucket key. Without those actions S3 rejects every SSE-KMS upload. `terraform validate` and `tflint` check the policy shape. They do not call IAM policy simulation, and nothing here has been applied.
+
+`aws_acm_certificate.main` uses DNS validation. `aws_acm_certificate_validation.main` waits on the records in `aws_acm_certificate.main.domain_validation_options`. Create those CNAMEs in Cloudflare by hand (name, type, and value from the `acm_validation_records` output) before any apply. This repository does not configure Cloudflare and does not run `terraform apply`.
+
 ## Data residency
 
 India's Digital Personal Data Protection Act, 2023 applies to personal data processed in India and to processing outside India when it is in connection with offering goods or services in India. Nexora is the data fiduciary for account and customer content it stores. Obligations include a lawful purpose, notice, security safeguards, and breach notice to the Data Protection Board and affected data principals. The government may restrict transfers to notified countries (section 16). Until a restriction is notified, a transfer still has to meet the Act. A significant-data-fiduciary designation would add a data-protection officer, an independent audit, and a data-protection impact assessment. Do not assume that designation; design as if it can be applied later.

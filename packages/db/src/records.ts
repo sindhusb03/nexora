@@ -195,6 +195,16 @@ export interface IdentityStore {
     createdAt: string;
     expiresAt: string;
   }): Promise<void>;
+  /**
+   * Inserts a magic link only when the email belongs to a live user.
+   * Unknown and disabled addresses insert nothing. The statement shape is the same either way.
+   */
+  createMagicLinkForEmail(input: {
+    email: string;
+    tokenHash: string;
+    createdAt: string;
+    expiresAt: string;
+  }): Promise<string | null>;
   consumeMagicLink(tokenHash: string, usedAt: string): Promise<string | null>;
   saveTotp(input: {
     actorId: string;

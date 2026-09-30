@@ -286,7 +286,7 @@ export function StudioApp() {
     setBusy(true);
     setNotice(null);
     try {
-      await disableTotp(session.csrfToken, password, code, false);
+      await disableTotp(session.csrfToken, password, code);
       setFactor(null);
       setNotice("Two-factor authentication is off.");
     } catch (caught) {

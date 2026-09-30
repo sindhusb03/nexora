@@ -15,6 +15,37 @@ export function lockoutSubject(kind: "password" | "magic" | "totp", value: strin
   return createHash("sha256").update(`${kind}|${normalized}`).digest("hex");
 }
 
+/** Actor id and email share one password lock so a check on either identifier counts. */
+export function passwordSubjects(
+  actorId: string,
+  email: string | null | undefined,
+): readonly string[] {
+  const subjects = [lockoutSubject("password", actorId)];
+  if (email) subjects.push(lockoutSubject("password", email));
+  return subjects;
+}
+
+export function strictestLockout(
+  states: readonly (LockoutSnapshot | null)[],
+): LockoutSnapshot | null {
+  let worst: LockoutSnapshot | null = null;
+  for (const state of states) {
+    if (!state) continue;
+    if (!worst || state.failures > worst.failures) worst = state;
+  }
+  return worst;
+}
+
+/** Seconds until the window opens, or null when none of the subjects are locked. */
+export function lockedRetry(states: readonly (LockoutSnapshot | null)[], now: Date): number | null {
+  let retry: number | null = null;
+  for (const state of states) {
+    const status = lockoutStatus(state, now);
+    if (status.locked) retry = Math.max(retry ?? 0, status.retryAfterSeconds);
+  }
+  return retry;
+}
+
 export function lockoutStatus(
   state: LockoutSnapshot | null,
   now: Date,

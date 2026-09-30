@@ -599,6 +599,198 @@ describe("auth regressions", () => {
     expect(stale.status).toBe(401);
   });
 
+  it("keeps magic-link timing independent of whether the address exists", async () => {
+    const knownEmail = "timing.user@example.com";
+    const unknownEmail = "timing.missing@example.com";
+    expect(
+      (
+        await app.request(
+          "/auth/signup",
+          json("POST", { actorId: "timing-user", email: knownEmail, password: TEST_PASSWORD }),
+        )
+      ).status,
+    ).toBe(201);
+    const slow = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 100_000 } },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      email: {
+        async send() {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        },
+      },
+      demoMode: true,
+    });
+    const sample = async (email: string) => {
+      await store.clearLockout(lockoutSubject("magic", email));
+      const started = performance.now();
+      const response = await slow.request("/auth/magic-link", json("POST", { email }));
+      expect(response.status).toBe(202);
+      return performance.now() - started;
+    };
+    for (let warm = 0; warm < 3; warm += 1) {
+      await sample(knownEmail);
+      await sample(unknownEmail);
+    }
+    const gaps: number[] = [];
+    for (let run = 0; run < 21; run += 1) {
+      gaps.push(Math.abs((await sample(knownEmail)) - (await sample(unknownEmail))));
+    }
+    gaps.sort((left, right) => left - right);
+    const median = gaps[10] ?? Number.POSITIVE_INFINITY;
+    expect(median, `median gap ${median.toFixed(3)}ms`).toBeLessThan(1);
+  });
+
+  it("rates limits on the proxy-appended address and the account, ignoring a spoofed hop", async () => {
+    const limited = createApp({
+      store,
+      platformAdminActorIds: ["platform-admin"],
+      auth: testAuth(),
+      http: {
+        ...DEFAULT_HTTP,
+        trustProxy: true,
+        trustedProxyHops: 1,
+        rateLimit: { windowMs: 60_000, max: 100_000, authMax: 3 },
+      },
+      logger: silentLogger,
+      passwordCost: 1_024,
+      demoMode: true,
+    });
+    const send = (forwarded: string, email: string) =>
+      limited.request("/auth/magic-link", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": forwarded },
+        body: JSON.stringify({ email }),
+      });
+    const email = "xff.user@example.com";
+    expect((await send("1.1.1.1, 5.6.7.8", email)).status).toBe(202);
+    expect((await send("9.9.9.9, 5.6.7.8", email)).status).toBe(202);
+    expect((await send("8.8.8.8, 5.6.7.8", email)).status).toBe(202);
+    const spoofed = await send("4.4.4.4, 5.6.7.8", email);
+    expect(spoofed.status).toBe(429);
+    expect(await errorCode(spoofed)).toBe("RATE_LIMITED");
+    const sameAccount = await send("1.1.1.1, 8.8.8.8", email);
+    expect(sameAccount.status).toBe(429);
+    expect(await errorCode(sameAccount)).toBe("RATE_LIMITED");
+    expect((await send("1.1.1.1, 8.8.8.8", "other.xff@example.com")).status).toBe(202);
+  });
+
+  it("counts second-factor password failures toward login lockout and requires a totp code to disable", async () => {
+    await sessions(app).register("factor-lock");
+    const login = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "factor-lock", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const cookie = cookieFrom(login);
+    const csrfToken = ((await login.json()) as { csrfToken: string }).csrfToken;
+    const headers = { "content-type": "application/json", cookie, "x-csrf-token": csrfToken };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await app.request("/auth/2fa/enroll", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ password: "wrong-password-123" }),
+      });
+      expect(wrong.status).toBe(401);
+    }
+    const lockedEnroll = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    expect(lockedEnroll.status).toBe(429);
+    expect(await errorCode(lockedEnroll)).toBe("AUTH_LOCKED");
+    const lockedLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "factor-lock", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    expect(lockedLogin.status).toBe(429);
+    expect(await errorCode(lockedLogin)).toBe("AUTH_LOCKED");
+
+    await sessions(app).register("factor-off");
+    const offLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "factor-off", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const offCookie = cookieFrom(offLogin);
+    const offCsrf = ((await offLogin.json()) as { csrfToken: string }).csrfToken;
+    const offHeaders = {
+      "content-type": "application/json",
+      cookie: offCookie,
+      "x-csrf-token": offCsrf,
+    };
+    const enrolled = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers: offHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const secret = ((await enrolled.json()) as { secret: string }).secret;
+    const code = totpCode(secret);
+    expect(
+      (
+        await app.request("/auth/2fa/confirm", {
+          method: "POST",
+          headers: offHeaders,
+          body: JSON.stringify({ code }),
+        })
+      ).status,
+    ).toBe(200);
+    const recoveryOnly = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: offHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD, recoveryCode: "ABCD-EFGH" }),
+    });
+    expect(recoveryOnly.status).toBe(400);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await app.request("/auth/2fa/disable", {
+        method: "POST",
+        headers: offHeaders,
+        body: JSON.stringify({ password: "wrong-password-123", code }),
+      });
+      expect(wrong.status).toBe(401);
+    }
+    const lockedDisable = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: offHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD, code }),
+    });
+    expect(lockedDisable.status).toBe(429);
+    expect(await errorCode(lockedDisable)).toBe("AUTH_LOCKED");
+
+    await sessions(app).register("factor-disable");
+    const disableLogin = await app.request(
+      "/auth/login",
+      json("POST", { actorId: "factor-disable", password: TEST_PASSWORD, region: "us-east-1" }),
+    );
+    const disableCookie = cookieFrom(disableLogin);
+    const disableCsrf = ((await disableLogin.json()) as { csrfToken: string }).csrfToken;
+    const disableHeaders = {
+      "content-type": "application/json",
+      cookie: disableCookie,
+      "x-csrf-token": disableCsrf,
+    };
+    const disableEnroll = await app.request("/auth/2fa/enroll", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD }),
+    });
+    const disableSecret = ((await disableEnroll.json()) as { secret: string }).secret;
+    const disableCode = totpCode(disableSecret);
+    await app.request("/auth/2fa/confirm", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({ code: disableCode }),
+    });
+    const disabled = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({ password: TEST_PASSWORD, code: disableCode }),
+    });
+    expect(disabled.status).toBe(200);
+  });
+
   it("refuses a weak password cost in production", async () => {
     const previous = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";

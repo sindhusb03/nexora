@@ -33,7 +33,8 @@ The API reads only the process environment. It does not load `.env`. Local scrip
 | `NEXORA_DEV_HEADERS`                                            | Refused when `true`                                                | `false`                                       |
 | `WEB_ORIGIN`                                                    | Comma-separated browser origins (scheme and host)                  | `http://localhost:3000`                       |
 | `API_BODY_LIMIT_BYTES`                                          | 1 KiB – 50 MiB                                                     | 8388608                                       |
-| `TRUST_PROXY`                                                   | `true` only behind a proxy that sets `X-Forwarded-For`             | `false`                                       |
+| `TRUST_PROXY`                                                   | `true` only behind a proxy that appends `X-Forwarded-For`          | `false`                                       |
+| `TRUST_PROXY_HOPS`                                              | Rightmost hops our proxies append. `1` behind the ALB              | `1`                                           |
 | `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX`, `AUTH_RATE_LIMIT_MAX` | Tune per deployment                                                | 60000, 600, 20                                |
 | `DEMO_MODE`                                                     | Refused when `true`. Default `false`                               | `false` unless set to `true`                  |
 | `OIDC_PROVIDERS`                                                | Optional JSON array. No provider is required (section 5)           | Unset                                         |

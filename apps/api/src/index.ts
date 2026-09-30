@@ -9,7 +9,7 @@ import {
 import { consoleEmailSender, MemoryMailbox } from "./auth/email.js";
 import { createApp } from "./app.js";
 import { ConfigError, loadConfig, type ApiConfig } from "./config.js";
-import { seedDemo } from "./demo/seed.js";
+import { DEMO_PASSWORD, DEMO_REGION, seedDemo } from "./demo/seed.js";
 import { createDirectory } from "./workspace/directory.js";
 import { errorFields, jsonLogger, startTelemetry } from "./observability.js";
 import { createErrorReporter } from "./reporting.js";
@@ -75,7 +75,14 @@ if (
   process.env.NEXORA_SEED_DEMO !== "false" &&
   !config.databaseUrl
 ) {
-  await seedDemo(store, directory, config.platformAdminActorIds);
+  await seedDemo(
+    store,
+    directory,
+    config.platformAdminActorIds,
+    8_192,
+    DEMO_PASSWORD,
+    config.auth.pinnedRegion ?? DEMO_REGION,
+  );
   logger.info("demo.seeded", {
     company: "Nazareno Services",
     actors: "sindhu,controller,viewer,platform-admin",

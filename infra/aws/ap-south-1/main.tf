@@ -289,7 +289,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DEMO_MODE", value = "false" },
       { name = "NEXORA_REGION", value = "ap-south-1" },
       { name = "WEB_ORIGIN", value = var.web_origin },
-      { name = "TRUST_PROXY", value = "true" }
+      { name = "TRUST_PROXY", value = "true" },
+      { name = "TRUST_PROXY_HOPS", value = "1" }
     ]
     secrets = [
       { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.database_url.arn },
@@ -462,6 +463,12 @@ resource "aws_iam_role_policy" "task_uploads" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = ["${aws_s3_bucket.uploads.arn}/*"]
+      },
+      {
+        Sid      = "UploadsSseKms"
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
+        Resource = [aws_kms_key.data.arn]
       },
     ]
   })

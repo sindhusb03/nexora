@@ -190,18 +190,10 @@ export async function enrollTotp(
   };
 }
 
-export async function disableTotp(
-  csrf: string,
-  password: string,
-  code: string,
-  recovery: boolean,
-): Promise<void> {
+export async function disableTotp(csrf: string, password: string, code: string): Promise<void> {
   await request(
     "/auth/2fa/disable",
-    {
-      method: "POST",
-      body: JSON.stringify(recovery ? { password, recoveryCode: code } : { password, code }),
-    },
+    { method: "POST", body: JSON.stringify({ password, code }) },
     csrf,
   );
 }

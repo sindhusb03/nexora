@@ -69,12 +69,33 @@ resource "aws_acm_certificate" "main" {
   }
 }
 
+# DNS validation records are created by hand in Cloudflare. This repo does not apply
+# Terraform and does not manage DNS. The listener waits on this resource so a future
+# apply cannot serve HTTPS on an unvalidated certificate.
+resource "aws_acm_certificate_validation" "main" {
+  certificate_arn         = aws_acm_certificate.main.arn
+  validation_record_fqdns = [for record in aws_acm_certificate.main.domain_validation_options : record.resource_record_name]
+}
+
+output "acm_validation_records" {
+  description = "Create these CNAMEs in Cloudflare before the certificate can become ISSUED."
+  value = [
+    for record in aws_acm_certificate.main.domain_validation_options : {
+      name  = record.resource_record_name
+      type  = record.resource_record_type
+      value = record.resource_record_value
+    }
+  ]
+}
+
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn   = aws_acm_certificate.main.arn
+
+  depends_on = [aws_acm_certificate_validation.main]
 
   default_action {
     type             = "forward"

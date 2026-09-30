@@ -38,6 +38,8 @@ export interface HttpConfig {
   readonly webOrigins: readonly string[];
   readonly bodyLimitBytes: number;
   readonly trustProxy: boolean;
+  /** How many rightmost X-Forwarded-For hops belong to our proxies. Used when trustProxy is set. */
+  readonly trustedProxyHops: number;
   readonly rateLimit: { readonly windowMs: number; readonly max: number; readonly authMax: number };
 }
 
@@ -64,6 +66,7 @@ const envSchema = z.object({
     .default("http://localhost:3000,http://127.0.0.1:4317,http://localhost:4317"),
   API_BODY_LIMIT_BYTES: z.coerce.number().int().min(1024).max(52_428_800).default(8_388_608),
   TRUST_PROXY: z.enum(["true", "false"]).default("false"),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(1).max(10).default(1),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100_000).default(600),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
@@ -237,6 +240,7 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
       webOrigins,
       bodyLimitBytes: values.API_BODY_LIMIT_BYTES,
       trustProxy: values.TRUST_PROXY === "true",
+      trustedProxyHops: values.TRUST_PROXY_HOPS,
       rateLimit: {
         windowMs: values.RATE_LIMIT_WINDOW_MS,
         max: values.RATE_LIMIT_MAX,
