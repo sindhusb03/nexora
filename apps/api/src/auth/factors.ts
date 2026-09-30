@@ -26,7 +26,6 @@ import {
   hashRecoveryCode,
   matchingTotpStep,
   totpAuthUrl,
-  verifyTotp,
 } from "./totp.js";
 
 const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
@@ -220,7 +219,8 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const body = confirmSchema.parse(await c.req.json());
     const totp = await store.getTotp(session.actorId);
     const secret = totp ? openSecret(auth.secret, totp.secretCipher) : null;
-    if (!totp || totp.enabled || !secret || !verifyTotp(secret, body.code)) {
+    const step = secret ? matchingTotpStep(secret, body.code) : null;
+    if (!totp || totp.enabled || !secret || step === null) {
       await recordAuth(store, logger, {
         eventType: "totp_enroll",
         outcome: "failure",
@@ -237,6 +237,14 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const enabled = await store.confirmTotp(session.actorId, new Date().toISOString());
     if (!enabled) {
       throw new ApiError(409, "AUTH_TOTP_ENABLED", "Two-factor authentication is already enabled.");
+    }
+    const recorded = await store.acceptTotpStep(session.actorId, step);
+    if (!recorded) {
+      throw new ApiError(
+        401,
+        "AUTH_INVALID_CREDENTIALS",
+        "That authenticator code was not accepted.",
+      );
     }
     const recoveryCodes = generateRecoveryCodes();
     await store.saveRecoveryCodes(

@@ -139,6 +139,7 @@ describe("magic link, second factor, rotation, and audit", () => {
     expect(enrolled.qrDataUrl.startsWith("data:image/png;base64,")).toBe(true);
     expect(enrolled.otpauthUrl.startsWith("otpauth://totp/")).toBe(true);
 
+    const enrolledAt = Date.now();
     const confirm = await app.request("/auth/2fa/confirm", {
       method: "POST",
       headers: {
@@ -146,7 +147,7 @@ describe("magic link, second factor, rotation, and audit", () => {
         cookie,
         "x-csrf-token": csrfToken,
       },
-      body: JSON.stringify({ code: totpCode(enrolled.secret) }),
+      body: JSON.stringify({ code: totpCode(enrolled.secret, enrolledAt) }),
     });
     expect(confirm.status).toBe(200);
     const recoveryCodes = ((await confirm.json()) as { recoveryCodes: string[] }).recoveryCodes;
@@ -168,7 +169,7 @@ describe("magic link, second factor, rotation, and audit", () => {
 
     const verified = await app.request(
       "/auth/2fa/verify",
-      json("POST", { challengeId, code: totpCode(enrolled.secret) }),
+      json("POST", { challengeId, code: totpCode(enrolled.secret, enrolledAt + 30_000) }),
     );
     expect(verified.status).toBe(200);
     expect(cookieFrom(verified)).toContain("nexora_session=");
@@ -439,7 +440,9 @@ describe("auth regressions", () => {
       body: JSON.stringify({ password: TEST_PASSWORD }),
     });
     const replaySecret = ((await replayEnroll.json()) as { secret: string }).secret;
-    const code = totpCode(replaySecret);
+    const enrolledAt = Date.now();
+    const code = totpCode(replaySecret, enrolledAt);
+    const nextCode = totpCode(replaySecret, enrolledAt + 30_000);
     await app.request("/auth/2fa/confirm", {
       method: "POST",
       headers: {
@@ -455,8 +458,12 @@ describe("auth regressions", () => {
     );
     const firstChallenge = ((await first.json()) as { challengeId: string }).challengeId;
     expect(
-      (await app.request("/auth/2fa/verify", json("POST", { challengeId: firstChallenge, code })))
-        .status,
+      (
+        await app.request(
+          "/auth/2fa/verify",
+          json("POST", { challengeId: firstChallenge, code: nextCode }),
+        )
+      ).status,
     ).toBe(200);
     const second = await app.request(
       "/auth/login",
@@ -464,8 +471,12 @@ describe("auth regressions", () => {
     );
     const secondChallenge = ((await second.json()) as { challengeId: string }).challengeId;
     expect(
-      (await app.request("/auth/2fa/verify", json("POST", { challengeId: secondChallenge, code })))
-        .status,
+      (
+        await app.request(
+          "/auth/2fa/verify",
+          json("POST", { challengeId: secondChallenge, code: nextCode }),
+        )
+      ).status,
     ).toBe(401);
     const disabled = await app.request("/auth/2fa/disable", {
       method: "POST",
@@ -474,17 +485,9 @@ describe("auth regressions", () => {
         cookie: replayCookie,
         "x-csrf-token": replayCsrf,
       },
-      body: JSON.stringify({
-        password: TEST_PASSWORD,
-        code: totpCode(replaySecret, Date.now() + 30_000),
-      }),
+      body: JSON.stringify({ password: TEST_PASSWORD, code }),
     });
-    expect(disabled.status).toBe(200);
-    const plain = await app.request(
-      "/auth/login",
-      json("POST", { actorId: "replay-user", password: TEST_PASSWORD, region: "us-east-1" }),
-    );
-    expect(plain.headers.get("set-cookie")).toContain("nexora_session=");
+    expect(disabled.status).toBe(401);
   });
 
   it("rate limits magic-link and second-factor calls", async () => {
@@ -634,25 +637,31 @@ describe("auth regressions", () => {
       expect(response.status).toBe(202);
       return performance.now() - started;
     };
-    for (let warm = 0; warm < 3; warm += 1) {
-      await sample(knownEmail);
-      await sample(unknownEmail);
+    const order: Array<"known" | "unknown"> = [];
+    for (let run = 0; run < 60; run += 1) order.push("known", "unknown");
+    for (let index = order.length - 1; index > 0; index -= 1) {
+      const swap = Math.floor(Math.random() * (index + 1));
+      const current = order[index];
+      order[index] = order[swap] ?? "known";
+      order[swap] = current ?? "unknown";
     }
     const knownTimes: number[] = [];
     const unknownTimes: number[] = [];
-    for (let run = 0; run < 21; run += 1) {
-      knownTimes.push(await sample(knownEmail));
-      unknownTimes.push(await sample(unknownEmail));
+    for (const kind of order) {
+      const elapsed = await sample(kind === "known" ? knownEmail : unknownEmail);
+      if (kind === "known") knownTimes.push(elapsed);
+      else unknownTimes.push(elapsed);
     }
-    knownTimes.sort((left, right) => left - right);
-    unknownTimes.sort((left, right) => left - right);
-    const knownMedian = knownTimes[10] ?? Number.POSITIVE_INFINITY;
-    const unknownMedian = unknownTimes[10] ?? Number.POSITIVE_INFINITY;
+    const knownMedian = medianOf(knownTimes);
+    const unknownMedian = medianOf(unknownTimes);
     const medianGap = Math.abs(knownMedian - unknownMedian);
+    const separation = rankAuc(knownTimes, unknownTimes);
     expect(
       medianGap,
-      `median gap ${medianGap.toFixed(3)}ms (known ${knownMedian.toFixed(1)}ms, unknown ${unknownMedian.toFixed(1)}ms)`,
-    ).toBeLessThan(1);
+      `median gap ${medianGap.toFixed(3)}ms (known ${knownMedian.toFixed(1)}ms, unknown ${unknownMedian.toFixed(1)}ms, auc ${separation.toFixed(3)})`,
+    ).toBeLessThan(5);
+    expect(separation).toBeGreaterThan(0.35);
+    expect(separation).toBeLessThan(0.65);
   });
 
   it("rates limits on the proxy-appended address and the account, ignoring a spoofed hop", async () => {
@@ -694,6 +703,25 @@ describe("auth regressions", () => {
     });
     expect(plain.status).toBe(415);
     expect(await errorCode(plain)).toBe("UNSUPPORTED_MEDIA_TYPE");
+    const noted = await limited.request("/auth/magic-link", {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain; note=application/json",
+        "x-forwarded-for": "1.1.1.1, 8.8.4.4",
+      },
+      body: JSON.stringify({ email: "noted.xff@example.com" }),
+    });
+    expect(noted.status).toBe(415);
+    expect(await errorCode(noted)).toBe("UNSUPPORTED_MEDIA_TYPE");
+    const typed = await limited.request("/auth/magic-link", {
+      method: "POST",
+      headers: {
+        "content-type": "Application/JSON; charset=utf-8",
+        "x-forwarded-for": "1.1.1.1, 7.7.7.7",
+      },
+      body: JSON.stringify({ email: "typed.xff@example.com" }),
+    });
+    expect(typed.status).toBe(202);
 
     const shortHeader = createApp({
       store,
@@ -821,16 +849,26 @@ describe("auth regressions", () => {
       body: JSON.stringify({ password: TEST_PASSWORD }),
     });
     const disableSecret = ((await disableEnroll.json()) as { secret: string }).secret;
-    const disableCode = totpCode(disableSecret);
+    const enrolledAt = Date.now();
+    const disableCode = totpCode(disableSecret, enrolledAt);
     await app.request("/auth/2fa/confirm", {
       method: "POST",
       headers: disableHeaders,
       body: JSON.stringify({ code: disableCode }),
     });
-    const disabled = await app.request("/auth/2fa/disable", {
+    const reusedEnrollment = await app.request("/auth/2fa/disable", {
       method: "POST",
       headers: disableHeaders,
       body: JSON.stringify({ password: TEST_PASSWORD, code: disableCode }),
+    });
+    expect(reusedEnrollment.status).toBe(401);
+    const disabled = await app.request("/auth/2fa/disable", {
+      method: "POST",
+      headers: disableHeaders,
+      body: JSON.stringify({
+        password: TEST_PASSWORD,
+        code: totpCode(disableSecret, enrolledAt + 30_000),
+      }),
     });
     expect(disabled.status).toBe(200);
   });
@@ -935,7 +973,7 @@ describe("auth regressions", () => {
     const challengeId = ((await challenged.json()) as { challengeId: string }).challengeId;
     const verified = await app.request(
       "/auth/2fa/verify",
-      json("POST", { challengeId, code: current }),
+      json("POST", { challengeId, code: next }),
     );
     expect(verified.status).toBe(200);
     const disableHeaders = {
@@ -954,7 +992,7 @@ describe("auth regressions", () => {
       headers: disableHeaders,
       body: JSON.stringify({ password: TEST_PASSWORD, code: next }),
     });
-    expect(stepped.status).toBe(200);
+    expect(stepped.status).toBe(401);
   });
 
   it("refuses a weak password cost in production", async () => {
@@ -1002,4 +1040,23 @@ describe("demo mode configuration", () => {
 async function errorCode(response: Response): Promise<string | undefined> {
   const body = (await response.json()) as { error?: { code?: string } };
   return body.error?.code;
+}
+
+function medianOf(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  return sorted[mid] ?? 0;
+}
+
+/** Probability that a known sample is slower than an unknown one. Ties count as one half. */
+function rankAuc(known: readonly number[], unknown: readonly number[]): number {
+  let score = 0;
+  for (const left of known) {
+    for (const right of unknown) {
+      if (left > right) score += 1;
+      else if (left === right) score += 0.5;
+    }
+  }
+  return score / (known.length * unknown.length);
 }

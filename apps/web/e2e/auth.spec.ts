@@ -71,7 +71,7 @@ test("magic link and two-factor sign-in", async ({ page, request }) => {
   await page.getByTestId("signin-password").fill(PASSWORD);
   await page.getByTestId("signin-submit").click();
   await expect(page.getByTestId("signin-otp")).toBeVisible();
-  await page.getByTestId("signin-otp").fill(totpCode(secret));
+  await page.getByTestId("signin-otp").fill(totpCode(secret, Date.now() + 30_000));
   await page.getByTestId("signin-submit").click();
   await expect(page.getByLabel(`Account ${actorId}`)).toBeVisible();
 

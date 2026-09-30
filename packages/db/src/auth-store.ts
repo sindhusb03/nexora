@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 
 import type { AppDatabase } from "./client.js";
 import {
@@ -180,7 +180,7 @@ export function createAuthStore(db: AppDatabase): AuthMethods {
             and(
               eq(authTotp.actorId, actorId),
               sql`${authTotp.enabledAt} IS NOT NULL`,
-              sql`${authTotp.lastAcceptedStep} IS NULL OR ${authTotp.lastAcceptedStep} < ${step}`,
+              or(isNull(authTotp.lastAcceptedStep), lt(authTotp.lastAcceptedStep, step)),
             ),
           )
           .returning({ actorId: authTotp.actorId });

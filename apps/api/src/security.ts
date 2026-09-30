@@ -72,7 +72,7 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
       c.req.method !== "GET" &&
       c.req.method !== "HEAD" &&
       c.req.method !== "OPTIONS" &&
-      !(c.req.header("content-type") ?? "").toLowerCase().includes("application/json")
+      !isJsonContentType(c.req.header("content-type"))
     ) {
       return c.json(
         { error: { code: "UNSUPPORTED_MEDIA_TYPE", message: "Send application/json" } },
@@ -89,6 +89,8 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler<AppEnv> 
  * (the ALB appends the peer it saw). The address is the entry just before those hops.
  * A client-supplied leftmost value is ignored. Fewer entries than trusted hops means the
  * header is incomplete, so the socket address is used.
+ * A single entry is trusted only because the task security group accepts traffic from
+ * the load balancer alone, so that entry is the one the balancer appended.
  */
 export function clientAddress(c: AppContext, trustProxy: boolean, trustedHops = 1): string {
   if (trustProxy) {
@@ -108,10 +110,17 @@ export function clientAddress(c: AppContext, trustProxy: boolean, trustedHops = 
   }
 }
 
+/** Type and subtype only, so a parameter cannot smuggle application/json. */
+function isJsonContentType(header: string | undefined): boolean {
+  const media = (header ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return (
+    media === "application/json" || (media.startsWith("application/") && media.endsWith("+json"))
+  );
+}
+
 async function accountIdentifiers(c: AppContext): Promise<readonly string[]> {
   if (c.req.method === "GET" || c.req.method === "OPTIONS" || c.req.method === "HEAD") return [];
-  const type = c.req.header("content-type") ?? "";
-  if (!type.includes("application/json")) return [];
+  if (!isJsonContentType(c.req.header("content-type"))) return [];
   try {
     const body = (await c.req.raw.clone().json()) as unknown;
     if (typeof body !== "object" || body === null) return [];
