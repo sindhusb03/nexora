@@ -1,5 +1,5 @@
 /** Calculation-engine version. Independent of the HTTP API version. */
-export const ENGINE_VERSION = "fe-kernel-0.1.0";
+export const ENGINE_VERSION = "fe-kernel-0.2.0";
 
 /** Analytical outputs are fixed-point strings at this scale. Ledger amounts stay integer minor units. */
 export const ANALYTICAL_SCALE = 12;

@@ -51,7 +51,7 @@ const envSchema = z.object({
   AUTH_COOKIE_SAMESITE: z.enum(["Strict", "Lax", "None"]).default("Lax"),
   NEXORA_DEV_HEADERS: z.enum(["true", "false"]).optional(),
   NEXORA_REGION: z.string().regex(REGION).optional(),
-  WEB_ORIGIN: z.string().default("http://localhost:3000"),
+  WEB_ORIGIN: z.string().default("http://localhost:3000,http://127.0.0.1:4317,http://localhost:4317"),
   API_BODY_LIMIT_BYTES: z.coerce.number().int().min(1024).max(52_428_800).default(8_388_608),
   TRUST_PROXY: z.enum(["true", "false"]).default("false"),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3_600_000).default(60_000),

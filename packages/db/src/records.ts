@@ -222,6 +222,11 @@ export interface LedgerStore extends IdentityStore {
   insertProposal(input: ProposalWrite): Promise<{ readonly id: string }>;
   insertDeal(input: DealWrite): Promise<{ readonly id: string }>;
   insertReportingBasis(input: BasisWrite): Promise<{ readonly id: string }>;
+  insertWorkspaceRecord(input: WorkspaceWrite): Promise<{ readonly id: string }>;
+  listWorkspaceRecords(tenantId: string, kind: string): Promise<readonly WorkspaceRow[]>;
+  updateWorkspaceRecord(input: WorkspaceUpdate): Promise<void>;
+  setTenantStatus(input: { tenantId: string; status: "active" | "suspended"; audit: AuditWrite }): Promise<void>;
+  deleteMembership(input: { tenantId: string; membershipId: string; audit: AuditWrite }): Promise<void>;
 }
 
 export interface VersionWrite {
@@ -438,6 +443,34 @@ export interface DealWrite {
   readonly payload: Record<string, unknown>;
   readonly createdAt: string;
   readonly audit: AuditWrite;
+}
+
+export interface WorkspaceWrite {
+  readonly tenantId: string;
+  readonly id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly payload: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly audit: AuditWrite;
+}
+
+export interface WorkspaceUpdate {
+  readonly tenantId: string;
+  readonly id: string;
+  readonly status: string;
+  readonly payload: Record<string, unknown>;
+  readonly updatedAt: string;
+  readonly audit: AuditWrite;
+}
+
+export interface WorkspaceRow {
+  readonly id: string;
+  readonly kind: string;
+  readonly status: string;
+  readonly payload: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface BasisWrite {

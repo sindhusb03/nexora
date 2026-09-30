@@ -28,7 +28,7 @@ const MAIN_PATH = [
     step: 1,
     title: "Upload and map",
     body: "Bank or trial balance opens Smart Ledger. Financial statements from a ledger system or Excel stay structured.",
-    href: "/?section=upload",
+    href: "/classic?section=upload",
     cta: "Choose a source",
   },
   {

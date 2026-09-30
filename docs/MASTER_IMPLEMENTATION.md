@@ -2,7 +2,7 @@
 
 This is the build contract for the product. The constitution in this file overrides a sprint plan, a screen, or a model response. Specs V1–V13 describe the destination. This document says what is already true in the repository, what to build next, and the gate that must pass before the next slice starts.
 
-Engine version today: `fe-kernel-0.1.0`.
+Engine version today: `fe-kernel-0.2.0`.
 
 ## 1. Constitution
 

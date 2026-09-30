@@ -3,6 +3,8 @@ import { createPgliteStore, openPostgres, type LedgerStore, type PostgresRuntime
 
 import { createApp } from "./app.js";
 import { ConfigError, loadConfig, type ApiConfig } from "./config.js";
+import { seedDemo } from "./demo/seed.js";
+import { createDirectory } from "./workspace/directory.js";
 import { errorFields, jsonLogger, startTelemetry } from "./observability.js";
 
 const logger = jsonLogger();
@@ -48,6 +50,12 @@ if (config.databaseUrl) {
   logger.warn("store.ephemeral", { message: "DATABASE_URL is unset; using in-memory PGlite. Data is lost on restart." });
 }
 
+const directory = createDirectory();
+if (!config.production && process.env.NEXORA_SEED_DEMO !== "false" && !config.databaseUrl) {
+  await seedDemo(store, directory, config.platformAdminActorIds);
+  logger.info("demo.seeded", { company: "Nazareno Services", actors: "sindhu,controller,viewer,platform-admin" });
+}
+
 const app = createApp({
   store,
   platformAdminActorIds: config.platformAdminActorIds,
@@ -56,6 +64,7 @@ const app = createApp({
   production: config.production,
   logger,
   storeKind: config.databaseUrl ? "postgres" : "pglite",
+  directory,
 });
 
 const server = serve({ fetch: app.fetch, port: config.port }, () => {

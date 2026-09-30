@@ -19,6 +19,7 @@ import type {
 } from "./records.js";
 import { createIdentityStore } from "./identity-store.js";
 import { createProgramStore } from "./program-store.js";
+import { createWorkspaceStore } from "./workspace-store.js";
 import {
   account,
   accountingPeriod,
@@ -36,7 +37,7 @@ const REPORTS = ["asset", "liability", "equity", "revenue", "expense"] as const;
 const CASH_FLOWS = ["cash", "cfo", "cfi", "cff", "non_cash", "distribution"] as const;
 
 export function createLedgerStore(db: AppDatabase): LedgerStore {
-  const core: Omit<LedgerStore, keyof ReturnType<typeof createProgramStore> | keyof IdentityStore> = {
+  const core: Omit<LedgerStore, keyof ReturnType<typeof createProgramStore> | keyof IdentityStore | keyof ReturnType<typeof createWorkspaceStore>> = {
     createTenant(input) {
       return tenantTx(db, input.tenant.tenantId, async (tx) => {
         await tx.insert(tenant).values({
@@ -480,7 +481,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
       });
     },
   };
-  return { ...core, ...createProgramStore(db), ...createIdentityStore(db) };
+  return { ...core, ...createProgramStore(db), ...createIdentityStore(db), ...createWorkspaceStore(db) };
 }
 
 export async function tenantTx<T>(db: AppDatabase, tenantId: string, fn: (tx: AppDatabase) => Promise<T>): Promise<T> {

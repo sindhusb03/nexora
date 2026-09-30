@@ -26,6 +26,8 @@ import {
 } from "./schemas.js";
 import { registerProgramRoutes } from "./program-routes.js";
 import { createProgramService } from "./program-service.js";
+import { createDirectory, type CompanyDirectory } from "./workspace/directory.js";
+import { registerWorkspaceRoutes } from "./workspace/routes.js";
 import { rateLimit } from "./security.js";
 import { createLedgerService } from "./service.js";
 
@@ -50,6 +52,7 @@ export interface AppOptions {
   readonly storeKind?: "postgres" | "pglite";
   /** Extra readiness gate beyond a store round trip, such as a migration check. */
   readonly readiness?: () => Promise<{ readonly ready: boolean; readonly reason?: string }>;
+  readonly directory?: CompanyDirectory;
 }
 
 export function createApp(options: AppOptions) {
@@ -265,6 +268,11 @@ export function createApp(options: AppOptions) {
 
   registerProgramRoutes(app, program);
   registerFileImportRoutes(app, options.store);
+  registerWorkspaceRoutes(app, {
+    store: options.store,
+    directory: options.directory ?? createDirectory(),
+    platformAdminActorIds: options.platformAdminActorIds,
+  });
 
   return app;
 }

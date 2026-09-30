@@ -58,7 +58,8 @@ interface AccountPosition {
 /**
  * Derives the three statements and the retained-earnings roll-forward.
  * The income close into retained earnings is a presentation derivation.
- * Source lines are not mutated.
+ * Source lines are not mutated. The income statement is the movement period.
+ * Opening revenue and expense roll into retained earnings; they are not current income.
  *
  * Debit-positive convention: closing = opening + debit - credit.
  * Cash flow is the direct method: each non-cash movement's opposite side is cash.
@@ -126,6 +127,7 @@ export function buildStatements(input: {
   let balanceCheck = 0n;
   let revenue = 0n;
   let expenses = 0n;
+  let priorEarnings = 0n;
   let assets = 0n;
   let liabilities = 0n;
   let otherEquity = 0n;
@@ -141,9 +143,11 @@ export function buildStatements(input: {
     balanceCheck += closing;
 
     if (position.report === "revenue") {
-      revenue += -closing;
+      revenue += position.movementCredit - position.movementDebit;
+      priorEarnings -= position.opening;
     } else if (position.report === "expense") {
-      expenses += closing;
+      expenses += position.movementDebit - position.movementCredit;
+      priorEarnings -= position.opening;
     } else if (position.report === "asset") {
       assets += closing;
     } else if (position.report === "liability") {
@@ -178,7 +182,7 @@ export function buildStatements(input: {
   }
 
   const netIncome = revenue - expenses;
-  const openingRetained = retained ? -retained.opening : 0n;
+  const openingRetained = (retained ? -retained.opening : 0n) + priorEarnings;
   const endingRetained = openingRetained + netIncome - distributions;
   const equity = otherEquity + endingRetained;
 

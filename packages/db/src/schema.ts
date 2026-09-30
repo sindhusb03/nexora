@@ -193,6 +193,7 @@ export const domainEvent = pgTable("domain_event", {
 
 import { identitySchema } from "./identity-schema.js";
 import { programSchema } from "./program-schema.js";
+import { workspaceRecord } from "./workspace-schema.js";
 
 export const schema = {
   tenant,
@@ -207,4 +208,5 @@ export const schema = {
   domainEvent,
   ...programSchema,
   ...identitySchema,
+  workspaceRecord,
 };

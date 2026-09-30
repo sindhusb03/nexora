@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { AuthConfig } from "../config.js";
 import { ApiError, type AppContext, type AppEnv, type Identity } from "../http.js";
 import type { Logger } from "../observability.js";
+import { expireSupportGrants } from "../workspace/routes.js";
 import { burnPasswordCheck, csrfTokenFor, hashPassword, verifyPassword } from "./crypto.js";
 import { assertCsrf, clearSessionCookie, lookupSession, writeSessionCookie } from "./session.js";
 
@@ -117,6 +118,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     assertCsrf(c, auth, deps.webOrigins, session.sessionId);
     const body = tenantSelectionSchema.parse(await c.req.json());
     if (body.tenantId !== null) {
+      await expireSupportGrants(store, body.tenantId, session.actorId, c.get("requestId"));
       const tenant = await store.getTenant(body.tenantId);
       if (!tenant) {
         throw new KernelError("FIN_NOT_FOUND", "Tenant not found");

@@ -71,6 +71,41 @@ describe("single entity statements", () => {
     expect(statement.inputHash).toHaveLength(64);
   });
 
+  it("rolls opening earnings into retained earnings and keeps them off the current income statement", () => {
+    const statement = buildStatements({
+      currency: USD,
+      retainedEarningsAccountId: "re",
+      lines: [
+        movement("cash", "asset", "cash", "100000", "0", "opening"),
+        movement("revenue", "revenue", "cfo", "0", "100000", "opening"),
+        movement("cash", "asset", "cash", "40000", "0", "movement"),
+        movement("revenue", "revenue", "cfo", "0", "40000", "movement"),
+        movement("expense", "expense", "cfo", "10000", "0", "movement"),
+        movement("cash", "asset", "cash", "0", "10000", "movement"),
+      ],
+    });
+
+    expect(statement.incomeStatement).toEqual({
+      revenueMinor: "40000",
+      expensesMinor: "10000",
+      netIncomeMinor: "30000",
+    });
+    expect(statement.balanceSheet).toEqual({
+      assetsMinor: "130000",
+      liabilitiesMinor: "0",
+      equityMinor: "130000",
+    });
+    expect(statement.retainedEarnings.openingMinor).toBe("100000");
+    expect(statement.retainedEarnings.endingMinor).toBe("130000");
+    expect(statement.cashFlow).toEqual({
+      beginningCashMinor: "100000",
+      cfoMinor: "30000",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "130000",
+    });
+  });
+
   it("fails closed when the books do not balance", () => {
     expect(() =>
       buildStatements({
