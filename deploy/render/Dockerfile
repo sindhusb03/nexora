@@ -19,7 +19,9 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NODE_ENV=production
 RUN pnpm --filter @nexora/web build
 # prune re-runs the root prepare script. Husky is a devDependency and is gone by then.
-RUN pnpm prune --prod --ignore-scripts
+# next start still loads next.config.ts, so TypeScript has to stay in the image.
+RUN pnpm prune --prod --ignore-scripts \
+    && pnpm add -w typescript@5.9.3 --ignore-scripts
 
 FROM node:22-bookworm-slim AS runner
 
