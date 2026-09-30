@@ -840,3 +840,73 @@ html.dark {
   }
   .nx-top-actions { margin-left: 0; }
 }
+
+/* The app-wide button rule is a filled primary control. Nav rows and the top bar opt out of it. */
+.nx .nx-nav nav button:not([data-slot="button"]) {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  box-shadow: none;
+  white-space: normal;
+}
+
+.nx .nx-nav nav button:not([data-slot="button"]) svg {
+  color: var(--faint);
+  flex: none;
+}
+
+.nx .nx-nav nav button:not([data-slot="button"]):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+  border-color: transparent;
+}
+
+.nx .nx-nav nav button:not([data-slot="button"]):hover:not(:disabled) svg {
+  color: var(--text-2);
+}
+
+.nx .nx-nav nav button.is-on:not([data-slot="button"]),
+.nx .nx-nav nav button.is-on:not([data-slot="button"]):hover:not(:disabled) {
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: inset 2px 0 0 var(--primary);
+  border-color: transparent;
+}
+
+.nx .nx-nav nav button.is-on:not([data-slot="button"]) svg,
+.nx .nx-nav nav button.is-on:not([data-slot="button"]):hover:not(:disabled) svg {
+  color: var(--primary);
+}
+
+.nx.is-collapsed .nx-nav nav button:not([data-slot="button"]) {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.nx .nx-brand .nx-icon-btn:not([data-slot="button"]),
+.nx .nx-top .nx-icon-btn:not([data-slot="button"]),
+.nx .nx-top .nx-search-btn:not([data-slot="button"]),
+.nx .nx-top .nx-avatar:not([data-slot="button"]),
+.nx .nx-top [data-slot="button"] {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.nx .nx-top .nx-avatar:not([data-slot="button"]) {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.nx .nx-brand .nx-icon-btn:not([data-slot="button"]):hover:not(:disabled),
+.nx .nx-top .nx-icon-btn:not([data-slot="button"]):hover:not(:disabled),
+.nx .nx-top .nx-search-btn:not([data-slot="button"]):hover:not(:disabled),
+.nx .nx-top .nx-avatar:not([data-slot="button"]):hover:not(:disabled),
+.nx .nx-top [data-slot="button"]:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--border);
+}
