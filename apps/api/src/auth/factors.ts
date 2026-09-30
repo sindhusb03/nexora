@@ -32,7 +32,7 @@ import {
 const EMAIL = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
 const MAGIC_TTL_MS = 15 * 60 * 1000;
 /** Both magic-link outcomes wait out this floor so a known address is not faster. */
-const MAGIC_RESPONSE_FLOOR_MS = 40;
+const MAGIC_RESPONSE_FLOOR_MS = 80;
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const magicSchema = z.object({
@@ -106,20 +106,19 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
       createdAt,
       expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
     });
+    const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
+    const text = `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`;
     if (actorId) {
-      const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
       void deps.email
-        .send({
-          to: body.email,
-          subject: "Your Nexora sign-in link",
-          text: `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`,
-        })
+        .send({ to: body.email, subject: "Your Nexora sign-in link", text })
         .catch((error: unknown) => {
           logger.error("email.magic_link", {
             requestId: c.get("requestId"),
             message: error instanceof Error ? error.message : "sign-in email was not sent",
           });
         });
+    } else {
+      void Promise.resolve(text.length);
     }
     await recordAuth(store, logger, {
       eventType: "magic_link_sent",

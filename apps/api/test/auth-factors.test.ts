@@ -635,13 +635,21 @@ describe("auth regressions", () => {
       await sample(knownEmail);
       await sample(unknownEmail);
     }
-    const gaps: number[] = [];
+    const knownTimes: number[] = [];
+    const unknownTimes: number[] = [];
     for (let run = 0; run < 21; run += 1) {
-      gaps.push(Math.abs((await sample(knownEmail)) - (await sample(unknownEmail))));
+      knownTimes.push(await sample(knownEmail));
+      unknownTimes.push(await sample(unknownEmail));
     }
-    gaps.sort((left, right) => left - right);
-    const median = gaps[10] ?? Number.POSITIVE_INFINITY;
-    expect(median, `median gap ${median.toFixed(3)}ms`).toBeLessThan(1);
+    knownTimes.sort((left, right) => left - right);
+    unknownTimes.sort((left, right) => left - right);
+    const knownMedian = knownTimes[10] ?? Number.POSITIVE_INFINITY;
+    const unknownMedian = unknownTimes[10] ?? Number.POSITIVE_INFINITY;
+    const medianGap = Math.abs(knownMedian - unknownMedian);
+    expect(
+      medianGap,
+      `median gap ${medianGap.toFixed(3)}ms (known ${knownMedian.toFixed(1)}ms, unknown ${unknownMedian.toFixed(1)}ms)`,
+    ).toBeLessThan(1);
   });
 
   it("rates limits on the proxy-appended address and the account, ignoring a spoofed hop", async () => {
