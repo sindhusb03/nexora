@@ -105,16 +105,24 @@ const app = createApp({
   errorReporter: createErrorReporter(config.sentryDsn),
 });
 
-const server = serve({ fetch: app.fetch, port: config.port }, () => {
-  logger.info("api.started", {
+const server = serve(
+  {
+    fetch: app.fetch,
     port: config.port,
-    store: config.databaseUrl ? "postgres" : "pglite",
-    production: config.production,
-    devHeaders: config.auth.devHeaders,
-    signupAllowed: config.auth.allowSignup,
-    tracesExported: telemetry.exporting,
-  });
-});
+    // HOST is optional. The Render start script sets 127.0.0.1 so the API stays on loopback.
+    ...(process.env.HOST ? { hostname: process.env.HOST } : {}),
+  },
+  () => {
+    logger.info("api.started", {
+      port: config.port,
+      store: config.databaseUrl ? "postgres" : "pglite",
+      production: config.production,
+      devHeaders: config.auth.devHeaders,
+      signupAllowed: config.auth.allowSignup,
+      tracesExported: telemetry.exporting,
+    });
+  },
+);
 
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {

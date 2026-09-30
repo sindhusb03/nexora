@@ -21,6 +21,22 @@ const securityHeaders = [
     : []),
 ];
 
+/**
+ * Same-origin API proxy for the Render container. Unset locally, so dev and the
+ * existing web image keep calling NEXT_PUBLIC_API_URL directly.
+ * `fallback` runs after App Router handlers, so `app/api/kernel-health` still wins.
+ */
+function apiProxyTarget(raw: string | undefined): string | null {
+  const value = raw?.trim() ?? "";
+  if (value.length === 0) return null;
+  if (!/^https?:\/\/[^/\s]+$/.test(value)) {
+    throw new Error("API_PROXY_TARGET must be a scheme and host with no path");
+  }
+  return value;
+}
+
+const proxyTarget = apiProxyTarget(process.env.API_PROXY_TARGET);
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -28,6 +44,15 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  ...(proxyTarget
+    ? {
+        async rewrites() {
+          return {
+            fallback: [{ source: "/api/:path*", destination: `${proxyTarget}/:path*` }],
+          };
+        },
+      }
+    : {}),
 };
 
 export default nextConfig;

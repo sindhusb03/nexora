@@ -4,6 +4,8 @@ Config and templates only. Nothing in this repository has been deployed, and no 
 
 The local stack is `docker-compose.yml`: web, API, Postgres 17 with pgvector, and MinIO. `CREATE EXTENSION vector` lives in `deploy/postgres/20-pgvector.sql` for that image only. Shared migrations do not create the extension, because CI Postgres and PGlite do not ship it.
 
+A separate demo staging Blueprint (one Docker service, in-memory PGlite, not production) is described in [render-staging.md](render-staging.md). It does not change the AWS templates below.
+
 ## AWS region
 
 Primary region is **ap-south-1 (Mumbai)**. Templates are in `infra/aws/ap-south-1/`. Apply is guarded by `i_understand_this_creates_resources`, which defaults to false.

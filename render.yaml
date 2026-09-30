@@ -1,0 +1,45 @@
+# Render Blueprint for demo staging. Deploys from GitHub, not Origin:
+# https://github.com/sindhusb03/nexora branch main.
+# Change `branch` and sync the Blueprint to track a different GitHub branch.
+# The free plan sleeps when idle. Use plan starter (0.5c-512mb) to stay awake.
+services:
+  - type: web
+    name: nexora-staging
+    runtime: docker
+    repo: https://github.com/sindhusb03/nexora
+    branch: main
+    region: singapore
+    plan: free
+    dockerfilePath: ./deploy/render/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/readyz
+    autoDeployTrigger: commit
+    domains:
+      - staging.nexafi.io
+    envVars:
+      - key: PORT
+        value: "4317"
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: staging
+      - key: DEMO_MODE
+        value: "true"
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_COOKIE_SAMESITE
+        value: Lax
+      - key: AUTH_ALLOW_SIGNUP
+        value: "false"
+      - key: NEXORA_DEV_HEADERS
+        value: "false"
+      - key: WEB_ORIGIN
+        value: https://staging.nexafi.io
+      - key: TRUST_PROXY
+        value: "true"
+      - key: TRUST_PROXY_HOPS
+        value: "2"
+      - key: API_PROXY_TARGET
+        value: http://127.0.0.1:8787
