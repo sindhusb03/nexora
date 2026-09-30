@@ -30,6 +30,7 @@ const BASELINE_MARKERS: Readonly<Record<string, string>> = {
   "0001_kernel_foundation.sql": "tenant",
   "0002_program.sql": "financial_state",
   "0003_identity.sql": "auth_user",
+  "0004_workspace.sql": "workspace_record",
 };
 
 export async function runMigrations(
