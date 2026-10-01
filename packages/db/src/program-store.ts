@@ -50,6 +50,7 @@ import type {
   VersionRow,
   VersionWrite,
   AuditWrite,
+  LedgerStore,
 } from "./records.js";
 import { auditEvent } from "./schema.js";
 
@@ -57,9 +58,90 @@ export function createProgramStore(db: AppDatabase) {
   return {
     insertFinancialState(input: VersionWrite) {
       return tenantTx(db, input.tenantId, async (tx) => {
+        if (input.supersedesId !== null) {
+          throw new KernelError(
+            "FIN_VERSION_CONFLICT",
+            "Successors require an atomic financial-state transition",
+          );
+        }
         await tx.insert(financialState).values(stateValues(input));
         await writeAudit(tx, input.tenantId, input.audit);
         return { id: input.id };
+      });
+    },
+    transitionFinancialStateAtomic(
+      input: Parameters<LedgerStore["transitionFinancialStateAtomic"]>[0],
+    ) {
+      const { successor, approval: decision, lineage } = input;
+      return tenantTx(db, successor.tenantId, async (tx) => {
+        // financial_state is append-only: nexora_app has SELECT/INSERT, not the UPDATE
+        // privilege required by FOR UPDATE. Serialize the immutable version's chain
+        // with a transaction lock without changing grants or bypassing tenant RLS.
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`financial_state:${successor.tenantId.toLowerCase()}:${successor.supersedesId?.toLowerCase()}`}, 0))`,
+        );
+        const [current] = await tx
+          .select()
+          .from(financialState)
+          .where(
+            and(
+              eq(financialState.tenantId, successor.tenantId),
+              eq(
+                financialState.financialStateId,
+                successor.supersedesId ?? "00000000-0000-0000-0000-000000000000",
+              ),
+            ),
+          );
+        if (!current) throw new KernelError("FIN_NOT_FOUND", "Financial state not found");
+        const [existing] = await tx
+          .select({ id: financialState.financialStateId })
+          .from(financialState)
+          .where(
+            and(
+              eq(financialState.tenantId, successor.tenantId),
+              eq(financialState.supersedesId, current.financialStateId),
+            ),
+          )
+          .limit(1);
+        if (existing)
+          throw new KernelError("FIN_VERSION_CONFLICT", "Financial state already has a successor");
+        if (
+          decision.tenantId !== successor.tenantId ||
+          lineage.tenantId !== successor.tenantId ||
+          decision.objectId !== successor.id ||
+          lineage.fromId !== current.financialStateId ||
+          lineage.toId !== successor.id
+        ) {
+          throw new KernelError(
+            "TENANT_ISOLATION",
+            "Transition records must share tenant and version scope",
+          );
+        }
+        await tx.insert(financialState).values(stateValues(successor));
+        await writeAudit(tx, successor.tenantId, successor.audit);
+        await tx.insert(approval).values({
+          approvalId: decision.approvalId,
+          tenantId: decision.tenantId,
+          objectType: decision.objectType,
+          objectId: decision.objectId,
+          actorId: decision.actorId,
+          decision: decision.decision,
+          policyVersion: decision.policyVersion,
+          createdAt: decision.createdAt,
+        });
+        await writeAudit(tx, successor.tenantId, decision.audit);
+        await tx.insert(lineageEdge).values({
+          lineageEdgeId: lineage.lineageEdgeId,
+          tenantId: lineage.tenantId,
+          fromType: lineage.fromType,
+          fromId: lineage.fromId,
+          toType: lineage.toType,
+          toId: lineage.toId,
+          relation: lineage.relation,
+          createdAt: lineage.createdAt,
+        });
+        await writeAudit(tx, successor.tenantId, lineage.audit);
+        return { id: successor.id };
       });
     },
     getFinancialState(tenantId: string, financialStateId: string) {
@@ -84,6 +166,11 @@ export function createProgramStore(db: AppDatabase) {
               engineVersion: row.engineVersion,
               makerActorId: row.makerActorId,
               supersedesId: row.supersedesId,
+              calculationStatus:
+                row.calculationStatus === "succeeded"
+                  ? ("succeeded" as const)
+                  : ("failed" as const),
+              calculationRunId: row.calculationRunId,
             }
           : null;
       });
@@ -210,6 +297,21 @@ export function createProgramStore(db: AppDatabase) {
         return { id: input.id };
       });
     },
+    getConsolidationGroup(tenantId: string, id: string) {
+      return tenantTx(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ id: consolidationGroup.consolidationGroupId })
+          .from(consolidationGroup)
+          .where(
+            and(
+              eq(consolidationGroup.tenantId, tenantId),
+              eq(consolidationGroup.consolidationGroupId, id),
+            ),
+          )
+          .limit(1);
+        return row ?? null;
+      });
+    },
     insertElimination(input: EliminationWrite) {
       return tenantTx(db, input.tenantId, async (tx) => {
         await tx.insert(eliminationEntry).values({
@@ -232,6 +334,16 @@ export function createProgramStore(db: AppDatabase) {
           name: input.name,
           createdAt: input.createdAt,
         });
+      });
+    },
+    getModel(tenantId: string, modelId: string) {
+      return tenantTx(db, tenantId, async (tx) => {
+        const [row] = await tx
+          .select({ id: model.modelId })
+          .from(model)
+          .where(and(eq(model.tenantId, tenantId), eq(model.modelId, modelId)))
+          .limit(1);
+        return row ?? null;
       });
     },
     insertModelVersion(input: ModelVersionWrite) {

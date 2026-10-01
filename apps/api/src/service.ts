@@ -569,34 +569,59 @@ async function statements(
   periodId: string,
 ) {
   const tenant = await scope(store, actor, "statement.read");
-  const entity = await requiredEntity(store, tenant.tenantId, entityId);
+  const { statement } = await computeStatementsForPeriod(
+    store,
+    tenant.tenantId,
+    entityId,
+    periodId,
+  );
+  return presentStatement(statement);
+}
+
+/** Internal kernel path. Callers authorize the operation before passing their tenant scope. */
+export async function computeStatementsForPeriod(
+  store: LedgerStore,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+) {
+  const entity = await requiredEntity(store, tenantId, entityId);
   if (!entity.retainedEarningsAccountId) {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", "Entity has no retained earnings account");
   }
-  const period = await requiredPeriod(store, tenant.tenantId, periodId);
+  const period = await requiredPeriod(store, tenantId, periodId);
   if (period.entityId !== entity.entityId) {
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
-  const activity = await store.listPostedActivity(tenant.tenantId, entity.entityId);
-  const lines: ClassifiedLine[] = activity.map((line) => ({
-    accountId: line.accountId,
-    report: line.report,
-    cashFlow: line.cashFlow,
-    debitMinor: line.debitMinor,
-    creditMinor: line.creditMinor,
-    currency: line.currency,
-    period: classifyPeriod(line, period.startDate, period.periodId),
-  }));
+  const activity = await store.listPostedActivity(tenantId, entity.entityId);
+  const lines: ClassifiedLine[] = activity
+    .filter((line) => line.periodStart <= period.endDate)
+    .map((line) => ({
+      journalId: line.journalId,
+      accountId: line.accountId,
+      report: line.report,
+      cashFlow: line.cashFlow,
+      debitMinor: line.debitMinor,
+      creditMinor: line.creditMinor,
+      currency: line.currency,
+      period: classifyPeriod(line, period.startDate, period.periodId),
+    }));
   lines.sort((left, right) => {
     const periodOrder = left.period.localeCompare(right.period);
-    return periodOrder === 0 ? left.accountId.localeCompare(right.accountId) : periodOrder;
+    return (
+      periodOrder ||
+      left.accountId.localeCompare(right.accountId) ||
+      (left.journalId ?? "").localeCompare(right.journalId ?? "") ||
+      left.debitMinor.localeCompare(right.debitMinor) ||
+      left.creditMinor.localeCompare(right.creditMinor)
+    );
   });
-  const statement = buildStatements({
+  const inputs = {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
     lines,
-  });
-  return presentStatement(statement);
+  };
+  return { statement: buildStatements(inputs), inputs };
 }
 
 async function calculateDcf(

@@ -7,6 +7,7 @@ export type ReportClass = "asset" | "liability" | "equity" | "revenue" | "expens
 export type CashFlowClass = "cash" | "cfo" | "cfi" | "cff" | "non_cash" | "distribution";
 
 export interface ClassifiedLine {
+  readonly journalId?: string;
   readonly accountId: string;
   readonly report: ReportClass;
   readonly cashFlow: CashFlowClass;
@@ -62,7 +63,8 @@ interface AccountPosition {
  * Opening revenue and expense roll into retained earnings; they are not current income.
  *
  * Debit-positive convention: closing = opening + debit - credit.
- * Cash flow is the direct method: each non-cash movement's opposite side is cash.
+ * With journal IDs, cash flow attributes actual cash to opposite-side lines per journal.
+ * Legacy callers without complete journal IDs retain account-based attribution.
  */
 export function buildStatements(input: {
   readonly currency: string;
@@ -137,6 +139,8 @@ export function buildStatements(input: {
   let cfi = 0n;
   let cff = 0n;
   let distributions = 0n;
+  const movements = input.lines.filter((line) => line.period === "movement");
+  const journalCashFlow = movements.every((line) => line.journalId !== undefined);
 
   for (const [accountId, position] of accounts) {
     const closing = position.opening + position.movementDebit - position.movementCredit;
@@ -155,7 +159,8 @@ export function buildStatements(input: {
     } else if (accountId === input.retainedEarningsAccountId) {
       // Folded into the derived retained-earnings close below.
     } else if (position.cashFlow === "distribution") {
-      distributions += position.opening + position.movementDebit - position.movementCredit;
+      priorEarnings -= position.opening;
+      distributions += position.movementDebit - position.movementCredit;
     } else if (position.report === "equity") {
       otherEquity += -closing;
     }
@@ -165,12 +170,69 @@ export function buildStatements(input: {
       endingCash += closing;
     }
 
+    if (journalCashFlow) {
+      continue;
+    }
     if (position.cashFlow === "cfo") {
       cfo += position.movementCredit - position.movementDebit;
     } else if (position.cashFlow === "cfi") {
       cfi += position.movementCredit - position.movementDebit;
     } else if (position.cashFlow === "cff" || position.cashFlow === "distribution") {
       cff += position.movementCredit - position.movementDebit;
+    }
+  }
+
+  if (journalCashFlow) {
+    const journals = new Map<string, ClassifiedLine[]>();
+    for (const line of movements) {
+      const id = line.journalId!;
+      const journal = journals.get(id) ?? [];
+      journal.push(line);
+      journals.set(id, journal);
+    }
+    for (const lines of journals.values()) {
+      const cashDelta = lines.reduce(
+        (sum, line) =>
+          sum +
+          (line.cashFlow === "cash"
+            ? parseMinor(line.debitMinor) - parseMinor(line.creditMinor)
+            : 0n),
+        0n,
+      );
+      if (cashDelta === 0n) continue;
+      const counterparts = lines
+        .filter((line) => line.cashFlow !== "cash")
+        .map((line) => ({
+          line,
+          amount: parseMinor(cashDelta > 0n ? line.creditMinor : line.debitMinor),
+        }))
+        .filter(({ amount }) => amount > 0n)
+        .sort((a, b) =>
+          a.amount === b.amount
+            ? a.line.accountId < b.line.accountId
+              ? -1
+              : a.line.accountId > b.line.accountId
+                ? 1
+                : 0
+            : a.amount > b.amount
+              ? -1
+              : 1,
+        );
+      const total = counterparts.reduce((sum, { amount }) => sum + amount, 0n);
+      const allocations = counterparts.map(({ line, amount }) => ({
+        line,
+        amount: (cashDelta * amount) / total,
+      }));
+      const largest = allocations[0];
+      if (largest) {
+        largest.amount +=
+          cashDelta - allocations.reduce((sum, allocation) => sum + allocation.amount, 0n);
+      }
+      for (const { line, amount } of allocations) {
+        if (line.cashFlow === "cfo") cfo += amount;
+        else if (line.cashFlow === "cfi") cfi += amount;
+        else if (line.cashFlow === "cff" || line.cashFlow === "distribution") cff += amount;
+      }
     }
   }
 
@@ -203,6 +265,7 @@ export function buildStatements(input: {
       currency,
       retainedEarningsAccountId: input.retainedEarningsAccountId,
       lines: input.lines.map((line) => ({
+        ...(line.journalId === undefined ? {} : { journalId: line.journalId }),
         accountId: line.accountId,
         report: line.report,
         cashFlow: line.cashFlow,

@@ -30,7 +30,7 @@ export interface ActorContext {
   readonly verified: boolean;
 }
 
-export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 429 | 501 | 503;
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 501 | 503;
 
 /** Failures outside the kernel's vocabulary: authentication, CSRF, limits. */
 export class ApiError extends Error {
@@ -86,6 +86,7 @@ export function statusFor(code: KernelErrorCode): 400 | 403 | 404 | 409 | 422 {
     case "PUBLISH_BLOCKED":
       return 409;
     case "FIN_UNBALANCED_JOURNAL":
+    case "FIN_INVALID_PERIOD":
     case "FIN_STATEMENT_IMBALANCE":
     case "FIN_INVALID_JOURNAL_LINE":
       return 422;
