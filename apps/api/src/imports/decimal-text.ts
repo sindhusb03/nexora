@@ -168,10 +168,10 @@ export function parseMoneyToken(value: string, convention?: NumberConvention): s
       return null;
     text = text.replace(/\./g, "").replace(",", ".");
   } else if (convention === "dot" && /,\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
-  // A decimal comma is unambiguous with two fractional digits. Three digits
+  // A decimal comma is unambiguous with one or two fractional digits. Three digits
   // remain grouping; never remove an arbitrary comma as CSV previously did.
-  if (/\d,\d{2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
-    if (/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+  if (/\d,\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+    if (/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+),\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
       text = text.replace(/\./g, "").replace(",", ".");
     }
   }

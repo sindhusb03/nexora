@@ -1,8 +1,9 @@
 import { parseMoneyToken, statementAmountToDecimal } from "./decimal-text.js";
 import type { PdfLine, PdfText } from "./bank-pdf.js";
-import { explicitYearEnd, parseLooseDate } from "./period.js";
+import { explicitYearEnd, parseLooseDate, isStatementPeriodLabel } from "./period.js";
 import { parseStatementSheet } from "./statement-xlsx.js";
 import type { SheetCell } from "./xlsx.js";
+import { annotationHeader, localizedStatementType, nonPeriodHeader } from "./statement-locales.js";
 import type {
   StatementLine,
   StatementPeriod,
@@ -150,6 +151,11 @@ function sectionToSheet(
       sheetName: section.title || `Statement ${index + 1}`,
       statementType: section.type,
       periods,
+      periodContext: [
+        section.title,
+        ...section.preamble,
+        ...section.lines.filter((line) => !line.items.some((item) => item.x > 150)).map(lineText),
+      ].join("\n"),
       lines,
       skippedRows,
       skippedCells,
@@ -165,10 +171,18 @@ function sectionToSheet(
  */
 function headerAnchoredSheet(
   section: Section,
-): { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] } | null {
+):
+  | { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] }
+  | { reason: string }
+  | null {
   const headerIndex = section.lines.findIndex((line) =>
     line.items.some(
-      (i) => /^(?:19|20)\d{2}$/.test(i.text.trim()) || parseLooseDate(i.text) !== null,
+      (i) =>
+        i.x > 150 &&
+        (/^(?:FY\s*)?(?:19|20)\d{2}$/.test(i.text.trim()) ||
+          parseLooseDate(i.text) !== null ||
+          isStatementPeriodLabel(i.text) ||
+          /^(?:year ended|\d{4}年)$/i.test(i.text.trim())),
     ),
   );
   if (headerIndex < 0) return null;
@@ -176,12 +190,34 @@ function headerAnchoredSheet(
   const anchors = header.items
     .filter(
       (i) =>
-        /^(?:19|20)\d{2}$/.test(i.text.trim()) ||
+        /^(?:FY\s*)?(?:19|20)\d{2}$/.test(i.text.trim()) ||
         parseLooseDate(i.text) !== null ||
-        /^notes?$/i.test(i.text.trim()),
+        isStatementPeriodLabel(i.text) ||
+        annotationHeader(i.text) ||
+        nonPeriodHeader(i.text) ||
+        /^(?:year ended|\d{4}年)$/i.test(i.text.trim()),
     )
     .sort((a, b) => a.x - b.x);
   if (!anchors.length) return null;
+  // A centered report date is not a column anchor. Retain the established
+  // single-column fallback only when no note/component columns compete with it.
+  if (
+    anchors.length === 1 &&
+    !section.lines.some((line) => line.items.some((item) => nonPeriodHeader(item.text))) &&
+    !section.lines
+      .slice(headerIndex + 1)
+      .some((line) =>
+        line.items.some(
+          (item) =>
+            parseMoneyToken(item.text) !== null &&
+            Math.min(
+              Math.abs(item.x - anchors[0]!.x),
+              Math.abs(item.x + (item.width ?? 0) - anchors[0]!.x - (anchors[0]!.width ?? 0)),
+            ) < 55,
+        ),
+      )
+  )
+    return null;
   const cells: SheetCell[] = [];
   for (const [index, line] of section.lines.slice(headerIndex).entries()) {
     const groups = new Map<number, string[]>();
@@ -212,7 +248,20 @@ function headerAnchoredSheet(
       });
   }
   const sheet = parseStatementSheet({ name: section.title, cells }, section.title);
-  return "reason" in sheet ? null : { sheet, droppedAmounts: [...sheet.droppedAmounts] };
+  return "reason" in sheet
+    ? { reason: "layout_unresolved" }
+    : {
+        sheet: {
+          ...sheet,
+          periodContext: [
+            sheet.periodContext ?? "",
+            section.title,
+            ...section.preamble,
+            ...section.lines.slice(0, headerIndex).map(lineText),
+          ].join("\n"),
+        },
+        droppedAmounts: [...sheet.droppedAmounts],
+      };
 }
 
 function columnLabel(
@@ -298,8 +347,10 @@ function looksLikeMoney(text: string): boolean {
 function titleOf(line: PdfLine): { type: StatementType } | null {
   if (line.items.some((item) => item.x > 450 && /^\d{1,3}$/.test(item.text))) return null;
   const text = lineText(line);
-  if (text.length < 8 || text.length > 140 || line.items.length > 12) return null;
+  if (text.length < 2 || text.length > 140 || line.items.length > 12) return null;
   if (line.items.some((item) => pdfAmount(item.text) !== null && /\d/.test(item.text))) return null;
+  const localized = localizedStatementType(text);
+  if (localized) return { type: localized };
   if (/balance sheets?|financial position/i.test(text)) return { type: "balance_sheet" };
   if (/statements? of cash flows?|cash flow/i.test(text)) return { type: "cash_flow" };
   if (/changes in .*equity|stockholders|shareholders/i.test(text)) return { type: "equity" };

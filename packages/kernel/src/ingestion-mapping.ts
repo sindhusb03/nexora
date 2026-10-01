@@ -1,6 +1,13 @@
 import { canonicalAccount } from "./ingestion-chart.js";
 import { MAPPING_AUTO_ACCEPT_CONFIDENCE, type AmountRole } from "./ingestion-types.js";
 import { AnalyticalDecimal } from "./money.js";
+import { LOCALIZED_LABELS } from "./ingestion-localized-labels.js";
+
+const localizedSynonyms = new Map(
+  Object.entries(LOCALIZED_LABELS).flatMap(([code, labels]) =>
+    labels.map((label) => [normalizeLabel(label), code] as const),
+  ),
+);
 
 export type MappingMethod = "exact" | "synonym" | "regex";
 
@@ -215,6 +222,9 @@ function semanticOverride(normalized: string): { code: string; contra: boolean }
 
 export function normalizeLabel(label: string): string {
   return label
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^\s*(?:\d+\.|[IVXLCDM]+\.|[a-z]\))\s+/u, "")
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
@@ -226,6 +236,8 @@ export function statementRole(label: string): AmountRole | "heading" {
   const normalized = normalizeLabel(label);
   if (normalized.length === 0) return "heading";
   if (TOTALS.has(normalized)) return "total";
+  const localized = localizedSynonyms.get(normalized);
+  if (localized === "net_income" || localized?.startsWith("total_")) return "total";
   if (
     normalized.startsWith("total ") ||
     normalized === "gross profit" ||
@@ -266,6 +278,8 @@ function mapNormalized(normalized: string): MappingHit | null {
   if (normalized.length === 0) return null;
   const role = statementRole(normalized);
   if (role === "heading") return null;
+  const localized = localizedSynonyms.get(normalized);
+  if (localized) return hit(localized, "0.98", "synonym", role);
   if (normalized === "borrowings" || normalized === "term loan")
     return hit("long_term_debt", REVIEW_CONFIDENCE, "regex", role);
   const exact = EXACT[normalized];

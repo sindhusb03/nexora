@@ -15,6 +15,8 @@ export function currencyEvidence(
   const codes = new Set([...metadata.matchAll(ISO)].map((m) => m[0].toUpperCase()));
   if (codes.size > 1) return { currency: null, conflict: true };
   const symbols = new Set<string>();
+  if (/\beuros?\b|\bTEUR\b/i.test(metadata)) symbols.add("EUR");
+  if (/千円|百万円|単位\s*[:：]?\s*円/.test(metadata)) symbols.add("JPY");
   for (const [pattern, currency] of [
     [/US\$/, "USD"],
     [/(?<![A-Za-z])S\$/, "SGD"],

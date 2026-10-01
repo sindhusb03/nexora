@@ -11,8 +11,15 @@ import {
   numberConvention,
   type NumberConvention,
 } from "./decimal-text.js";
-import { datedRangePhrase, explicitYearEnd, parseLooseDate } from "./period.js";
+import {
+  datedRangePhrase,
+  explicitYearEnd,
+  parseLooseDate,
+  isStatementPeriodLabel,
+  isReportRunLine,
+} from "./period.js";
 import type { SheetCell, Worksheet } from "./xlsx.js";
+import { annotationHeader, localizedStatementType, nonPeriodHeader } from "./statement-locales.js";
 
 export type StatementType = "income_statement" | "balance_sheet" | "cash_flow" | "equity";
 
@@ -37,6 +44,7 @@ export interface StatementLine {
 }
 
 export interface StatementSheet {
+  readonly periodContext?: string;
   readonly sheetName: string;
   readonly statementType: StatementType;
   readonly periods: readonly StatementPeriod[];
@@ -104,15 +112,20 @@ export function parseStatementSheet(
   let periods: StatementPeriod[] = [];
   for (const rowNo of rowNumbers.slice(0, MAX_HEADER_SCAN_ROWS)) {
     const row = rows.get(rowNo) ?? [];
-    if (
-      /\b(?:print(?:ed)?|generated|run\s+(?:date|at)|report\s+date|prepared|downloaded)\b/i.test(
-        row.map((c) => c.text).join(" "),
-      )
-    )
-      continue;
-    const candidates = (rows.get(rowNo) ?? []).filter(
-      (cell) => cell.col >= 2 && !(cell.kind === "string" && cell.text.trim().length === 0),
-    );
+    if (isReportRunLine(row.map((c) => c.text).join(" "))) continue;
+    const candidates = (rows.get(rowNo) ?? [])
+      .map((cell) => {
+        if (cell.kind !== "string") return cell;
+        const below = rows.get(rowNo + 1)?.find((c) => c.col === cell.col)?.text ?? "";
+        const combined = `${cell.text.trim()} ${below.trim()}`;
+        return /^(?:\d{4}年|Year ended)$/i.test(cell.text.trim()) &&
+          isStatementPeriodLabel(combined)
+          ? { ...cell, text: combined }
+          : cell;
+      })
+      .filter(
+        (cell) => cell.col >= 2 && !(cell.kind === "string" && cell.text.trim().length === 0),
+      );
     if (candidates.length === 0) continue;
     const periodCells = candidates.filter((cell) => headerRole(cell) === "period");
     if (periodCells.length === 0) continue;
@@ -134,42 +147,57 @@ export function parseStatementSheet(
       nextNo === undefined
         ? []
         : (rows.get(nextNo) ?? []).filter((cell) => cell.col >= 2 && headerRole(cell) === "period");
-    const chosen = nextPeriods.length > periodCells.length ? nextPeriods : periodCells;
-    headerRow = nextPeriods.length > periodCells.length && nextNo !== undefined ? nextNo : rowNo;
+    const nextLabel = nextNo === undefined ? undefined : rows.get(nextNo)?.find((c) => c.col === 1);
+    const useNext =
+      nextPeriods.length > periodCells.length ||
+      (nextPeriods.length === periodCells.length &&
+        (!nextLabel || headerRole(nextLabel) === "label"));
+    const chosen = useNext ? nextPeriods : periodCells;
+    headerRow = useNext && nextNo !== undefined ? nextNo : rowNo;
     const following = rowNumbers.find((candidate) => headerRow !== null && candidate > headerRow);
     const preceding = [...rowNumbers]
       .reverse()
       .find((candidate) => headerRow !== null && candidate < headerRow);
     const below = following === undefined ? undefined : rows.get(following);
     const above = preceding === undefined ? undefined : rows.get(preceding);
-    periods = chosen.map((cell) => {
-      const merge = sheet.merges?.find((m) => m.row === cell.row && m.col === cell.col);
-      const bodyCols = merge
-        ? [
-            ...new Set(
-              sheet.cells
-                .filter(
-                  (c) =>
-                    c.row > merge.endRow &&
-                    c.col >= merge.col &&
-                    c.col <= merge.endCol &&
-                    (c.kind === "number"
-                      ? excelNumberToDecimal(c.text)
-                      : parseMoneyToken(c.text)) !== null,
-                )
-                .map((c) => c.col),
-            ),
-          ]
-        : [];
-      // A merged year can cover a spacer and one amount column, never two competing amounts.
-      if (merge && bodyCols.length > 1) return { col: -1, label: "UNRESOLVED", derived: false };
-      return {
-        col: bodyCols[0] ?? cell.col,
-        label: composePeriod(periodLabel(cell) ?? "", above, below, cell.col),
-        derived: false,
-      };
-    });
-    if (periods.some((p) => p.col < 0)) return { reason: "layout_unresolved" };
+    periods = chosen
+      .filter(
+        (cell) =>
+          ![
+            cell.text,
+            above?.find((c) => c.col === cell.col)?.text ?? "",
+            below?.find((c) => c.col === cell.col)?.text ?? "",
+          ].some(nonPeriodHeader),
+      )
+      .map((cell) => {
+        const merge = sheet.merges?.find((m) => m.row === cell.row && m.col === cell.col);
+        const bodyCols = merge
+          ? [
+              ...new Set(
+                sheet.cells
+                  .filter(
+                    (c) =>
+                      c.row > merge.endRow &&
+                      c.col >= merge.col &&
+                      c.col <= merge.endCol &&
+                      (c.kind === "number"
+                        ? excelNumberToDecimal(c.text)
+                        : parseMoneyToken(c.text)) !== null,
+                  )
+                  .map((c) => c.col),
+              ),
+            ]
+          : [];
+        // A merged year can cover a spacer and one amount column, never two competing amounts.
+        if (merge && bodyCols.length > 1) return { col: -1, label: "UNRESOLVED", derived: false };
+        return {
+          col: bodyCols[0] ?? cell.col,
+          label: composePeriod(periodLabel(cell) ?? "", above, below, cell.col),
+          derived: false,
+        };
+      });
+    if (periods.length === 0 || periods.some((p) => p.col < 0))
+      return { reason: "layout_unresolved" };
     break;
   }
   if (headerRow === null) {
@@ -184,10 +212,25 @@ export function parseStatementSheet(
     return { reason: "layout_unresolved" };
   const firstPeriodCol = Math.min(...periods.map((period) => period.col));
   const periodByCol = new Map(periods.map((period) => [period.col, period.label]));
+  const amountTokens = sheet.cells
+    .filter(
+      (c) =>
+        c.row > headerRow! &&
+        periodByCol.has(c.col) &&
+        c.kind === "string" &&
+        /\d/.test(c.text) &&
+        !periodLabel(c),
+    )
+    .map((c) => c.text);
+  const convention = numberConvention(amountTokens, sheet.cells.map((c) => c.text).join("\n"));
+  if (convention === "conflict") return { reason: "layout_unresolved" };
   const annotationCols = new Set(
-    (rows.get(headerRow) ?? [])
+    sheet.cells
+      .filter((cell) => cell.row <= headerRow)
       .filter(
-        (cell) => headerRole(cell) === "annotation" && referenceColumn(cell.col, rows, headerRow),
+        (cell) =>
+          nonPeriodHeader(cell.text) &&
+          (headerRole(cell) !== "annotation" || referenceColumn(cell.col, rows, headerRow)),
       )
       .map((cell) => cell.col),
   );
@@ -225,8 +268,14 @@ export function parseStatementSheet(
       const period = periodByCol.get(cell.col);
       if (period === undefined) continue;
       if (cell.kind === "string" && cell.text.trim().length === 0) continue;
-      const amount = statementCellAmount(cell.kind, cell.text, label);
+      const amount = statementCellAmount(cell.kind, cell.text, label, convention);
       if (amount === null) {
+        if (
+          cell.kind === "string" &&
+          convention === "unknown" &&
+          parseMoneyToken(cell.text) !== null
+        )
+          return { reason: "layout_unresolved" };
         if (cell.kind === "string" && looksLikeMoney(cell.text)) {
           droppedAmounts.push({ raw: cell.text, page: null });
         }
@@ -249,7 +298,14 @@ export function parseStatementSheet(
       droppedAmounts,
     };
   }
-  const statementType = classify(fileName, sheet.name, lines);
+  const statementType =
+    classify(fileName, sheet.name, lines) ??
+    localizedStatementType(
+      sheet.cells
+        .filter((c) => c.row <= headerRow!)
+        .map((c) => c.text)
+        .join("\n"),
+    );
   if (statementType === null) {
     return {
       reason: "Could not tell whether this sheet is an income statement or a balance sheet",
@@ -259,6 +315,24 @@ export function parseStatementSheet(
     sheetName: sheet.name,
     statementType,
     periods: markDerived(periods, lines),
+    periodContext: rowNumbers
+      .filter((r) => r <= headerRow!)
+      .map((r) =>
+        (rows.get(r) ?? [])
+          .filter((c) => r < headerRow! || c.col < firstPeriodCol)
+          .filter(
+            (c) =>
+              !periods.some(
+                (p) =>
+                  p.col === c.col &&
+                  p.label !== c.text.trim() &&
+                  p.label.startsWith(`${c.text.trim()} `),
+              ),
+          )
+          .map((c) => c.text)
+          .join(" "),
+      )
+      .join("\n"),
     lines,
     skippedRows,
     skippedCells,
@@ -484,6 +558,8 @@ function monthName(month: number): string {
 }
 
 function headerRole(cell: SheetCell): "period" | "label" | "annotation" | "unknown" {
+  if (annotationHeader(cell.text)) return "annotation";
+  if (nonPeriodHeader(cell.text)) return "unknown";
   if (periodLabel(cell)) return "period";
   const text = cell.kind === "string" ? cell.text : "";
   const normalized = text
@@ -546,7 +622,8 @@ function periodLabel(cell: SheetCell): string | null {
   }
   if (cell.kind === "string") {
     const text = cell.text.replace(/\s+/g, " ").trim();
-    if (text.length === 0 || text.length > 48) return null;
+    if (text.length === 0 || text.length > 160) return null;
+    if (isStatementPeriodLabel(text)) return text;
     if (parseLooseDate(text)) return text;
     if (/^(current month|year to date)( (this year|last year))?$/i.test(text)) return text;
     if (/^(this year|last year|ytd)$/i.test(text)) return text;
@@ -556,7 +633,7 @@ function periodLabel(cell: SheetCell): string | null {
     if (/^\d{1,2}[./-]\d{1,2}[./-]\d{4}$/.test(text)) return text;
     if (/^\d{1,2}-[A-Za-z]{3,9}-\d{4}$/.test(text)) return text;
     if (/^(?:FY\s*)?(?:19|20)\d{2}\s*[-/]\s*\d{2,4}$/i.test(text)) return text;
-    if (/^FY\s*\d{2}$/i.test(text)) return text;
+    if (/^FY\s*\d{2}(?:-\d{2})?$/i.test(text)) return text;
     if (/^[A-Za-z]{3,9}[-\s]\d{2}$/.test(text)) return text;
     if (
       /^(?:(?:for the )?year ended|(?:three|six|nine|twelve|\d+)\s+months?\s+ended|as at|as of|quarter ended|half[-\s]?year ended)\b/i.test(
@@ -587,6 +664,8 @@ function classify(
   lines: readonly StatementLine[],
 ): StatementType | null {
   for (const name of [sheetName, fileName]) {
+    const localized = localizedStatementType(name);
+    if (localized) return localized;
     const income = INCOME_NAME.test(name);
     const balance = BALANCE_NAME.test(name);
     if (income && !balance) return "income_statement";
@@ -620,7 +699,11 @@ function composePeriod(
   const belowText = below?.find((cell) => cell.col === col)?.text.trim() ?? "";
   if (!/(19|20)\d{2}/.test(label) && /^(19|20)\d{2}$/.test(belowText))
     return `${label} ${belowText}`;
-  if (/^(19|20)\d{2}$/.test(label) && /(?:year ended|months ended|as at|as of)/i.test(aboveText)) {
+  if (
+    (/^(19|20)\d{2}$/.test(label) || parseLooseDate(label)) &&
+    /(?:year ended|months ended|as at|as of)/i.test(aboveText) &&
+    !parseLooseDate(aboveText.replace(/^.*(?:ended|as at|as of)\s*/i, ""))
+  ) {
     return `${aboveText} ${label}`;
   }
   return label;

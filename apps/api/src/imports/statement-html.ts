@@ -8,11 +8,18 @@ export function looksLikeHtml(text: string): boolean {
 /** Turns HTML tables into the same sheet shape as an .xlsx upload. */
 export function htmlToWorksheets(html: string): readonly Worksheet[] {
   const decoded = decodeHtml(html);
-  const tables = decoded.split(/<table\b/i).slice(1);
+  const parts = decoded.split(/<table\b/i);
+  const tables = parts.slice(1);
   return tables.map((table, index) => {
     const body = table.split(/<\/table>/i)[0] ?? table;
     const rows = body.split(/<tr\b/i).slice(1);
     const cells: SheetCell[] = [];
+    const preamble = (parts[index] ?? "")
+      .split(/<\/table>/i)
+      .at(-1)
+      ?.replace(/<[^>]+>/g, " ")
+      .trim();
+    if (preamble) cells.push({ row: 0, col: 1, kind: "string", text: preamble, formula: false });
     rows.forEach((row, rowIndex) => {
       const rowBody = row.split(/<\/tr>/i)[0] ?? row;
       const parts = rowBody.split(/<t[dh]\b/i).slice(1);
