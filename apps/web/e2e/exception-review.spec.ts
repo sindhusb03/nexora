@@ -17,6 +17,32 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
 }
 
+test("direct review sign-in activates a company and resolves an exception", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.goto("/review");
+  await expect(page.getByRole("heading", { name: /Sign in to review/ })).toBeVisible();
+  await page.getByLabel("Actor", { exact: true }).fill("sindhu");
+  await page.getByLabel("Password", { exact: true }).fill("nexora-demo-2026");
+  await page.getByRole("button", { name: "Open the company" }).click();
+  await expect(page.getByTestId("screen-upload")).toBeVisible();
+  await page.getByTestId("upload-input").setInputFiles({
+    name: "direct-review.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("account,amount\nRevenue,158000.00\n"),
+  });
+  await page.getByTestId("start-extraction").click();
+  await expect(page.getByTestId("job-status")).toContainText("ready");
+  await page.getByTestId("open-exceptions").click();
+  await page.getByRole("link", { name: /The column header "Amount"/ }).click();
+  await expect(page.getByTestId("action-accept")).toBeEnabled();
+  await page.getByTestId("action-accept").click();
+  await page.getByTestId("confirm-resolution").click();
+  await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("audit-trail")).toContainText("sindhu");
+  await page.reload();
+  await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
+});
+
 test("triage extraction exceptions without posting", async ({ page }) => {
   await signIn(page);
   await page.getByTestId("nav-review").click();

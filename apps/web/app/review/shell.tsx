@@ -14,8 +14,8 @@ import {
   type ReactNode,
 } from "react";
 
-import { fetchAuthConfig, fetchSession, login } from "../studio/api";
-import type { SessionView } from "../studio/types";
+import { fetchAuthConfig, fetchSession, listCompanies, login, selectTenant } from "../studio/api";
+import type { CompanyCard, SessionView } from "../studio/types";
 
 const SessionContext = createContext<SessionView | null>(null);
 const AsOfContext = createContext<{
@@ -50,6 +50,9 @@ export function ReviewShell({
   const [asOf, setAsOf] = useState("—");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [companies, setCompanies] = useState<readonly CompanyCard[] | null>(null);
+  const [companyBusy, setCompanyBusy] = useState(false);
+  const [companyAttempt, setCompanyAttempt] = useState(0);
 
   useEffect(() => {
     const dark = window.localStorage.getItem("nexora-theme") === "dark";
@@ -69,6 +72,49 @@ export function ReviewShell({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!session || session.tenantId) return;
+    const current = session;
+    let cancelled = false;
+    setCompanyBusy(true);
+    setNotice(null);
+    setCompanies(null);
+    void (async () => {
+      try {
+        const listed = await listCompanies(current.csrfToken);
+        if (cancelled) return;
+        setCompanies(listed);
+        const onlyCompany = listed.length === 1 ? listed[0] : undefined;
+        if (onlyCompany) {
+          const active = await selectTenant(current.csrfToken, onlyCompany.tenantId);
+          if (!cancelled) setSession(active);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setNotice(caught instanceof Error ? caught.message : "The company could not be opened.");
+        }
+      } finally {
+        if (!cancelled) setCompanyBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, companyAttempt]);
+
+  async function onCompany(tenantId: string) {
+    if (!session || companyBusy) return;
+    setCompanyBusy(true);
+    setNotice(null);
+    try {
+      setSession(await selectTenant(session.csrfToken, tenantId));
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "The company could not be opened.");
+    } finally {
+      setCompanyBusy(false);
+    }
+  }
 
   async function onSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -131,6 +177,48 @@ export function ReviewShell({
             </p>
           ) : null}
         </form>
+      </main>
+    );
+  }
+
+  if (!session.tenantId) {
+    return (
+      <main className="nx-gate">
+        <section className="nx-signin" aria-labelledby="company-title" aria-busy={companyBusy}>
+          <p className="nx-kicker">Nexora</p>
+          <h1 id="company-title">Choose a company</h1>
+          {companyBusy ? <p role="status">Opening your company access…</p> : null}
+          {companies?.length === 0 ? (
+            <p>
+              No companies are available for this account. Open Studio to manage company access.
+            </p>
+          ) : companies ? (
+            <div className="flex flex-col gap-2" role="group" aria-label="Available companies">
+              {companies.map((company) => (
+                <Button
+                  key={company.tenantId}
+                  type="button"
+                  variant="outline"
+                  disabled={companyBusy}
+                  onClick={() => void onCompany(company.tenantId)}
+                >
+                  {company.name}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {notice ? (
+            <p className="nx-notice" role="alert">
+              {notice}
+            </p>
+          ) : null}
+          {!companyBusy && companies === null && notice ? (
+            <Button type="button" onClick={() => setCompanyAttempt((attempt) => attempt + 1)}>
+              Retry
+            </Button>
+          ) : null}
+          <Link href="/studio">Go to Studio</Link>
+        </section>
       </main>
     );
   }
