@@ -1,0 +1,46 @@
+# Separate workflow so PR body edits re-run only this check.
+# Dependabot-authored PRs pushed by Dependabot are exempt because their bodies
+# cannot carry the attestation; reviewers still apply docs/review-workflow.md
+# to dependency PRs.
+name: Financial attestation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: financial-attestation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  financial-attestation:
+    name: financial-attestation
+    if: ${{ !(github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require attestation on financial paths
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+          body="$(printf '%s\n' "$PR_BODY" | tr -d '\r')"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(packages/kernel/|packages/db/|apps/api/|\.github/workflows/)'; then
+            if ! printf '%s\n' "$body" | grep -Eq '^- \[[xX]\] I completed the financial review checklist in docs/review-workflow\.md$'; then
+              echo "This pull request changes the kernel, database, API, or CI gates."
+              echo "Check the financial review attestation in the pull request body."
+              echo "The required line is in .github/pull_request_template.md."
+              exit 1
+            fi
+          fi

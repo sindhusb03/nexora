@@ -123,9 +123,14 @@ jobs:
           AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
           PORT: "8788"
         run: |
-          if timeout 60 pnpm --filter @nexora/api start; then
+          set -euo pipefail
+          code=0
+          timeout 60 pnpm --filter @nexora/api start > refuse.log 2>&1 || code=$?
+          cat refuse.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
             echo "The API started with a superuser login in production"; exit 1
           fi
+          grep -Fq "The login role is a superuser." refuse.log
 
       - name: Refuse to boot in production without DATABASE_URL
         env:
@@ -133,9 +138,14 @@ jobs:
           AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
           PORT: "8789"
         run: |
-          if timeout 60 pnpm --filter @nexora/api start; then
+          set -euo pipefail
+          code=0
+          timeout 60 pnpm --filter @nexora/api start > refuse.log 2>&1 || code=$?
+          cat refuse.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
             echo "The API started in production without a database"; exit 1
           fi
+          grep -Fq "DATABASE_URL is required when NODE_ENV=production. The in-memory store is for development only." refuse.log
 
   images:
     name: docker-images
@@ -150,35 +160,6 @@ jobs:
 
       - name: Build web image
         run: docker build -f apps/web/Dockerfile -t nexora-web:ci .
-
-  financial-attestation:
-    name: financial-attestation
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Require attestation on financial paths
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          changed="$(git diff --name-only "$BASE_SHA" HEAD)"
-          body="$(printf '%s\n' "$PR_BODY" | tr -d '\r')"
-          printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(packages/kernel/|packages/db/|apps/api/|\.github/workflows/)'; then
-            if ! printf '%s\n' "$body" | grep -Eq '^- \[[xX]\] I completed the financial review checklist in docs/review-workflow\.md$'; then
-              echo "This pull request changes the kernel, database, API, or CI gates."
-              echo "Check the financial review attestation in the pull request body."
-              echo "The required line is in .github/pull_request_template.md."
-              exit 1
-            fi
-          fi
 
   playwright:
     name: playwright

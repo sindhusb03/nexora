@@ -1,0 +1,237 @@
+.review-shell .nx-nav a.nx-brand,
+.review-shell .nx-nav nav a {
+  margin-top: 0;
+  font-size: inherit;
+  color: var(--text-2);
+}
+
+.review-shell .nx-nav nav a.is-on {
+  background: var(--primary-soft);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.review-banner {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--violet-line);
+  background: var(--violet-soft);
+  color: var(--text);
+  border-radius: var(--radius);
+}
+
+.review-banner strong {
+  color: var(--violet);
+}
+
+.review-drop {
+  border: 1px dashed var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.review-drop.is-over {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.review-files,
+.review-audit {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-file,
+.review-card,
+.review-split > * {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+}
+
+.review-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 1rem;
+  width: 100%;
+}
+
+.review-file progress,
+.review-progress progress {
+  width: 100%;
+  height: 0.45rem;
+  accent-color: var(--primary);
+}
+
+.review-toolbar,
+.review-actions,
+.review-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+}
+
+.review-toolbar label,
+.review-actions label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.review-toolbar select,
+.review-toolbar input,
+.review-actions input,
+.review-actions select,
+.review-actions textarea {
+  min-width: 10rem;
+  height: 2rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 0.5rem;
+  font: inherit;
+}
+
+.review-actions textarea {
+  height: 4.2rem;
+  padding: 0.4rem 0.5rem;
+  min-width: 16rem;
+}
+
+.review-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.review-table th,
+.review-table td {
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.review-table th {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-muted);
+}
+
+.review-table tr.is-selected {
+  background: var(--primary-soft);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.review-table a {
+  color: inherit;
+  font-weight: 620;
+}
+
+.review-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.review-figures div {
+  margin: 0;
+}
+
+.review-figures dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.review-figures dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.05rem;
+}
+
+.review-progress {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.review-split {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.2fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.review-source {
+  position: relative;
+  overflow: auto;
+  background: var(--surface-sunken);
+  min-height: 12rem;
+}
+
+.review-page {
+  position: relative;
+  margin: 0.5rem auto;
+  background: white;
+  color: #14213a;
+  box-shadow: var(--shadow-sm);
+}
+
+.review-highlight {
+  position: absolute;
+  border: 2px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  pointer-events: none;
+}
+
+.sheet-highlight {
+  outline: 2px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.review-help kbd,
+.nx-kbd {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  background: var(--surface-muted);
+}
+
+.review-shortcuts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.8rem;
+  margin: 0;
+}
+
+.review-shortcuts dt {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .review-split {
+    grid-template-columns: 1fr;
+  }
+}

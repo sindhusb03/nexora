@@ -5,11 +5,13 @@ import { Input } from "@/components/ui/input";
 
 import { useState } from "react";
 
+import { amountDecimal, parseAmount } from "./csv";
 import type { Session } from "./books/api";
 import { useAction } from "./books/hooks";
 import { ErrorNotice } from "./books/ui";
 import {
   applyStatementUpload,
+  isCurrentDataSource,
   parseSourceTable,
   smartLedgerApplies,
   statementPairNote,
@@ -57,12 +59,13 @@ export function UploadMap({
       fileName: kind === source.kind ? source.fileName : null,
       rows: kind === "financial_statements" ? [] : source.rows,
     };
-    writeDataSource(next);
+    writeDataSource(next, session);
     onChange(next);
     setFileNote(null);
   }
 
   async function onFile(file: File) {
+    if (!isCurrentDataSource(source, session)) return;
     const spreadsheet = /\.xlsx?$/i.test(file.name);
     const pdf = /\.pdf$/i.test(file.name);
     if (file.size === 0) {
@@ -80,18 +83,51 @@ export function UploadMap({
       return;
     }
     const text = await file.text();
-    const parsed = parseSourceTable(text);
+    if (!isCurrentDataSource(source, session)) return;
+    let parsed: ReturnType<typeof parseSourceTable>;
+    try {
+      parsed = parseSourceTable(text);
+    } catch (error) {
+      setFileNote(error instanceof Error ? error.message : "CSV needs review.");
+      return;
+    }
+    const checked = parsed.map((row) => ({
+      row,
+      amount: parseAmount(row.amount, { decimal: "auto" }),
+    }));
+    const issues = checked.filter((item) => !item.amount.ok || !item.row.account);
+    const canonical = checked.map(({ row, amount }) => ({
+      ...row,
+      amount: amount.ok ? amountDecimal(amount) : row.amount,
+    }));
     if (parsed.length === 0) {
       setFileNote("The file has no account and amount columns the kernel can import.");
       return;
     }
-    const rows = parsed.map((row) => {
+    const rows = canonical.map((row, index) => {
       const suggested = suggestCategory(row.account);
-      return { ...row, category: suggested ?? "", suggestedCategory: suggested };
+      const checkedAmount = checked[index]?.amount;
+      const reviewReason = !row.account
+        ? "Missing account"
+        : checkedAmount && !checkedAmount.ok
+          ? checkedAmount.reason
+          : null;
+      return {
+        ...row,
+        category: suggested ?? "",
+        suggestedCategory: suggested,
+        ...(reviewReason ? { reviewReason } : {}),
+      };
     });
     const next = { ...source, fileName: file.name, rows };
-    writeDataSource(next);
+    writeDataSource(next, session);
     onChange(next);
+    if (issues.length > 0) {
+      setFileNote(
+        `Needs review. Nothing imported. ${issues.map(({ row, amount }) => `Row ${row.rowNo}: ${amount.ok ? "Missing account" : amount.reason} (${row.amount})`).join("; ")}`,
+      );
+      return;
+    }
     if (session.tenantId.length === 0) {
       setFileNote(
         "Rows are ready to map. Provision a company before the kernel stores the import.",
@@ -104,7 +140,7 @@ export function UploadMap({
         "POST",
         "/v1/imports",
         {
-          rows: parsed.map((row) => ({
+          rows: canonical.map((row) => ({
             rowNo: row.rowNo,
             account: row.account,
             amount: row.amount,
@@ -113,6 +149,7 @@ export function UploadMap({
         { idempotencyKey: `${file.name}:${file.size}:${parsed.length}` },
       ),
     );
+    if (!isCurrentDataSource(source, session)) return;
     setFileNote(
       stored && typeof stored.fileHash === "string"
         ? `Kernel stored one batch. File hash ${stored.fileHash}.`
@@ -134,14 +171,17 @@ export function UploadMap({
       return;
     }
     setFileNote(`Sending ${file.name} to the kernel…`);
-    const data = await action.run(async () =>
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!isCurrentDataSource(source, session)) return;
+    const data = await action.run(() =>
       kernelCall(session, "POST", "/v1/imports/file", {
         kind,
         ...(kind === "financial_statements" ? { cadence: source.cadence } : {}),
         fileName: file.name,
-        contentBase64: toBase64(new Uint8Array(await file.arrayBuffer())),
+        contentBase64: toBase64(bytes),
       }),
     );
+    if (!isCurrentDataSource(source, session)) return;
     if (!data) {
       setFileNote(`The kernel did not accept ${file.name}. Nothing was stored.`);
       return;
@@ -170,7 +210,7 @@ export function UploadMap({
         };
       });
       const next = { ...source, fileName: file.name, rows };
-      writeDataSource(next);
+      writeDataSource(next, session);
       onChange(next);
       const checks = result.totalChecks.map(
         (check) =>
@@ -194,7 +234,7 @@ export function UploadMap({
       sheets: result.sheets,
     });
     const next = { ...source, fileName: file.name, rows: [], statementPair: applied.pair };
-    writeDataSource(next);
+    writeDataSource(next, session);
     onChange(next);
     const sheets = result.sheets.map(
       (sheet) =>
@@ -307,7 +347,7 @@ export function UploadMap({
                 variant={source.system === system.id ? "outline" : "ghost"}
                 onClick={() => {
                   const next = { ...source, system: system.id };
-                  writeDataSource(next);
+                  writeDataSource(next, session);
                   onChange(next);
                 }}
               >
@@ -330,7 +370,7 @@ export function UploadMap({
                   checked={source.cadence === item.id}
                   onChange={() => {
                     const next = { ...source, cadence: item.id };
-                    writeDataSource(next);
+                    writeDataSource(next, session);
                     onChange(next);
                   }}
                 />
@@ -351,6 +391,20 @@ export function UploadMap({
         </div>
       ) : null}
 
+      {source.rows.some((row) => row.reviewReason) ? (
+        <div role="alert">
+          <strong>Needs review ? these rows have not been imported.</strong>
+          <ul>
+            {source.rows
+              .filter((row) => row.reviewReason)
+              .map((row) => (
+                <li key={row.rowNo}>
+                  Row {row.rowNo}: {row.account} ? {row.amount}: {row.reviewReason}
+                </li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
       {fileNote ? (
         <p className="muted" role="status">
           {fileNote}

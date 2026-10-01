@@ -34,7 +34,7 @@ import { StatementGrid } from "./statement-grid";
 import type { JournalView, PlatformView, Workspace } from "./types";
 
 export function money(minor: string, currency: string): string {
-  return withCurrency(minorToDisplay(minor), currency);
+  return withCurrency(minorToDisplay(minor, currency), currency);
 }
 
 function colors(dark: boolean) {
@@ -49,7 +49,7 @@ function colors(dark: boolean) {
   };
 }
 
-function baseOption(dark: boolean): echarts.EChartsOption {
+function baseOption(dark: boolean, currency: string): echarts.EChartsOption {
   const tone = colors(dark);
   return {
     animation: false,
@@ -65,7 +65,7 @@ function baseOption(dark: boolean): echarts.EChartsOption {
     },
     yAxis: {
       type: "value",
-      axisLabel: { color: tone.muted, formatter: (value: number) => axisCurrency(value) },
+      axisLabel: { color: tone.muted, formatter: (value: number) => axisCurrency(value, currency) },
       splitLine: { lineStyle: { color: tone.split, type: "dashed" } },
     },
   };
@@ -102,7 +102,7 @@ export function DashboardView({
   const option = useMemo<echarts.EChartsOption>(() => {
     const labels = workspace.series.map((item) => item.label);
     return {
-      ...baseOption(dark),
+      ...baseOption(dark, currency),
       tooltip: {
         trigger: "axis",
         formatter: (params) => {
@@ -113,7 +113,7 @@ export function DashboardView({
           return `${item.label}<br/>Revenue ${money(item.revenue, currency)}<br/>Ending cash ${money(item.cash, currency)}`;
         },
       },
-      xAxis: { ...(baseOption(dark).xAxis as object), data: labels, boundaryGap: false },
+      xAxis: { ...(baseOption(dark, currency).xAxis as object), data: labels, boundaryGap: false },
       series: [
         {
           name: "Revenue",
@@ -121,7 +121,7 @@ export function DashboardView({
           smooth: true,
           showSymbol: false,
           connectNulls: true,
-          data: workspace.series.map((item) => minorToAxis(item.revenue)),
+          data: workspace.series.map((item) => minorToAxis(item.revenue, currency)),
           color: tone.revenue,
           areaStyle: { color: tone.revenue, opacity: 0.12 },
         },
@@ -131,7 +131,7 @@ export function DashboardView({
           smooth: true,
           showSymbol: false,
           connectNulls: true,
-          data: workspace.series.map((item) => minorToAxis(item.cash)),
+          data: workspace.series.map((item) => minorToAxis(item.cash, currency)),
           color: tone.cash,
           areaStyle: { color: tone.cash, opacity: 0.1 },
         },
@@ -275,7 +275,7 @@ function KpiCard({
     <article className="nx-kpi">
       <div className="nx-kpi-top">
         <p>{label}</p>
-        {spark.length > 1 ? <Sparkline values={spark} color={color} /> : null}
+        {spark.length > 1 ? <Sparkline currency={currency} values={spark} color={color} /> : null}
       </div>
       <strong>{display}</strong>
       {delta === null ? (
@@ -307,13 +307,15 @@ function Delta({
 }
 
 function Sparkline({
+  currency,
   values,
   color,
 }: {
+  readonly currency: string;
   readonly values: readonly string[];
   readonly color: string;
 }) {
-  const nums = values.map((value) => minorToAxis(value));
+  const nums = values.map((value) => minorToAxis(value, currency));
   const min = Math.min(...nums);
   const max = Math.max(...nums);
   const span = max - min || 1;
@@ -539,9 +541,9 @@ export function ForecastView({
   const tone = colors(dark);
   const option = useMemo<echarts.EChartsOption>(
     () => ({
-      ...baseOption(dark),
+      ...baseOption(dark, currency),
       xAxis: {
-        ...(baseOption(dark).xAxis as object),
+        ...(baseOption(dark, currency).xAxis as object),
         data: workspace.forecast.base.months.map((month) => `M${month.period}`),
       },
       series: [
@@ -552,7 +554,9 @@ export function ForecastView({
           showSymbol: false,
           connectNulls: true,
           areaStyle: { color: tone.revenue, opacity: 0.12 },
-          data: workspace.forecast.base.months.map((month) => minorToAxis(month.revenueMinor)),
+          data: workspace.forecast.base.months.map((month) =>
+            minorToAxis(month.revenueMinor, currency),
+          ),
           color: tone.revenue,
         },
         {
@@ -561,12 +565,15 @@ export function ForecastView({
           smooth: true,
           showSymbol: false,
           connectNulls: true,
-          data: workspace.forecast.scenario.months.map((month) => minorToAxis(month.revenueMinor)),
+          data: workspace.forecast.scenario.months.map((month) =>
+            minorToAxis(month.revenueMinor, currency),
+          ),
           color: tone.plan,
         },
       ],
     }),
     [
+      currency,
       dark,
       tone.plan,
       tone.revenue,
@@ -672,9 +679,9 @@ export function CashView({
   const tone = colors(dark);
   const option = useMemo<echarts.EChartsOption>(
     () => ({
-      ...baseOption(dark),
+      ...baseOption(dark, currency),
       xAxis: {
-        ...(baseOption(dark).xAxis as object),
+        ...(baseOption(dark, currency).xAxis as object),
         data: cash.weeks.map((week) => week.label.slice(5)),
       },
       series: [
@@ -682,13 +689,13 @@ export function CashView({
           name: "Ending cash",
           type: "bar",
           data: cash.weeks.map((week) => ({
-            value: minorToAxis(week.endingMinor),
+            value: minorToAxis(week.endingMinor, currency),
             itemStyle: { color: week.belowMinimum ? tone.alert : tone.cash },
           })),
         },
       ],
     }),
-    [cash.weeks, dark, tone.alert, tone.cash],
+    [cash.weeks, currency, dark, tone.alert, tone.cash],
   );
   return (
     <div className="nx-stack" data-testid="screen-cash">
@@ -749,27 +756,27 @@ export function VarianceView({
   const tone = colors(dark);
   const option = useMemo<echarts.EChartsOption>(
     () => ({
-      ...baseOption(dark),
+      ...baseOption(dark, currency),
       xAxis: {
-        ...(baseOption(dark).xAxis as object),
+        ...(baseOption(dark, currency).xAxis as object),
         data: workspace.variance.lines.map((line) => line.label),
       },
       series: [
         {
           name: "Actual",
           type: "bar",
-          data: workspace.variance.lines.map((line) => minorToAxis(line.actualMinor)),
+          data: workspace.variance.lines.map((line) => minorToAxis(line.actualMinor, currency)),
           color: tone.revenue,
         },
         {
           name: "Plan",
           type: "bar",
-          data: workspace.variance.lines.map((line) => minorToAxis(line.planMinor)),
+          data: workspace.variance.lines.map((line) => minorToAxis(line.planMinor, currency)),
           color: tone.plan,
         },
       ],
     }),
-    [dark, tone.plan, tone.revenue, workspace.variance.lines],
+    [currency, dark, tone.plan, tone.revenue, workspace.variance.lines],
   );
   return (
     <div className="nx-stack" data-testid="screen-variance">
@@ -1026,7 +1033,7 @@ function waterfall(
   const fall: number[] = [];
   const totals: number[] = [];
   for (const step of steps) {
-    const value = minorToAxis(step.minor);
+    const value = minorToAxis(step.minor, currency);
     if (step.total) {
       assist.push(0);
       rise.push(0);
@@ -1048,7 +1055,7 @@ function waterfall(
     }
   }
   return {
-    ...baseOption(dark),
+    ...baseOption(dark, currency),
     tooltip: {
       trigger: "axis",
       formatter: (params) => {
@@ -1059,7 +1066,10 @@ function waterfall(
         return `${step.label}<br/>${money(step.minor, currency)}`;
       },
     },
-    xAxis: { ...(baseOption(dark).xAxis as object), data: steps.map((step) => step.label) },
+    xAxis: {
+      ...(baseOption(dark, currency).xAxis as object),
+      data: steps.map((step) => step.label),
+    },
     series: [
       {
         name: "Base",

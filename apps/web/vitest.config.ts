@@ -9,7 +9,7 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
     environment: "jsdom",
-    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
+    include: ["test/**/*.test.ts", "test/**/*.test.tsx", "app/**/*.test.ts", "app/**/*.test.tsx"],
   },
   resolve: {
     alias: { "@": root },

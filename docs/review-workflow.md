@@ -27,7 +27,7 @@ A push that changes calculation, schema, auth, or money handling needs a fresh r
 
 ## Financial checklist
 
-Complete this for every R3 change, and for any R2 change that writes. The author checks the attestation box in the pull request. The `financial-attestation` job enforces the box when the diff touches `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows`, once that workflow runs. The box does not replace this reading.
+Complete this for every R3 change, and for any R2 change that writes. The author checks the attestation box in the pull request. The `financial-attestation` job enforces the box when the diff touches `packages/kernel`, `packages/db`, `apps/api`, or `.github/workflows`, once that workflow runs, except for PRs opened and pushed by Dependabot, which still require review. The box does not replace this reading.
 
 - Invariants affected are named in the PR.
 - Golden tests state inputs, formula or method version, and expected outputs.
@@ -71,7 +71,7 @@ Merge is squash to `main` after:
 
 - the approval count for the risk class is met
 - the branch is up to date with `main`
-- `financial-attestation` would pass (the attestation line is present when the diff touches a protected path)
+- `financial-attestation` would pass (the attestation line is present when the diff touches a protected path) or is skipped for a PR opened and pushed by Dependabot
 - lint, typecheck, test, kernel coverage, build, and Playwright have passed locally or in CI
 
 The merger confirms the approvals are from reviewers who are not the author when the class is R3. Rollback is the plan in the pull request. Do not rewrite posted journals to undo a release.

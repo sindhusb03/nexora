@@ -1,7 +1,8 @@
 import { createPgliteStore, type LedgerStore } from "@nexora/db";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MemoryMailbox, consoleEmailSender } from "../src/auth/email.js";
+import * as oidc from "../src/auth/oidc.js";
 import { sha256 } from "../src/auth/oidc.js";
 import { lockoutSubject, nextLockout } from "../src/auth/lockout.js";
 import {
@@ -616,6 +617,7 @@ describe("auth regressions", () => {
         )
       ).status,
     ).toBe(201);
+    const send = vi.fn(() => new Promise<void>(() => {}));
     const slow = createApp({
       store,
       platformAdminActorIds: ["platform-admin"],
@@ -623,45 +625,59 @@ describe("auth regressions", () => {
       http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 100_000 } },
       logger: silentLogger,
       passwordCost: 1_024,
-      email: {
-        async send() {
-          await new Promise((resolve) => setTimeout(resolve, 25));
-        },
-      },
+      email: { send },
       demoMode: true,
     });
-    const sample = async (email: string) => {
-      await store.clearLockout(lockoutSubject("magic", email));
-      const started = performance.now();
-      const response = await slow.request("/auth/magic-link", json("POST", { email }));
-      expect(response.status).toBe(202);
-      return performance.now() - started;
-    };
-    const order: Array<"known" | "unknown"> = [];
-    for (let run = 0; run < 60; run += 1) order.push("known", "unknown");
-    for (let index = order.length - 1; index > 0; index -= 1) {
-      const swap = Math.floor(Math.random() * (index + 1));
-      const current = order[index];
-      order[index] = order[swap] ?? "known";
-      order[swap] = current ?? "unknown";
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const hash = vi.spyOn(oidc, "sha256");
+    const create = vi.spyOn(store, "requestMagicLink");
+    const realTimeout = globalThis.setTimeout;
+    const releases: (() => void)[] = [];
+    let scheduled!: () => void;
+    const held = new Promise<void>((resolve) => {
+      scheduled = resolve;
+    });
+    const timer = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((callback, delay, ...args) => {
+        if (delay === 80) {
+          releases.push(() => callback(...args));
+          if (releases.length === 2) scheduled();
+          return realTimeout(() => {}, 0);
+        }
+        return realTimeout(callback, delay, ...args);
+      });
+    let completed = 0;
+    try {
+      const requests = [knownEmail, unknownEmail].map((email) =>
+        Promise.resolve(slow.request("/auth/magic-link", json("POST", { email }))).then(
+          (response) => {
+            completed += 1;
+            return response;
+          },
+        ),
+      );
+      await held;
+      expect(completed).toBe(0);
+      expect(releases).toHaveLength(2);
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(hash).toHaveBeenCalledTimes(2);
+      for (const [input] of create.mock.calls) {
+        expect(input.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(hash.mock.results.map((result) => result.value)).toContain(input.tokenHash);
+      }
+      expect(send).toHaveBeenCalledTimes(1);
+      releases.forEach((release) => release());
+      const responses = await Promise.all(requests);
+      expect(responses.map((response) => response.status)).toEqual([202, 202]);
+      expect(await responses[0]?.json()).toEqual(await responses[1]?.json());
+    } finally {
+      releases.forEach((release) => release());
+      timer.mockRestore();
+      clock.mockRestore();
+      hash.mockRestore();
+      create.mockRestore();
     }
-    const knownTimes: number[] = [];
-    const unknownTimes: number[] = [];
-    for (const kind of order) {
-      const elapsed = await sample(kind === "known" ? knownEmail : unknownEmail);
-      if (kind === "known") knownTimes.push(elapsed);
-      else unknownTimes.push(elapsed);
-    }
-    const knownMedian = medianOf(knownTimes);
-    const unknownMedian = medianOf(unknownTimes);
-    const medianGap = Math.abs(knownMedian - unknownMedian);
-    const separation = rankAuc(knownTimes, unknownTimes);
-    expect(
-      medianGap,
-      `median gap ${medianGap.toFixed(3)}ms (known ${knownMedian.toFixed(1)}ms, unknown ${unknownMedian.toFixed(1)}ms, auc ${separation.toFixed(3)})`,
-    ).toBeLessThan(5);
-    expect(separation).toBeGreaterThan(0.35);
-    expect(separation).toBeLessThan(0.65);
   });
 
   it("rates limits on the proxy-appended address and the account, ignoring a spoofed hop", async () => {
@@ -874,20 +890,45 @@ describe("auth regressions", () => {
   });
 
   it("keeps health checks fast while magic-link responses are held", async () => {
-    const started = performance.now();
-    const pending = Array.from({ length: 20 }, (_, index) =>
-      app.request("/auth/magic-link", json("POST", { email: `held.${index}@example.com` })),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const healthStarted = performance.now();
-    const health = await app.request("/healthz");
-    const healthElapsed = performance.now() - healthStarted;
-    expect(health.status).toBe(200);
-    expect(healthElapsed, `healthz ${healthElapsed.toFixed(1)}ms`).toBeLessThan(50);
-    const held = await Promise.all(pending);
-    const elapsed = performance.now() - started;
-    expect(held.every((response) => response.status === 202)).toBe(true);
-    expect(elapsed, `20 held requests took ${elapsed.toFixed(0)}ms`).toBeLessThan(500);
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    const realTimeout = globalThis.setTimeout;
+    const releases: (() => void)[] = [];
+    let scheduled!: () => void;
+    const held = new Promise<void>((resolve) => {
+      scheduled = resolve;
+    });
+    const timer = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((callback, delay, ...args) => {
+        if (delay === 80) {
+          releases.push(() => callback(...args));
+          if (releases.length === 20) scheduled();
+          return realTimeout(() => {}, 0);
+        }
+        return realTimeout(callback, delay, ...args);
+      });
+    let completed = 0;
+    try {
+      const pending = Array.from({ length: 20 }, (_, index) =>
+        Promise.resolve(
+          app.request("/auth/magic-link", json("POST", { email: `held.${index}@example.com` })),
+        ).then((response) => {
+          completed += 1;
+          return response;
+        }),
+      );
+      await held;
+      const health = await app.request("/healthz");
+      expect(health.status).toBe(200);
+      expect(completed).toBe(0);
+      expect(releases).toHaveLength(20);
+      releases.forEach((release) => release());
+      expect((await Promise.all(pending)).every((response) => response.status === 202)).toBe(true);
+    } finally {
+      releases.forEach((release) => release());
+      timer.mockRestore();
+      clock.mockRestore();
+    }
   });
 
   it("locks totp disable after five failures and rejects a reused step", async () => {
@@ -1040,23 +1081,4 @@ describe("demo mode configuration", () => {
 async function errorCode(response: Response): Promise<string | undefined> {
   const body = (await response.json()) as { error?: { code?: string } };
   return body.error?.code;
-}
-
-function medianOf(values: readonly number[]): number {
-  const sorted = [...values].sort((left, right) => left - right);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 0) return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
-  return sorted[mid] ?? 0;
-}
-
-/** Probability that a known sample is slower than an unknown one. Ties count as one half. */
-function rankAuc(known: readonly number[], unknown: readonly number[]): number {
-  let score = 0;
-  for (const left of known) {
-    for (const right of unknown) {
-      if (left > right) score += 1;
-      else if (left === right) score += 0.5;
-    }
-  }
-  return score / (known.length * unknown.length);
 }

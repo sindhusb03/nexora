@@ -1,3 +1,5 @@
+import { splitCsv } from "./csv";
+
 export type DataSourceKind = "bank" | "trial_balance" | "financial_statements";
 
 export type StatementCadence = "monthly" | "quarterly" | "yearly";
@@ -11,11 +13,14 @@ export interface LedgerRow {
   readonly category: string;
   /** A category the screen proposed. The user can replace it before anything is recorded. */
   readonly suggestedCategory: string | null;
+  readonly reviewReason?: string;
   /** Posting date for bank lines the kernel read from a statement. Trial-balance rows have none. */
   readonly date?: string | null;
 }
 
 export interface DataSourceState {
+  readonly cacheKey?: string | null;
+  readonly cacheEpoch?: number;
   readonly kind: DataSourceKind | null;
   readonly cadence: StatementCadence;
   readonly system: AccountingSystem | null;
@@ -56,21 +61,76 @@ export function smartLedgerApplies(kind: DataSourceKind | null): boolean {
   return kind === "bank" || kind === "trial_balance";
 }
 
-export function readDataSource(): DataSourceState {
-  if (typeof window === "undefined") return EMPTY_SOURCE;
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY_SOURCE;
-    const parsed: unknown = JSON.parse(raw);
-    return isDataSource(parsed) ? withStatementPair(parsed) : EMPTY_SOURCE;
-  } catch {
-    return EMPTY_SOURCE;
-  }
+type SourceIdentity = { readonly actorId: string; readonly tenantId: string };
+let activeKey: string | null = null;
+let epoch = 0;
+let memory: DataSourceState = EMPTY_SOURCE;
+
+export function dataSourceKey(identity: SourceIdentity): string | null {
+  return identity.actorId ? JSON.stringify([identity.actorId, identity.tenantId]) : null;
 }
 
-export function writeDataSource(state: DataSourceState): void {
+export function clearDataSource(): void {
+  activeKey = null;
+  epoch += 1;
+  memory = EMPTY_SOURCE;
+  if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* Storage may be disabled. */
+  }
+  window.dispatchEvent(new Event("nexora:data-source"));
+}
+
+export function setDataSourceIdentity(identity: SourceIdentity): void {
+  const nextKey = dataSourceKey(identity);
+  if (activeKey !== null && activeKey !== nextKey) clearDataSource();
+  activeKey = nextKey;
+  readDataSource();
+}
+
+export function readDataSource(): DataSourceState {
+  if (typeof window === "undefined" || activeKey === null) return EMPTY_SOURCE;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (isDataSource(parsed) && parsed.cacheKey === activeKey)
+        memory = { ...withStatementPair(parsed), cacheEpoch: epoch };
+      else {
+        window.sessionStorage.removeItem(STORAGE_KEY);
+        memory = EMPTY_SOURCE;
+      }
+    }
+  } catch {
+    /* The identity-scoped memory remains usable without storage. */
+  }
+  return memory.cacheKey === activeKey
+    ? memory
+    : { ...EMPTY_SOURCE, cacheKey: activeKey, cacheEpoch: epoch };
+}
+
+export function isCurrentDataSource(state: DataSourceState, identity: SourceIdentity): boolean {
+  return (
+    activeKey !== null &&
+    dataSourceKey(identity) === activeKey &&
+    state.cacheKey === activeKey &&
+    state.cacheEpoch === epoch
+  );
+}
+
+export function writeDataSource(state: DataSourceState, identity?: SourceIdentity): void {
+  if (
+    activeKey === null ||
+    (identity && dataSourceKey(identity) !== activeKey) ||
+    (state.cacheKey !== undefined && state.cacheKey !== activeKey) ||
+    (state.cacheEpoch !== undefined && state.cacheEpoch !== epoch)
+  )
+    return;
+  memory = { ...state, cacheKey: activeKey, cacheEpoch: epoch };
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(memory));
   } catch {
     // The in-memory selection still drives the sidebar for this visit.
   }
@@ -98,18 +158,11 @@ export function suggestCategory(account: string): string | null {
 export function parseSourceTable(
   text: string,
 ): readonly { rowNo: number; account: string; amount: string }[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
   const rows: { rowNo: number; account: string; amount: string }[] = [];
-  for (const line of lines) {
-    const cells = line.split(/[,;\t]/).map((cell) => cell.trim().replace(/^"|"$/g, ""));
-    if (cells.length < 2) continue;
-    const account = cells[0] ?? "";
-    const amount = cells[1] ?? "";
-    if (!/^-?\d+(\.\d+)?$/.test(amount)) continue;
-    if (/^account$/i.test(account)) continue;
+  for (const cells of splitCsv(text)) {
+    const account = cells[0]?.trim() ?? "";
+    const amount = cells.length > 2 ? cells.slice(1).join(" | ") : (cells[1]?.trim() ?? "");
+    if (rows.length === 0 && /^account$/i.test(account) && /^amount$/i.test(amount)) continue;
     rows.push({ rowNo: rows.length + 1, account, amount });
   }
   return rows;
