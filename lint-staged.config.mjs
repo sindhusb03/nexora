@@ -1,6 +1,7 @@
 import { relative } from "node:path";
 
 const PACKAGE_FILTERS = [
+  ["packages/contracts/", "@nexora/contracts"],
   ["packages/kernel/", "@nexora/kernel"],
   ["packages/db/", "@nexora/db"],
   ["apps/api/", "@nexora/api"],

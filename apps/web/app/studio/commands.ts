@@ -3,6 +3,7 @@ export interface CommandItem {
   readonly label: string;
   readonly hint: string;
   readonly group: string;
+  readonly href?: string;
 }
 
 export const NAV_GROUPS = [
@@ -17,6 +18,13 @@ export const NAV_GROUPS = [
 export const STUDIO_COMMANDS: readonly CommandItem[] = [
   { id: "dashboard", label: "Dashboard", hint: "KPIs and trend", group: "Overview" },
   { id: "onboarding", label: "Onboarding", hint: "Upload, map, reconcile", group: "Books" },
+  {
+    id: "review",
+    label: "Exception review",
+    hint: "Triage extraction exceptions",
+    group: "Books",
+    href: "/review",
+  },
   { id: "statements", label: "Statements", hint: "Three statements and journals", group: "Books" },
   { id: "forecast", label: "Forecast", hint: "Drivers and scenarios", group: "Planning" },
   { id: "cash", label: "Cash", hint: "13-week cash", group: "Planning" },
