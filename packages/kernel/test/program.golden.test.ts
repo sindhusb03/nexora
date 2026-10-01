@@ -193,10 +193,13 @@ describe("capital, QoE, basis, and citations", () => {
   });
 
   it("discards an uncited numeric claim and blocks a maker from checking their own publish", () => {
-    const claims = acceptCitedClaims([
-      { text: "EBITDA is 115", citationId: null },
-      { text: "See the published bridge", citationId: "run-1" },
-    ]);
+    const claims = acceptCitedClaims(
+      [
+        { text: "EBITDA is 115", citationId: null },
+        { text: "See the published bridge", citationId: "run-1" },
+      ],
+      ["run-1"],
+    );
     expect(claims.discarded).toHaveLength(1);
     expect(claims.accepted).toHaveLength(1);
     expect(() => assertMakerChecker("owner-1", "owner-1")).toThrowError(

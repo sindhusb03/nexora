@@ -1,13 +1,59 @@
-import { and, eq } from "drizzle-orm";
+import { KernelError } from "@nexora/kernel";
+import { and, asc, eq } from "drizzle-orm";
 
 import type { AppDatabase } from "./client.js";
-import type { WorkspaceRow, WorkspaceUpdate, WorkspaceWrite } from "./records.js";
-import { membership, tenant } from "./schema.js";
+import type { LedgerStore, WorkspaceRow, WorkspaceUpdate, WorkspaceWrite } from "./records.js";
+import { legalEntity, membership, tenant } from "./schema.js";
 import { tenantTx, writeAudit } from "./store.js";
 import { workspaceRecord } from "./workspace-schema.js";
 
 export function createWorkspaceStore(db: AppDatabase) {
   return {
+    listWorkspaceEntityIds(tenantId: string): Promise<readonly string[]> {
+      return tenantTx(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select({ id: legalEntity.legalEntityId })
+          .from(legalEntity)
+          .where(eq(legalEntity.tenantId, tenantId))
+          .orderBy(asc(legalEntity.createdAt), asc(legalEntity.legalEntityId));
+        return rows.map((row) => row.id);
+      });
+    },
+
+    grantSupportAccess(input: Parameters<LedgerStore["grantSupportAccess"]>[0]) {
+      return tenantTx(db, input.tenantId, async (tx) => {
+        if (
+          !Number.isFinite(Date.parse(input.expiresAt)) ||
+          Date.parse(input.expiresAt) <= Date.now()
+        ) {
+          throw new RangeError("Support expiry must be in the future");
+        }
+        await tx.insert(membership).values({
+          membershipId: input.membershipId,
+          tenantId: input.tenantId,
+          actorId: input.actorId,
+          role: "auditor",
+          createdAt: input.createdAt,
+        });
+        await writeAudit(tx, input.tenantId, input.membershipAudit);
+        await tx.insert(workspaceRecord).values({
+          workspaceRecordId: input.id,
+          tenantId: input.tenantId,
+          kind: "support",
+          status: "active",
+          payload: {
+            ...input.payload,
+            actorId: input.actorId,
+            membershipId: input.membershipId,
+            expiresAt: input.expiresAt,
+          },
+          createdAt: input.createdAt,
+          updatedAt: input.createdAt,
+        });
+        await writeAudit(tx, input.tenantId, input.audit);
+      });
+    },
+
     insertWorkspaceRecord(input: WorkspaceWrite) {
       return tenantTx(db, input.tenantId, async (tx) => {
         await tx.insert(workspaceRecord).values({
@@ -43,15 +89,22 @@ export function createWorkspaceStore(db: AppDatabase) {
 
     updateWorkspaceRecord(input: WorkspaceUpdate) {
       return tenantTx(db, input.tenantId, async (tx) => {
-        await tx
+        const changed = await tx
           .update(workspaceRecord)
           .set({ status: input.status, payload: input.payload, updatedAt: input.updatedAt })
           .where(
             and(
               eq(workspaceRecord.workspaceRecordId, input.id),
               eq(workspaceRecord.tenantId, input.tenantId),
+              input.expectedStatus === undefined
+                ? undefined
+                : eq(workspaceRecord.status, input.expectedStatus),
             ),
-          );
+          )
+          .returning({ id: workspaceRecord.workspaceRecordId });
+        if (input.expectedStatus !== undefined && changed.length === 0) {
+          throw new KernelError("FIN_VERSION_CONFLICT", "Workspace record changed since review");
+        }
         await writeAudit(tx, input.tenantId, input.audit);
       });
     },
