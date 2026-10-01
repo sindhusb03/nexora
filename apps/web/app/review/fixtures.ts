@@ -323,6 +323,22 @@ function createDemoPack(): DemoPack {
       grid(3, 3, 2, [["Account", "Amount"]]),
     ),
     value(
+      "header_number",
+      "naz_is",
+      "FY2025 header",
+      "income",
+      "FY2025",
+      "202500",
+      "USD",
+      prov("naz_is", "Nazareno_Income_Statement_FY2025.xlsx", {
+        sheet: "Income statement",
+        row: 2,
+        col: 2,
+        rawText: "FY2025",
+      }),
+      grid(2, 2, 2, [["Period", "FY2025"]]),
+    ),
+    value(
       "formula",
       "naz_bs",
       "Retained earnings formula",
@@ -437,6 +453,16 @@ function createDemoPack(): DemoPack {
       diff: null,
       currency: "USD",
     }),
+    {
+      ...check(values, "header_as_value", "info", "0.9900", "naz_is", "header_number", {
+        message: 'The period header "FY2025" carries an extracted number.',
+        expected: null,
+        actual: "202500",
+        diff: null,
+        currency: "USD",
+      }),
+      id: "header_with_value",
+    },
     check(values, "formula_cached_mismatch", "warn", "0.7600", "naz_bs", "formula", {
       message: "The retained earnings formula does not match the cached cell value.",
       expected: "9100000",

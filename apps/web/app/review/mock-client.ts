@@ -168,7 +168,7 @@ function materialize(
   );
   const exceptions = pack.exceptions.map((item) => ({
     ...item,
-    id: `${jobId}_${item.type}`,
+    id: `${jobId}_${item.id}`,
     jobId,
     documentId: documentIds.get(item.documentId) ?? item.documentId,
     valueIds: item.valueIds.map((id) => valueIds.get(id) ?? id),

@@ -116,7 +116,9 @@ test("triage extraction exceptions without posting", async ({ page }) => {
   await expect(page.getByTestId("bulk-list")).not.toContainText("low_confidence_extraction");
   await shot(page, "05-bulk-confirm");
   await page.getByTestId("bulk-confirm-submit").click();
-  await expect(page.getByTestId("exception-header_as_value")).toContainText("Accepted");
+  await expect(
+    page.getByTestId("exception-header_as_value").filter({ hasText: 'The column header "Amount"' }),
+  ).toContainText("Accepted");
   await expect(page.getByTestId("exception-sign_convention")).toContainText("Open");
   await expect(page.getByTestId("exception-duplicate_extraction")).toContainText("Open");
   await expect(page.getByTestId("exception-unit_scale")).toContainText("Open");
@@ -144,4 +146,56 @@ test("a viewer cannot resolve or bulk-accept", async ({ page }) => {
   await page.keyboard.press("a");
   await expect(page.getByTestId("exception-bank_to_book")).toContainText("Open");
   await expect(page.getByTestId("queue-notice")).toContainText("cannot record a resolution");
+});
+
+test("numbered headers cannot be accepted by button or shortcut and stay out of bulk confirmation", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByTestId("nav-review").click();
+  await page.getByTestId("upload-input").setInputFiles({
+    name: "headers.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("account,amount\nPeriod,FY2025\n"),
+  });
+  await page.getByTestId("start-extraction").click();
+  await expect(page.getByTestId("job-status")).toContainText("ready");
+  await page.getByTestId("open-exceptions").click();
+  const numberedMessage = 'The period header "FY2025" carries an extracted number.';
+  const emptyMessage = 'The column header "Amount" was read as a numeric row.';
+  const explanation =
+    "This header contains a number and cannot be accepted. Choose not applicable or correct.";
+  const numberedRow = page.getByRole("row").filter({ hasText: numberedMessage });
+  await numberedRow.getByText("Open", { exact: true }).click();
+  await page.keyboard.press("a");
+  await page.keyboard.press("a");
+  await expect(page.getByTestId("queue-notice")).toHaveText(explanation);
+  await expect(page.getByTestId("confirm-key")).toHaveCount(0);
+  await expect(numberedRow).toContainText("Open");
+
+  await page.getByRole("link", { name: numberedMessage, exact: true }).click();
+  const accept = page.getByRole("button", { name: "Accept", exact: true });
+  await expect(accept).toBeDisabled();
+  await expect(accept).toHaveAccessibleDescription(explanation);
+  await expect(page.getByTestId("action-correct")).toBeEnabled();
+  await expect(page.getByTestId("action-not-applicable")).toBeEnabled();
+  await page.getByRole("heading", { name: numberedMessage, exact: true }).focus();
+  await page.keyboard.press("a");
+  await page.keyboard.press("a");
+  await expect(page.getByTestId("confirm-resolution")).toHaveCount(0);
+  await expect(page.getByTestId("screen-detail").getByText("Open", { exact: true })).toBeVisible();
+  await expect(page.getByText("No resolutions yet.", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("audit-trail").getByRole("listitem")).toHaveCount(0);
+
+  await page.getByTestId("back-to-queue").click();
+  await page.getByTestId("bulk-accept").click();
+  const list = page.getByTestId("bulk-list");
+  await expect(list).toContainText(emptyMessage);
+  await expect(list).not.toContainText(numberedMessage);
+  await expect(list).not.toContainText("low_confidence_extraction");
+  await expect(list).not.toContainText("missing_period");
+  await page.getByTestId("bulk-confirm-submit").click();
+  await expect(numberedRow).toContainText("Open");
+  await expect(page.getByTestId("exception-low_confidence_extraction")).toContainText("Open");
+  await expect(page.getByRole("row").filter({ hasText: emptyMessage })).toContainText("Accepted");
 });

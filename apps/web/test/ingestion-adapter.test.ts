@@ -1,10 +1,11 @@
 import {
   EXCEPTION_TYPES,
+  HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
   exceptionSchema,
   isBulkCandidate,
   type Exception,
 } from "@nexora/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildDemoPack } from "../app/review/fixtures";
 import { createHttpIngestionClient } from "../app/review/http-client";
@@ -13,6 +14,11 @@ import { buildSimplePdf } from "../app/review/simple-pdf";
 
 const csrf = "csrf-test-token";
 const roles = ["controller"];
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 const csv = {
   fileName: "nazareno-income.csv",
@@ -35,6 +41,135 @@ function clientAt(start: number) {
   };
 }
 
+describe("header adapter rejection", () => {
+  it.each(["expected", "actual", "diff"] as const)(
+    "preserves the HTTP 422 envelope for a non-null header %s and leaves adapter state unchanged",
+    async (field) => {
+      let clock = 0;
+      const store = memoryStore();
+      const client = createMockIngestionClient({ now: () => clock, store });
+      const uploaded = await client.upload({ files: [csv], idempotencyKey: "header-upload" }, csrf);
+      expect(uploaded.ok).toBe(true);
+      if (!uploaded.ok) return;
+      clock = 2_000;
+      store.write(
+        store.read().map((job) => ({
+          ...job,
+          exceptions: job.exceptions.map((item) =>
+            item.type === "header_as_value"
+              ? {
+                  ...item,
+                  values: {
+                    expected: null,
+                    actual: null,
+                    diff: null,
+                    currency: "USD",
+                    [field]: "0",
+                  },
+                }
+              : item,
+          ),
+        })),
+      );
+      const listed = await client.getExceptions(uploaded.value.id);
+      if (!listed.ok) throw new Error(listed.error.message);
+      const header = listed.value.find((item) => item.type === "header_as_value")!;
+      const before = structuredClone(store.read());
+      const request = {
+        action: "accept" as const,
+        note: null,
+        correctedMinor: null,
+        accountCode: null,
+        idempotencyKey: "header-accept",
+      };
+      const rejected = await client.resolve(header.id, request, "sindhu", roles, csrf);
+      expect(rejected).toMatchObject({
+        ok: false,
+        error: {
+          code: "HEADER_VALUE_NOT_ACCEPTABLE",
+          message: HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+          details: { httpStatus: 422 },
+        },
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init: RequestInit) => {
+          expect(url).toBe(`https://ingestion.test/v1/ingestion/exceptions/${header.id}/resolve`);
+          expect(init.method).toBe("POST");
+          expect(JSON.parse(String(init.body))).toEqual(request);
+          const result = await client.resolve(header.id, request, "sindhu", roles, csrf);
+          if (result.ok) throw new Error("Expected rejection");
+          const details = result.error.details as { httpStatus: number };
+          return new Response(
+            JSON.stringify({ error: { code: result.error.code, message: result.error.message } }),
+            { status: details.httpStatus },
+          );
+        }),
+      );
+      const http = createHttpIngestionClient("https://ingestion.test");
+      expect(await http.resolve(header.id, request, "sindhu", roles, csrf)).toMatchObject({
+        ok: false,
+        error: {
+          code: "HEADER_VALUE_NOT_ACCEPTABLE",
+          message: HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+        },
+      });
+      expect(store.read()).toEqual(before);
+      expect(await client.getExceptions(uploaded.value.id)).toEqual(listed);
+    },
+  );
+
+  it.each(["header_with_value", "low_confidence_extraction", "missing_period"])(
+    "rejects mixed bulk requests containing %s without any audit entries",
+    async (excludedId) => {
+      let clock = 0;
+      const store = memoryStore();
+      const client = createMockIngestionClient({ now: () => clock, store });
+      const uploaded = await client.upload({ files: [csv], idempotencyKey: "bulk-upload" }, csrf);
+      if (!uploaded.ok) throw new Error(uploaded.error.message);
+      clock = 2_000;
+      store.write(
+        store.read().map((job) => ({
+          ...job,
+          exceptions: job.exceptions.map((item) =>
+            item.type === "low_confidence_extraction" ? { ...item, confidence: "0.9900" } : item,
+          ),
+        })),
+      );
+      const before = structuredClone(store.read());
+      const jobId = uploaded.value.id;
+      const request = {
+        jobId,
+        exceptionIds: [`${jobId}_header_as_value`, `${jobId}_${excludedId}`],
+        note: null,
+        idempotencyKey: "bulk-rejected",
+      };
+      expect(await client.bulkAccept(request, "sindhu", roles, csrf)).toMatchObject({
+        ok: false,
+        error: { code: "INGESTION_BULK_REJECTED" },
+      });
+      expect(store.read()).toEqual(before);
+      const accepted = await client.bulkAccept(
+        { ...request, exceptionIds: [`${jobId}_header_as_value`], idempotencyKey: "bulk-eligible" },
+        "sindhu",
+        roles,
+        csrf,
+      );
+      expect(accepted.ok).toBe(true);
+      if (!accepted.ok) return;
+      expect(accepted.value.find((item) => item.id === `${jobId}_header_as_value`)).toMatchObject({
+        status: "accepted",
+        auditTrail: [expect.objectContaining({ action: "accept" })],
+      });
+      expect(accepted.value.find((item) => item.id === `${jobId}_${excludedId}`)).toMatchObject({
+        status: "open",
+        resolution: null,
+        auditTrail: [],
+      });
+    },
+  );
+});
+
 describe("demo extraction fixture", () => {
   it("covers every check type in India and the US without recomputed diffs", () => {
     const pack = buildDemoPack();
@@ -46,7 +181,9 @@ describe("demo extraction fixture", () => {
       "US",
       "US",
     ]);
-    expect(pack.exceptions.map((item) => item.type).sort()).toEqual([...EXCEPTION_TYPES].sort());
+    expect([...new Set(pack.exceptions.map((item) => item.type))].sort()).toEqual(
+      [...EXCEPTION_TYPES].sort(),
+    );
     for (const item of pack.exceptions) {
       expect(exceptionSchema.parse(item).id).toBe(item.id);
       if (item.values.expected !== null && item.values.actual !== null) {

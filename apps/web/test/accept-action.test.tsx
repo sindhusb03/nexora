@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 import { HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE } from "@nexora/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,20 +17,26 @@ afterEach(() => {
 });
 
 describe("accept action", () => {
-  it("disables Accept on a numbered header and explains the choice", () => {
-    render(
-      <AcceptButton
-        exception={{ type: "header_as_value", values: { ...values, actual: "100" } }}
-        canResolve
-        selected={false}
-        onSelect={vi.fn()}
-      />,
-    );
-    expect((screen.getByTestId("action-accept") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId("action-accept-wrap").getAttribute("title")).toBe(
-      HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
-    );
-  });
+  it.each(["expected", "actual", "diff"] as const)(
+    "disables Accept with an accessible explanation for non-null %s",
+    (field) => {
+      render(
+        <AcceptButton
+          exception={{ type: "header_as_value", values: { ...values, [field]: "0" } }}
+          canResolve
+          selected={false}
+          onSelect={vi.fn()}
+        />,
+      );
+      expect((screen.getByTestId("action-accept") as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByRole("button", { name: "Accept" })).toHaveAccessibleDescription(
+        HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+      );
+      expect(screen.getByTestId("action-accept-wrap").getAttribute("title")).toBe(
+        HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+      );
+    },
+  );
 
   it("leaves Accept available when the header has no number", () => {
     const onSelect = vi.fn();

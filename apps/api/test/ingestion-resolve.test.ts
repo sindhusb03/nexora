@@ -1,4 +1,8 @@
-import { resolveException, type Exception } from "@nexora/contracts";
+import {
+  HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+  resolveException,
+  type Exception,
+} from "@nexora/contracts";
 import { describe, expect, it } from "vitest";
 
 const at = "2026-09-30T12:00:00.000Z";
@@ -34,27 +38,33 @@ function header(actual: string | null): Exception {
 }
 
 describe("numbered header accept", () => {
-  it("returns 422 HEADER_VALUE_NOT_ACCEPTABLE and does not write the audit trail", () => {
-    const open = header("100");
-    const resolved = resolveException(
-      open,
-      {
-        action: "accept",
-        note: null,
-        correctedMinor: null,
-        accountCode: null,
-        idempotencyKey: "idem-header-number",
-      },
-      "sindhu",
-      at,
-    );
-    expect(resolved.ok).toBe(false);
-    if (resolved.ok) return;
-    expect(resolved.error.code).toBe("HEADER_VALUE_NOT_ACCEPTABLE");
-    expect(resolved.error.details).toMatchObject({ httpStatus: 422 });
-    expect(open.status).toBe("open");
-    expect(open.resolution).toBeNull();
-    expect(open.auditTrail).toEqual([]);
-    expect(open.values.actual).toBe("100");
-  });
+  it.each(["expected", "actual", "diff"] as const)(
+    "returns 422 HEADER_VALUE_NOT_ACCEPTABLE for non-null %s without mutation",
+    (field) => {
+      const open = header(null);
+      open.values = { ...open.values, [field]: "0" };
+      const before = structuredClone(open);
+      const resolved = resolveException(
+        open,
+        {
+          action: "accept",
+          note: null,
+          correctedMinor: null,
+          accountCode: null,
+          idempotencyKey: "idem-header-number",
+        },
+        "sindhu",
+        at,
+      );
+      expect(resolved.ok).toBe(false);
+      if (resolved.ok) return;
+      expect(resolved.error.code).toBe("HEADER_VALUE_NOT_ACCEPTABLE");
+      expect(resolved.error.message).toBe(HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE);
+      expect(resolved.error.details).toMatchObject({ httpStatus: 422 });
+      expect(open.status).toBe("open");
+      expect(open.resolution).toBeNull();
+      expect(open.auditTrail).toEqual([]);
+      expect(open).toEqual(before);
+    },
+  );
 });

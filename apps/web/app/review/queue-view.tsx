@@ -12,6 +12,8 @@ import {
 import {
   canResolveIngestion,
   EXCEPTION_TYPES,
+  HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
+  headerValueNotAcceptable,
   type Exception,
   type ExtractionJob,
 } from "@nexora/contracts";
@@ -163,6 +165,11 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
         event.preventDefault();
         const action = event.key === "a" ? "accept" : "not_applicable";
         if (selected.status !== "open") return;
+        if (action === "accept" && headerValueNotAcceptable(selected)) {
+          setArmed(null);
+          setNotice(HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE);
+          return;
+        }
         if (armed === action) {
           setArmed(null);
           void resolveQuick(selected, action);
