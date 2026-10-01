@@ -123,9 +123,14 @@ jobs:
           AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
           PORT: "8788"
         run: |
-          if timeout 60 pnpm --filter @nexora/api start; then
+          set -euo pipefail
+          code=0
+          timeout 60 pnpm --filter @nexora/api start > refuse.log 2>&1 || code=$?
+          cat refuse.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
             echo "The API started with a superuser login in production"; exit 1
           fi
+          grep -Fq "The login role is a superuser." refuse.log
 
       - name: Refuse to boot in production without DATABASE_URL
         env:
@@ -133,9 +138,14 @@ jobs:
           AUTH_SECRET: ci-only-auth-secret-0123456789abcdef0123456789
           PORT: "8789"
         run: |
-          if timeout 60 pnpm --filter @nexora/api start; then
+          set -euo pipefail
+          code=0
+          timeout 60 pnpm --filter @nexora/api start > refuse.log 2>&1 || code=$?
+          cat refuse.log
+          if [ "$code" -eq 0 ] || [ "$code" -eq 124 ]; then
             echo "The API started in production without a database"; exit 1
           fi
+          grep -Fq "DATABASE_URL is required when NODE_ENV=production. The in-memory store is for development only." refuse.log
 
   images:
     name: docker-images

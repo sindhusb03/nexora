@@ -17,6 +17,7 @@ import {
   type ApiResult,
   type Session,
 } from "./books/api";
+import { clearDataSource, setDataSourceIdentity } from "./data-source";
 import { readStoredSession, writeStoredSession } from "./books/hooks";
 import { ErrorNotice, Field } from "./books/ui";
 import { AppShell, IdentityForm, identityContext, type Area } from "./shell";
@@ -60,18 +61,22 @@ export function useIdentity(): Identity {
   const [state, setState] = useState<IdentityState>({ status: "loading" });
 
   const adopt = useCallback((signed: SignedSession) => {
+    setDataSourceIdentity(toSession(signed));
     setCsrfToken(signed.csrfToken);
     setState({ status: "ready", session: toSession(signed), signed });
   }, []);
 
   const signedOut = useCallback((notice: ApiError | null) => {
+    clearDataSource();
     setCsrfToken(null);
     setState({ status: "signed-out", notice });
   }, []);
 
   useEffect(() => {
     if (DEV_HEADERS) {
-      setState({ status: "ready", session: readStoredSession(), signed: null });
+      const session = readStoredSession();
+      setDataSourceIdentity(session);
+      setState({ status: "ready", session, signed: null });
       return;
     }
     let cancelled = false;
@@ -86,6 +91,7 @@ export function useIdentity(): Identity {
   }, [adopt, signedOut]);
 
   const applyDev = useCallback((next: Session) => {
+    setDataSourceIdentity(next);
     writeStoredSession(next);
     setState({ status: "ready", session: next, signed: null });
   }, []);
@@ -110,13 +116,14 @@ export function useIdentity(): Identity {
   );
 
   const signOut = useCallback(async () => {
+    const headers = csrfHeaders();
+    signedOut(null);
     await apiRequest({
       method: "POST",
       path: "/auth/logout",
-      headers: csrfHeaders(),
+      headers,
       decode: acceptAny,
     });
-    signedOut(null);
   }, [signedOut]);
 
   return { state, selectTenant, applyDev, signedIn: adopt, signOut };

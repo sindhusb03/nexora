@@ -1,8 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { LedgerStore } from "@nexora/db";
 
 import { strToU8, unzipSync, zipSync } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as statementCsv from "../src/imports/statement-csv.js";
+import { importFile } from "../src/imports/file-import.js";
 
 import { extractPdfText, parseBankStatement, type PdfLine } from "../src/imports/bank-pdf.js";
 import {
@@ -251,6 +254,94 @@ async function provisioned() {
 }
 
 describe("POST /v1/imports/file", () => {
+  it("checks service-level scope before even decoding an empty upload", async () => {
+    const store = {
+      getTenant: vi
+        .fn()
+        .mockResolvedValue({ tenantId: "tenant", homeRegion: "us-east-1", status: "active" }),
+      listRoles: vi.fn().mockResolvedValue([]),
+    } as unknown as LedgerStore;
+    const parser = vi.spyOn(statementCsv, "parseStatementCsv");
+    const decode = vi.spyOn(Buffer, "from");
+    try {
+      await expect(
+        importFile(
+          store,
+          {
+            actorId: "stranger",
+            tenantId: "tenant",
+            region: "us-east-1",
+            correlationId: "scope-test",
+            idempotencyKey: null,
+            expectedVersion: null,
+            verified: true,
+          },
+          {
+            kind: "financial_statements",
+            cadence: "yearly",
+            fileName: "Balance.csv",
+            contentBase64: "",
+          },
+        ),
+      ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+      expect(parser).not.toHaveBeenCalled();
+      expect(decode).not.toHaveBeenCalled();
+    } finally {
+      parser.mockRestore();
+      decode.mockRestore();
+    }
+  });
+  it("authorizes before decoding or invoking the CSV parser", async () => {
+    const { app, tenantId } = await provisioned();
+    await sessions(app).register("no-import-access");
+    const parser = vi.spyOn(statementCsv, "parseStatementCsv");
+    try {
+      for (const content of ["", "Account;2024;2025\nCash;20;0"]) {
+        const response = await call(app, "POST", "/v1/imports/file", {
+          actor: "no-import-access",
+          tenant: tenantId,
+          body: {
+            kind: "financial_statements",
+            cadence: "yearly",
+            fileName: "Balance Sheet.csv",
+            contentBase64: Buffer.from(content).toString("base64"),
+          },
+        });
+        expect(response.status).toBe(403);
+      }
+      expect(parser).not.toHaveBeenCalled();
+    } finally {
+      parser.mockRestore();
+    }
+  });
+
+  it("replays the stored CSV result without invoking the parser again", async () => {
+    const { app, tenantId } = await provisioned();
+    const parser = vi.spyOn(statementCsv, "parseStatementCsv");
+    const upload = () =>
+      call(app, "POST", "/v1/imports/file", {
+        actor: "owner-1",
+        tenant: tenantId,
+        body: {
+          kind: "financial_statements",
+          cadence: "yearly",
+          fileName: "Balance Sheet.csv",
+          contentBase64: Buffer.from("Account;2024;2025\nCash;20;0").toString("base64"),
+        },
+      });
+    try {
+      const first = await upload();
+      expect(first.status).toBe(201);
+      const stored = (await first.json()) as Record<string, unknown>;
+      parser.mockClear();
+      const replay = await upload();
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toEqual({ ...stored, replayed: true });
+      expect(parser).not.toHaveBeenCalled();
+    } finally {
+      parser.mockRestore();
+    }
+  });
   it("rejects an empty file", async () => {
     const { app, tenantId } = await provisioned();
     const response = await call(app, "POST", "/v1/imports/file", {
@@ -376,6 +467,60 @@ describe("POST /v1/imports/file", () => {
 });
 
 describe("statement files from the demo layouts", () => {
+  it("preserves different amounts under repeated period labels", () => {
+    const book = parseStatementCsv("Account;2025;2025\nCash;10;20", "Balance Sheet.csv");
+    expect(book.sheets[0]?.lines[0]?.values.map((value) => value.amount)).toEqual(["10", "20"]);
+  });
+  it.each(["Particulars", "Account name", "Line item"])(
+    "recognises %s year headers only in label context",
+    (label) => {
+      const book = parseStatementCsv(`${label};2024;2025\nCash;1999;2050`, "Balance Sheet.csv");
+      expect(book.sheets[0]?.periods.map((period) => period.label)).toEqual(["2024", "2025"]);
+      expect(book.sheets[0]?.lines[0]?.values.map((value) => value.amount)).toEqual([
+        "1999",
+        "2050",
+      ]);
+    },
+  );
+  it("never treats unlabelled CSV amount rows as years or Excel date headers", () => {
+    const book = parseStatementCsv("Cash;1999;2050\nAssets;25000;40000", "Balance Sheet.csv");
+    expect(book.sheets[0]?.lines.map((line) => line.values.map((value) => value.amount))).toEqual([
+      ["1999", "2050"],
+      ["25000", "40000"],
+    ]);
+  });
+  it.each([
+    ["-20.00", "-20.00"],
+    ["20.00-", "-20.00"],
+    ["1999", "1999"],
+    ["2050", "2050"],
+    ["2025.00", "2025.00"],
+    ["(300.00)", "-300.00"],
+    ["1,234.50 CR", "1234.50"],
+    ["1,234.50 DR", "-1234.50"],
+    ["12,34,567.89", "1234567.89"],
+    ["₹1,00,000", "100000"],
+    ["USD 20.00", "20.00"],
+    ["9007199254740993.01", "9007199254740993.01"],
+    ["99.999999", "99.999999"],
+  ])("imports CSV amount %s exactly (decimal-text-v1)", (input, expected) => {
+    const book = parseStatementCsv(`Account;2024;2025\nCash;${input};0`, "Balance Sheet.csv");
+    expect(book.sheets[0]?.lines.find((row) => row.label === "Cash")?.values[0]?.amount).toBe(
+      expected,
+    );
+    expect(book.sheets[0]?.periods.map((period) => period.label)).toEqual(["2024", "2025"]);
+  });
+
+  it.each(["1,23", "1.234", "1,234", "-20 CR", "(20)-", "12,3456.00"])(
+    "reports %s as a skipped amount for review",
+    (input) => {
+      const book = parseStatementCsv(`Account;2024;2025\nCash;${input};0`, "Balance Sheet.csv");
+      expect(book.sheets[0]?.skippedCells).toBe(1);
+      expect(book.sheets[0]?.lines.find((row) => row.label === "Cash")?.values).toEqual([
+        { period: "2025", amount: "0", raw: "0", formula: false },
+      ]);
+    },
+  );
   it("reads a QuickBooks PDF balance sheet", () => {
     const book = parseStatementPdf(
       {
