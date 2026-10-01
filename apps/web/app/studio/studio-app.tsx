@@ -8,6 +8,7 @@ import {
   Inbox,
   LayoutDashboard,
   LineChart,
+  ListChecks,
   Moon,
   Presentation,
   Scale,
@@ -19,6 +20,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -67,6 +69,7 @@ import type { CompanyCard, CopilotReply, PlatformView, SessionView, Workspace } 
 const NAV_ICONS: Record<string, typeof Inbox> = {
   dashboard: LayoutDashboard,
   onboarding: Upload,
+  review: ListChecks,
   statements: Table2,
   forecast: LineChart,
   cash: Wallet,
@@ -106,6 +109,7 @@ const EMPTY_AUTH: AuthConfigView = {
 };
 
 export function StudioApp() {
+  const router = useRouter();
   const [session, setSession] = useState<SessionView | null>(null);
   const [companies, setCompanies] = useState<readonly CompanyCard[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -347,6 +351,11 @@ export function StudioApp() {
 
   function pick(id: string) {
     setPaletteOpen(false);
+    const command = STUDIO_COMMANDS.find((item) => item.id === id);
+    if (command?.href) {
+      router.push(command.href);
+      return;
+    }
     if (id === "copilot") {
       setCopilotOpen(true);
       return;
@@ -973,5 +982,7 @@ function StudioSkeleton() {
 }
 
 function isScreen(value: string): value is Screen {
-  return STUDIO_COMMANDS.some((command) => command.id === value && command.id !== "copilot");
+  return STUDIO_COMMANDS.some(
+    (command) => command.id === value && command.id !== "copilot" && command.href === undefined,
+  );
 }

@@ -39,6 +39,7 @@ const proxyTarget = apiProxyTarget(process.env.API_PROXY_TARGET);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  transpilePackages: ["@nexora/contracts"],
   poweredByHeader: false,
   devIndicators: false,
   async headers() {
