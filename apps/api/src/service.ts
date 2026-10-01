@@ -42,8 +42,15 @@ export function createLedgerService(store: LedgerStore, platformAdminActorIds: r
       actor: ActorContext,
       input: { actorId: string; role: Exclude<Role, "platform_admin"> },
     ) => grantMembership(store, actor, input),
-    createEntity: (actor: ActorContext, input: { legalName: string; functionalCurrency: string }) =>
-      createEntity(store, actor, input),
+    createEntity: (
+      actor: ActorContext,
+      input: {
+        legalName: string;
+        functionalCurrency: string;
+        fiscalYearEndMonth?: number | undefined;
+        fiscalYearEndDay?: number | undefined;
+      },
+    ) => createEntity(store, actor, input),
     listEntities: (actor: ActorContext) => listEntities(store, actor),
     createAccount: (
       actor: ActorContext,
@@ -165,7 +172,12 @@ async function grantMembership(
 async function createEntity(
   store: LedgerStore,
   actor: ActorContext,
-  input: { legalName: string; functionalCurrency: string },
+  input: {
+    legalName: string;
+    functionalCurrency: string;
+    fiscalYearEndMonth?: number | undefined;
+    fiscalYearEndDay?: number | undefined;
+  },
 ) {
   const tenant = await scope(store, actor, "entity.write");
   const now = new Date().toISOString();
@@ -176,6 +188,8 @@ async function createEntity(
       tenantId: tenant.tenantId,
       legalName: input.legalName,
       functionalCurrency: input.functionalCurrency,
+      fiscalYearEndMonth: input.fiscalYearEndMonth ?? null,
+      fiscalYearEndDay: input.fiscalYearEndDay ?? null,
       retainedEarningsAccountId: null,
     },
     audit: audit(actor, "EntityCreated", "legal_entity", entityId, now, {

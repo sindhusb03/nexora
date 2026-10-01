@@ -121,3 +121,67 @@ export function printedAmountToDecimal(text: string): string | null {
 export function isPrintedAmount(text: string): boolean {
   return STATEMENT_AMOUNT.test(text.trim());
 }
+
+const GROUPED_NUMBER = "\\d{1,3}(?:,\\d{2})*,\\d{3}|\\d{1,3}(?:,\\d{3})+|\\d+";
+const CURRENCY_PREFIX =
+  "S\\$|A\\$|US\\$|C\\$|NZ\\$|HK\\$|R\\$|₹|¥|£|€|\\$|Rs\\.?|INR|AED|USD|EUR|GBP|SGD|AUD|JPY";
+const MONEY_SOURCE = `((?:\\((?:${GROUPED_NUMBER})(?:\\.\\d+)?\\)|-?(?:${GROUPED_NUMBER})(?:\\.\\d+)?)-?)(?:\\s*(CR|DR))?`;
+
+function stripCurrency(value: string): string {
+  return value
+    .replace(new RegExp(`^(?:${CURRENCY_PREFIX})\\s*`, "i"), "")
+    .replace(/\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY)$/i, "")
+    .trim();
+}
+
+/** Full amount token. `1223456.78` stays intact; Indian and western grouping, brackets, and CR/DR are accepted. */
+export function parseMoneyToken(value: string): string | null {
+  const match = new RegExp(`^\\s*${MONEY_SOURCE}\\s*$`, "i").exec(stripCurrency(value));
+  if (!match?.[1]) return null;
+  return signedMoney(match[1], match[2] ?? null);
+}
+
+export function findMoneyTokens(text: string): { raw: string; amount: string }[] {
+  const found: { raw: string; amount: string }[] = [];
+  const pattern = new RegExp(
+    `(?<![\\w./-])(?:${CURRENCY_PREFIX}\\s*)?${MONEY_SOURCE}(?:\\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY))?(?![\\w/])`,
+    "gi",
+  );
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[0] ?? "";
+    const amount = parseMoneyToken(raw);
+    if (!amount) continue;
+    found.push({ raw, amount });
+  }
+  return found;
+}
+
+function signedMoney(body: string, marker: string | null): string | null {
+  let negative = false;
+  let number = body.trim();
+  if (number.startsWith("(") && number.endsWith(")")) {
+    negative = true;
+    number = number.slice(1, -1).trim();
+  }
+  if (number.startsWith("-")) {
+    negative = true;
+    number = number.slice(1).trim();
+  }
+  if (number.endsWith("-")) {
+    negative = true;
+    number = number.slice(0, -1).trim();
+  }
+  if (!isGroupedNumber(number)) return null;
+  if (marker && /^DR$/i.test(marker)) negative = true;
+  const digits = number.replace(/,/g, "").replace(/^0+(?=\d)/, "");
+  const normalized = digits.length === 0 ? "0" : digits;
+  return negative && normalized !== "0" ? `-${normalized}` : normalized;
+}
+
+function isGroupedNumber(value: string): boolean {
+  return (
+    /^\d+(\.\d+)?$/.test(value) ||
+    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(value) ||
+    /^\d{1,3}(?:,\d{2})*,\d{3}(?:\.\d+)?$/.test(value)
+  );
+}

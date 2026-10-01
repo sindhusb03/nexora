@@ -1,4 +1,4 @@
-import { statementAmountToDecimal } from "./decimal-text.js";
+import { parseMoneyToken, statementAmountToDecimal } from "./decimal-text.js";
 import type { PdfLine, PdfText } from "./bank-pdf.js";
 import type {
   StatementLine,
@@ -8,22 +8,8 @@ import type {
   StatementWorkbook,
 } from "./statement-xlsx.js";
 
-const TITLES: readonly { readonly pattern: RegExp; readonly type: StatementType }[] = [
-  {
-    pattern:
-      /^(balance sheet|statement of financial position|estado de situaci[oó]n(?: financiera)?)$/i,
-    type: "balance_sheet",
-  },
-  {
-    pattern:
-      /^(income statement|statement of (loss and comprehensive income|comprehensive income|loss|income|operations)|estados? de ingresos(?: y gastos)?(?: y cambio en participacion)?)$/i,
-    type: "income_statement",
-  },
-  { pattern: /^(statement of cash flows|estados? de flujos de efectivo)$/i, type: "cash_flow" },
-  { pattern: /^statement of changes in (stockholders[’'] equity|equity)$/i, type: "equity" },
-];
-
-const DATE_TEXT = /\b(\d{1,2} de [A-Za-zÁÉÍÓÚáéíóú]+ de \d{4}|[A-Za-z]+ \d{1,2}, \d{4})\b/;
+const DATE_TEXT =
+  /\b(\d{1,2} de [A-Za-zÁÉÍÓÚáéíóú]+ de \d{4}|\d{1,2} [A-Za-z]+ \d{4}|[A-Za-z]+ \d{1,2}, \d{4})\b/;
 
 /**
  * Reads statement pages from PDF text. Amounts stay the printed decimal strings.
@@ -33,10 +19,18 @@ export function parseStatementPdf(text: PdfText, fileName: string): StatementWor
   const sections = collectSections(text.lines);
   const sheets: StatementSheet[] = [];
   const skippedSheets: { sheetName: string; reason: string }[] = [];
+  const droppedAmounts: { raw: string; page: number | null }[] = [];
+  let layoutUnresolved = false;
   sections.forEach((section, index) => {
     const sheet = sectionToSheet(section, index);
-    if ("reason" in sheet) skippedSheets.push({ sheetName: section.title, reason: sheet.reason });
-    else sheets.push(sheet);
+    if ("reason" in sheet) {
+      if (sheet.reason === "layout_unresolved") layoutUnresolved = true;
+      skippedSheets.push({ sheetName: section.title, reason: sheet.reason });
+      if ("droppedAmounts" in sheet) droppedAmounts.push(...sheet.droppedAmounts);
+    } else {
+      sheets.push(sheet.sheet);
+      droppedAmounts.push(...sheet.droppedAmounts);
+    }
   });
   if (sheets.length === 0 && skippedSheets.length === 0) {
     skippedSheets.push({
@@ -45,7 +39,9 @@ export function parseStatementPdf(text: PdfText, fileName: string): StatementWor
         "No balance sheet, income statement, cash flow, or equity statement heading was found",
     });
   }
-  return { sheets, skippedSheets };
+  if (layoutUnresolved)
+    return { sheets: [], skippedSheets, droppedAmounts, layoutUnresolved: true };
+  return { sheets, skippedSheets, droppedAmounts, layoutUnresolved: false };
 }
 
 interface Section {
@@ -80,7 +76,12 @@ function collectSections(lines: readonly PdfLine[]): Section[] {
   return sections;
 }
 
-function sectionToSheet(section: Section, index: number): StatementSheet | { reason: string } {
+function sectionToSheet(
+  section: Section,
+  index: number,
+):
+  | { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] }
+  | { reason: string; droppedAmounts?: readonly { raw: string; page: number | null }[] } {
   const dated =
     [...section.preamble, ...section.lines.slice(0, 8).map(lineText)]
       .map(findDate)
@@ -88,8 +89,10 @@ function sectionToSheet(section: Section, index: number): StatementSheet | { rea
   const split = section.lines.map(splitLine);
   const amountXs = split.flatMap((line) => line.amounts.map((amount) => amount.x));
   const centers = cluster(amountXs);
-  if (centers.length === 0)
-    return { reason: "The statement heading has no printed amounts under it" };
+  const droppedAmounts = split.flatMap((line) => line.dropped);
+  if (centers.length === 0) {
+    return { reason: "The statement heading has no printed amounts under it", droppedAmounts };
+  }
 
   const headerLines = split.filter((line) => line.amounts.length === 0).slice(0, 8);
   const periods: StatementPeriod[] = centers.map((center, column) => ({
@@ -120,7 +123,7 @@ function sectionToSheet(section: Section, index: number): StatementSheet | { rea
         skippedCells += 1;
         continue;
       }
-      values.push({ period, amount: amount.amount, raw: amount.amount, formula: false });
+      values.push({ period, amount: amount.amount, raw: amount.raw, formula: false });
     }
     if (line.label.length === 0) {
       if (values.length > 0) skippedRows += 1;
@@ -132,15 +135,20 @@ function sectionToSheet(section: Section, index: number): StatementSheet | { rea
   if (!lines.some((line) => line.values.length > 0)) {
     return {
       reason: "The statement heading has labels but no amount columns this parser could keep",
+      droppedAmounts,
     };
   }
   return {
-    sheetName: section.title || `Statement ${index + 1}`,
-    statementType: section.type,
-    periods,
-    lines,
-    skippedRows,
-    skippedCells,
+    sheet: {
+      sheetName: section.title || `Statement ${index + 1}`,
+      statementType: section.type,
+      periods,
+      lines,
+      skippedRows,
+      skippedCells,
+      droppedAmounts: split.flatMap((line) => line.dropped),
+    },
+    droppedAmounts: split.flatMap((line) => line.dropped),
   };
 }
 
@@ -165,7 +173,10 @@ function columnLabel(
       .trim();
     if (
       /^(current month|year to date)( (this year|last year))?$/i.test(phrase) ||
-      /^(this year|last year|ytd|(19|20)\d{2})$/i.test(phrase)
+      /^(this year|last year|ytd|(19|20)\d{2})$/i.test(phrase) ||
+      /(?:year ended|months ended|as at|as of)/i.test(phrase) ||
+      /^\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}$/i.test(phrase) ||
+      /^[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4}$/i.test(phrase)
     ) {
       phrases.push(phrase);
     }
@@ -177,28 +188,66 @@ function columnLabel(
 
 interface Split {
   readonly label: string;
-  readonly amounts: readonly { readonly x: number; readonly amount: string }[];
+  readonly amounts: readonly {
+    readonly x: number;
+    readonly amount: string;
+    readonly raw: string;
+  }[];
   readonly items: PdfLine["items"];
+  readonly dropped: readonly { readonly raw: string; readonly page: number | null }[];
 }
 
 function splitLine(line: PdfLine): Split {
-  const amounts: { x: number; amount: string }[] = [];
+  const amounts: { x: number; amount: string; raw: string }[] = [];
+  const dropped: { raw: string; page: number | null }[] = [];
   const label: string[] = [];
   for (const item of line.items) {
     if (item.text === "$") continue;
-    const amount = statementAmountToDecimal(item.text);
-    if (amount === null) label.push(item.text);
-    else amounts.push({ x: item.x, amount });
+    const amount = pdfAmount(item.text);
+    if (amount === null) {
+      if (looksLikeMoney(item.text)) dropped.push({ raw: item.text, page: line.page });
+      else label.push(item.text);
+    } else amounts.push({ x: item.x, amount, raw: item.text });
   }
-  return { label: label.join(" ").replace(/\s+/g, " ").trim(), amounts, items: line.items };
+  return {
+    label: label.join(" ").replace(/\s+/g, " ").trim(),
+    amounts,
+    items: line.items,
+    dropped,
+  };
+}
+
+function pdfAmount(text: string): string | null {
+  const trimmed = text.trim();
+  if (!/[(),.]|\b(?:CR|DR)\b/i.test(trimmed)) return statementAmountToDecimal(trimmed);
+  if (/^(19|20)\d{2}$/.test(trimmed)) return null;
+  return parseMoneyToken(trimmed) ?? statementAmountToDecimal(trimmed);
+}
+
+function looksLikeMoney(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length <= 40 &&
+    /^(?:[$€£₹]|S\$|A\$)?\s*\(?-?\d[\d,]*(?:\.\d+)?\)?(?:\s*(?:CR|DR))?$/i.test(trimmed)
+  );
 }
 
 function titleOf(line: PdfLine): { type: StatementType } | null {
   if (line.items.some((item) => item.x > 450 && /^\d{1,3}$/.test(item.text))) return null;
   const text = lineText(line);
-  if (text.length < 8 || text.length > 80 || line.items.length > 8) return null;
-  const found = TITLES.find((title) => title.pattern.test(text));
-  return found ? { type: found.type } : null;
+  if (text.length < 8 || text.length > 140 || line.items.length > 12) return null;
+  if (line.items.some((item) => pdfAmount(item.text) !== null && /\d/.test(item.text))) return null;
+  if (/balance sheets?|financial position/i.test(text)) return { type: "balance_sheet" };
+  if (/statements? of cash flows?|cash flow/i.test(text)) return { type: "cash_flow" };
+  if (/changes in .*equity|stockholders|shareholders/i.test(text)) return { type: "equity" };
+  if (
+    /income statements?|statements? of (?:operations|income|earnings)|profit and loss|comprehensive income|profit or loss/i.test(
+      text,
+    )
+  ) {
+    return { type: "income_statement" };
+  }
+  return null;
 }
 
 function lineText(line: PdfLine): string {

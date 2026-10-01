@@ -1,0 +1,146 @@
+import {
+  boolean,
+  char,
+  date,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+export const ingestionJob = pgTable(
+  "ingestion_job",
+  {
+    ingestionJobId: uuid("ingestion_job_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    legalEntityId: uuid("legal_entity_id").notNull(),
+    status: text("status").notNull(),
+    currency: char("currency", { length: 3 }),
+    formulaVersion: text("formula_version"),
+    inputHash: text("input_hash"),
+    outputHash: text("output_hash"),
+    modelPayload: jsonb("model_payload"),
+    idempotencyKey: text("idempotency_key"),
+    contentHash: text("content_hash"),
+    canonicalHash: text("canonical_hash"),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("ix_ingestion_job_tenant").on(table.tenantId, table.createdAt),
+    index("ix_ingestion_job_content").on(table.tenantId, table.legalEntityId, table.contentHash),
+    index("ix_ingestion_job_canonical").on(
+      table.tenantId,
+      table.legalEntityId,
+      table.canonicalHash,
+    ),
+  ],
+);
+
+export const sourceDocument = pgTable(
+  "source_document",
+  {
+    sourceDocumentId: uuid("source_document_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ingestionJobId: uuid("ingestion_job_id").notNull(),
+    fileName: text("file_name").notNull(),
+    mediaType: text("media_type").notNull(),
+    byteLength: integer("byte_length").notNull(),
+    sha256: text("sha256").notNull(),
+    parserId: text("parser_id"),
+    status: text("status").notNull(),
+    error: text("error"),
+    parseIssues: jsonb("parse_issues").notNull().default([]),
+    statementKinds: text("statement_kinds").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [index("ix_source_document_job").on(table.tenantId, table.ingestionJobId)],
+);
+
+export const extractedValue = pgTable(
+  "extracted_value",
+  {
+    extractedValueId: uuid("extracted_value_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ingestionJobId: uuid("ingestion_job_id").notNull(),
+    sourceDocumentId: uuid("source_document_id").notNull(),
+    statementType: text("statement_type").notNull(),
+    role: text("role").notNull(),
+    label: text("label").notNull(),
+    periodKey: text("period_key"),
+    periodStart: date("period_start", { mode: "string" }),
+    periodEnd: date("period_end", { mode: "string" }),
+    spanMonths: integer("span_months").notNull(),
+    currency: char("currency", { length: 3 }),
+    scale: text("scale").notNull(),
+    amountMinor: numeric("amount_minor", { precision: 38, scale: 0, mode: "string" }),
+    rawText: text("raw_text").notNull(),
+    page: integer("page"),
+    sheet: text("sheet"),
+    rowNo: integer("row_no"),
+    colNo: integer("col_no"),
+    bbox: jsonb("bbox"),
+    accountCode: text("account_code"),
+    mappingConfidence: text("mapping_confidence"),
+    mappingMethod: text("mapping_method"),
+    mappingAccepted: boolean("mapping_accepted").notNull(),
+    contra: boolean("contra").notNull(),
+    balanceKind: text("balance_kind").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    sectionId: text("section_id").notNull(),
+  },
+  (table) => [index("ix_extracted_value_job").on(table.tenantId, table.ingestionJobId)],
+);
+
+export const ingestionAccountMapping = pgTable(
+  "ingestion_account_mapping",
+  {
+    accountMappingId: uuid("ingestion_account_mapping_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ingestionJobId: uuid("ingestion_job_id").notNull(),
+    extractedValueId: uuid("extracted_value_id").notNull(),
+    accountCode: text("account_code").notNull(),
+    confidence: text("confidence").notNull(),
+    method: text("method").notNull(),
+    accepted: boolean("accepted").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [index("ix_ingestion_account_mapping_job").on(table.tenantId, table.ingestionJobId)],
+);
+
+export const ingestionException = pgTable(
+  "ingestion_exception",
+  {
+    ingestionExceptionId: uuid("ingestion_exception_id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ingestionJobId: uuid("ingestion_job_id").notNull(),
+    sourceDocumentId: uuid("source_document_id"),
+    type: text("type").notNull(),
+    severity: text("severity").notNull(),
+    message: text("message").notNull(),
+    expectedValue: text("expected_value"),
+    actualValue: text("actual_value"),
+    diffValue: text("diff_value"),
+    provenance: jsonb("provenance").notNull(),
+    status: text("status").notNull(),
+    resolution: jsonb("resolution"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("ix_ingestion_exception_job").on(table.tenantId, table.ingestionJobId, table.status),
+  ],
+);
+
+export const ingestionSchema = {
+  ingestionJob,
+  sourceDocument,
+  extractedValue,
+  ingestionAccountMapping,
+  ingestionException,
+};

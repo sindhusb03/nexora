@@ -1,0 +1,42 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 581 >>
+stream
+BT /F1 11 Tf 1 0 0 1 72 740 Tm (For the year ended December 31, 2024) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 726 Tm (Income Statement) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 712 Tm (USD) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 698 Tm (Revenue) Tj ET
+BT /F1 11 Tf 1 0 0 1 400 698 Tm (1,200,000) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 684 Tm (Cost of Goods Sold) Tj ET
+BT /F1 11 Tf 1 0 0 1 400 684 Tm (480,000) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 670 Tm (Operating Expenses) Tj ET
+BT /F1 11 Tf 1 0 0 1 400 670 Tm (300,000) Tj ET
+BT /F1 11 Tf 1 0 0 1 72 656 Tm (Net Income) Tj ET
+BT /F1 11 Tf 1 0 0 1 400 656 Tm (420,000) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000873 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+943
+%%EOF

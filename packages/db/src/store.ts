@@ -1,7 +1,9 @@
 import {
   KernelError,
   ROLES,
+  buildStatements,
   type CashFlowClass,
+  type ClassifiedLine,
   type ReportClass,
   type Role,
 } from "@nexora/kernel";
@@ -16,7 +18,9 @@ import type {
   CalculationRunRecord,
   EntityRecord,
   IdentityStore,
+  IngestionPostCommit,
   JournalRecord,
+  LedgerPostSnapshot,
   LedgerStore,
   PeriodRecord,
   PostedActivityLine,
@@ -24,6 +28,9 @@ import type {
   TenantRecord,
 } from "./records.js";
 import { writeRoleChangeAudit } from "./auth-store.js";
+import { ingestionJob } from "./ingestion-schema.js";
+import { createIngestionStore } from "./ingestion-store.js";
+import { lineageEdge } from "./program-schema.js";
 import { createIdentityStore } from "./identity-store.js";
 import { currentRlsSession } from "./session-context.js";
 import { createProgramStore } from "./program-store.js";
@@ -50,6 +57,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
     | keyof ReturnType<typeof createProgramStore>
     | keyof IdentityStore
     | keyof ReturnType<typeof createWorkspaceStore>
+    | keyof ReturnType<typeof createIngestionStore>
   > = {
     createTenant(input) {
       return tenantTx(db, input.tenant.tenantId, async (tx) => {
@@ -135,6 +143,8 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           tenantId: input.entity.tenantId,
           legalName: input.entity.legalName,
           functionalCurrency: input.entity.functionalCurrency,
+          fiscalYearEndMonth: input.entity.fiscalYearEndMonth,
+          fiscalYearEndDay: input.entity.fiscalYearEndDay,
           retainedEarningsAccountId: null,
           createdAt: input.audit.occurredAt,
         });
@@ -528,12 +538,370 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
         } satisfies CalculationRunRecord;
       });
     },
+
+    commitIngestionPost(input) {
+      return tenantTx(db, input.tenantId, async (tx) => {
+        await lockLedger(tx, input.tenantId, input.entityId);
+        return writeIngestionPost(tx, input);
+      });
+    },
+
+    runLockedIngestionPost(tenantId, entityId, fn) {
+      return tenantTx(db, tenantId, async (tx) => {
+        const snapshot = await readLockedLedger(tx, tenantId, entityId);
+        const decision = await fn(snapshot);
+        if (isIngestionWrite(decision)) await writeIngestionPost(tx, decision.commit);
+        return decision;
+      });
+    },
   };
   return {
     ...core,
     ...createProgramStore(db),
     ...createIdentityStore(db),
     ...createWorkspaceStore(db),
+    ...createIngestionStore(db),
+  };
+}
+
+async function writeIngestionPost(
+  tx: AppDatabase,
+  input: IngestionPostCommit,
+): Promise<{ readonly journalIds: readonly string[] }> {
+  for (const created of input.accounts) {
+    await tx.insert(account).values({
+      accountId: created.accountId,
+      tenantId: input.tenantId,
+      legalEntityId: input.entityId,
+      code: created.code,
+      name: created.name,
+      report: created.report,
+      cashFlow: created.cashFlow,
+      currency: input.currency,
+      active: true,
+      createdAt: input.occurredAt,
+    });
+    if (created.retainedEarnings) {
+      const updated = await tx
+        .update(legalEntity)
+        .set({ retainedEarningsAccountId: created.accountId })
+        .where(
+          and(
+            eq(legalEntity.tenantId, input.tenantId),
+            eq(legalEntity.legalEntityId, input.entityId),
+            isNull(legalEntity.retainedEarningsAccountId),
+          ),
+        )
+        .returning({ id: legalEntity.legalEntityId });
+      if (updated.length === 0) {
+        throw new KernelError(
+          "FIN_IMMUTABLE_RECORD",
+          "Retained earnings account is already assigned",
+        );
+      }
+    }
+  }
+  for (const period of input.periods) {
+    await tx.insert(accountingPeriod).values({
+      periodId: period.periodId,
+      tenantId: input.tenantId,
+      legalEntityId: input.entityId,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      status: "open",
+      createdAt: input.occurredAt,
+    });
+  }
+  const journalIds: string[] = [];
+  let inserted = 0;
+  for (const journal of input.journals) {
+    const existing = await tx
+      .select()
+      .from(journalEntry)
+      .where(
+        and(
+          eq(journalEntry.tenantId, input.tenantId),
+          eq(journalEntry.idempotencyKey, journal.idempotencyKey),
+        ),
+      )
+      .limit(1);
+    const prior = existing[0];
+    if (prior) {
+      if (prior.payloadHash !== journal.payloadHash) {
+        throw new KernelError(
+          "FIN_IDEMPOTENCY_MISMATCH",
+          "Idempotency key was reused with a different payload",
+        );
+      }
+      journalIds.push(prior.journalId);
+      continue;
+    }
+    await tx.insert(journalEntry).values({
+      journalId: journal.journalId,
+      tenantId: input.tenantId,
+      legalEntityId: input.entityId,
+      periodId: journal.periodId,
+      status: "draft",
+      currency: input.currency,
+      idempotencyKey: journal.idempotencyKey,
+      payloadHash: journal.payloadHash,
+      reversesJournalId: null,
+      sourceRef: journal.sourceRef,
+      actorId: input.actorId,
+      correlationId: input.correlationId,
+      version: 1,
+      createdAt: input.occurredAt,
+      postedAt: null,
+    });
+    if (journal.lines.length > 0) {
+      await tx.insert(journalLine).values(
+        journal.lines.map((line) => ({
+          journalLineId: line.lineId,
+          tenantId: input.tenantId,
+          journalId: journal.journalId,
+          accountId: line.accountId,
+          lineNo: line.lineNo,
+          debitMinor: line.debitMinor,
+          creditMinor: line.creditMinor,
+        })),
+      );
+    }
+    await tx
+      .update(journalEntry)
+      .set({ status: "posted", postedAt: input.occurredAt })
+      .where(
+        and(
+          eq(journalEntry.tenantId, input.tenantId),
+          eq(journalEntry.journalId, journal.journalId),
+        ),
+      );
+    await writeAudit(tx, input.tenantId, {
+      eventId: crypto.randomUUID(),
+      eventType: "JournalPosted",
+      aggregateType: "journal",
+      aggregateId: journal.journalId,
+      actorId: input.actorId,
+      correlationId: input.correlationId,
+      occurredAt: input.occurredAt,
+      payload: { sourceRef: journal.sourceRef, jobId: input.jobId },
+    });
+    await tx.insert(domainEvent).values({
+      eventId: journal.domainEventId,
+      eventType: "JournalPosted",
+      eventVersion: 1,
+      tenantId: input.tenantId,
+      occurredAt: input.occurredAt,
+      actorId: input.actorId,
+      correlationId: input.correlationId,
+      causationId: input.auditEventId,
+      aggregateType: "journal",
+      aggregateId: journal.journalId,
+      payload: { sourceRef: journal.sourceRef, jobId: input.jobId },
+    });
+    journalIds.push(journal.journalId);
+    inserted += 1;
+    if (input.fault === "after-first-journal" && inserted === 1) {
+      throw new Error("fault:after-first-journal");
+    }
+  }
+  if (input.journals.length > 0) {
+    const entityRows = await tx
+      .select()
+      .from(legalEntity)
+      .where(
+        and(
+          eq(legalEntity.tenantId, input.tenantId),
+          eq(legalEntity.legalEntityId, input.entityId),
+        ),
+      )
+      .limit(1);
+    const retainedId = entityRows[0]?.retainedEarningsAccountId;
+    if (!retainedId) {
+      throw new KernelError("FIN_STATEMENT_IMBALANCE", "Entity has no retained earnings account");
+    }
+    const accountRows = await tx
+      .select()
+      .from(account)
+      .where(and(eq(account.tenantId, input.tenantId), eq(account.legalEntityId, input.entityId)));
+    const byId = new Map(accountRows.map((row) => [row.accountId, row]));
+    const last = input.journals.length - 1;
+    const lines: ClassifiedLine[] = [];
+    input.journals.forEach((journal, index) => {
+      const period = index === last ? "movement" : "opening";
+      for (const line of journal.lines) {
+        const row = byId.get(line.accountId);
+        if (!row) {
+          throw new KernelError("FIN_NOT_FOUND", "Posted line account is missing");
+        }
+        lines.push({
+          accountId: line.accountId,
+          report: row.report as ClassifiedLine["report"],
+          cashFlow: row.cashFlow as ClassifiedLine["cashFlow"],
+          debitMinor: line.debitMinor,
+          creditMinor: line.creditMinor,
+          currency: input.currency,
+          period,
+        });
+      }
+    });
+    const statements = buildStatements({
+      currency: input.currency,
+      retainedEarningsAccountId: retainedId,
+      lines,
+    });
+    if (statements.incomeStatement.netIncomeMinor !== input.netIncomeMinor) {
+      throw new KernelError(
+        "FIN_STATEMENT_IMBALANCE",
+        "Posted statements do not match the linked model",
+      );
+    }
+  }
+  if (input.fault === "before-commit") throw new Error("fault:before-commit");
+  await tx.insert(calculationRun).values({
+    calculationRunId: input.calculationRunId,
+    tenantId: input.tenantId,
+    kind: "ingestion_model",
+    status: "succeeded",
+    engineVersion: input.engineVersion,
+    inputHash: input.inputHash,
+    inputs: { jobId: input.jobId, formulaVersion: input.formulaVersion },
+    outputs: { outputHash: input.outputHash, netIncomeMinor: input.netIncomeMinor },
+    actorId: input.actorId,
+    correlationId: input.correlationId,
+    createdAt: input.occurredAt,
+  });
+  await tx.insert(lineageEdge).values({
+    lineageEdgeId: input.lineageEdgeId,
+    tenantId: input.tenantId,
+    fromType: "ingestion_job",
+    fromId: input.jobId,
+    toType: "calculation_run",
+    toId: input.calculationRunId,
+    relation: "posted_model",
+    createdAt: input.occurredAt,
+  });
+  await tx
+    .update(ingestionJob)
+    .set({
+      status: "posted",
+      currency: input.currency,
+      formulaVersion: input.formulaVersion,
+      inputHash: input.inputHash,
+      outputHash: input.outputHash,
+      canonicalHash: input.canonicalHash,
+      modelPayload: { ...input.modelPayload, journals: journalIds },
+      updatedAt: input.occurredAt,
+    })
+    .where(
+      and(eq(ingestionJob.tenantId, input.tenantId), eq(ingestionJob.ingestionJobId, input.jobId)),
+    );
+  await writeAudit(tx, input.tenantId, {
+    eventId: input.auditEventId,
+    eventType: "IngestionModelPosted",
+    aggregateType: "ingestion_job",
+    aggregateId: input.jobId,
+    actorId: input.actorId,
+    correlationId: input.correlationId,
+    occurredAt: input.occurredAt,
+    payload: { journalCount: String(journalIds.length), inputHash: input.inputHash },
+  });
+  return { journalIds };
+}
+
+function isIngestionWrite(
+  value: unknown,
+): value is { action: "write"; commit: IngestionPostCommit } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "action" in value &&
+    value.action === "write" &&
+    "commit" in value
+  );
+}
+
+async function lockLedger(tx: AppDatabase, tenantId: string, entityId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT legal_entity_id FROM legal_entity WHERE tenant_id = ${tenantId} AND legal_entity_id = ${entityId} FOR UPDATE`,
+  );
+  await tx.execute(
+    sql`SELECT period_id FROM accounting_period WHERE tenant_id = ${tenantId} AND legal_entity_id = ${entityId} FOR UPDATE`,
+  );
+}
+
+async function readLockedLedger(
+  tx: AppDatabase,
+  tenantId: string,
+  entityId: string,
+): Promise<LedgerPostSnapshot> {
+  await lockLedger(tx, tenantId, entityId);
+  const entities = await tx
+    .select({
+      fiscalYearEndMonth: legalEntity.fiscalYearEndMonth,
+      fiscalYearEndDay: legalEntity.fiscalYearEndDay,
+      retainedEarningsAccountId: legalEntity.retainedEarningsAccountId,
+    })
+    .from(legalEntity)
+    .where(and(eq(legalEntity.tenantId, tenantId), eq(legalEntity.legalEntityId, entityId)))
+    .limit(1);
+  const accounts = await tx
+    .select()
+    .from(account)
+    .where(and(eq(account.tenantId, tenantId), eq(account.legalEntityId, entityId)));
+  const periods = await tx
+    .select()
+    .from(accountingPeriod)
+    .where(
+      and(eq(accountingPeriod.tenantId, tenantId), eq(accountingPeriod.legalEntityId, entityId)),
+    );
+  const journalRows = await tx
+    .select()
+    .from(journalEntry)
+    .where(
+      and(
+        eq(journalEntry.tenantId, tenantId),
+        eq(journalEntry.legalEntityId, entityId),
+        eq(journalEntry.status, "posted"),
+      ),
+    )
+    .orderBy(asc(journalEntry.postedAt));
+  const journals: JournalRecord[] = [];
+  for (const row of journalRows) {
+    if (!row.postedAt) continue;
+    const lines = await tx
+      .select()
+      .from(journalLine)
+      .where(and(eq(journalLine.tenantId, tenantId), eq(journalLine.journalId, row.journalId)))
+      .orderBy(asc(journalLine.lineNo));
+    journals.push({
+      journalId: row.journalId,
+      tenantId: row.tenantId,
+      entityId: row.legalEntityId,
+      periodId: row.periodId,
+      currency: row.currency.trim(),
+      idempotencyKey: row.idempotencyKey,
+      payloadHash: row.payloadHash,
+      reversesJournalId: row.reversesJournalId,
+      sourceRef: row.sourceRef,
+      actorId: row.actorId,
+      correlationId: row.correlationId,
+      version: row.version,
+      postedAt: row.postedAt,
+      lines: lines.map((line) => ({
+        accountId: line.accountId,
+        lineNo: line.lineNo,
+        debitMinor: minor(line.debitMinor),
+        creditMinor: minor(line.creditMinor),
+      })),
+    });
+  }
+  return {
+    accounts: accounts.map(mapAccount),
+    periods: periods.map(mapPeriod),
+    journals,
+    fiscalYearEndMonth: entities[0]?.fiscalYearEndMonth ?? null,
+    fiscalYearEndDay: entities[0]?.fiscalYearEndDay ?? null,
+    retainedEarningsAccountId: entities[0]?.retainedEarningsAccountId ?? null,
   };
 }
 
@@ -624,6 +992,8 @@ function mapEntity(row: typeof legalEntity.$inferSelect): EntityRecord {
     tenantId: row.tenantId,
     legalName: row.legalName,
     functionalCurrency: row.functionalCurrency.trim(),
+    fiscalYearEndMonth: row.fiscalYearEndMonth,
+    fiscalYearEndDay: row.fiscalYearEndDay,
     retainedEarningsAccountId: row.retainedEarningsAccountId,
   };
 }

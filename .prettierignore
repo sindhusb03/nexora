@@ -7,3 +7,5 @@ test-results
 playwright-report
 pnpm-lock.yaml
 *.tsbuildinfo
+apps/api/test/fixtures/corpus/**/*.xlsx
+apps/api/test/fixtures/corpus/**/*.pdf

@@ -1,5 +1,7 @@
 import type { CashFlowClass, ReportClass, Role } from "@nexora/kernel";
 
+import type { createIngestionStore } from "./ingestion-store.js";
+
 export interface TenantRecord {
   readonly tenantId: string;
   readonly name: string;
@@ -13,6 +15,17 @@ export interface EntityRecord {
   readonly tenantId: string;
   readonly legalName: string;
   readonly functionalCurrency: string;
+  readonly fiscalYearEndMonth: number | null;
+  readonly fiscalYearEndDay: number | null;
+  readonly retainedEarningsAccountId: string | null;
+}
+
+export interface LedgerPostSnapshot {
+  readonly accounts: readonly AccountRecord[];
+  readonly periods: readonly PeriodRecord[];
+  readonly journals: readonly JournalRecord[];
+  readonly fiscalYearEndMonth: number | null;
+  readonly fiscalYearEndDay: number | null;
   readonly retainedEarningsAccountId: string | null;
 }
 
@@ -107,6 +120,55 @@ export interface AuditWrite {
   readonly correlationId: string;
   readonly occurredAt: string;
   readonly payload: Record<string, unknown>;
+}
+
+export interface IngestionPostCommit {
+  readonly tenantId: string;
+  readonly entityId: string;
+  readonly jobId: string;
+  readonly currency: string;
+  readonly actorId: string;
+  readonly correlationId: string;
+  readonly occurredAt: string;
+  readonly canonicalHash: string;
+  readonly formulaVersion: string;
+  readonly inputHash: string;
+  readonly outputHash: string;
+  readonly netIncomeMinor: string;
+  readonly modelPayload: Record<string, unknown>;
+  readonly engineVersion: string;
+  readonly calculationRunId: string;
+  readonly lineageEdgeId: string;
+  readonly auditEventId: string;
+  readonly fault?: "after-first-journal" | "before-commit";
+  readonly accounts: readonly {
+    readonly accountId: string;
+    readonly code: string;
+    readonly name: string;
+    readonly report: ReportClass;
+    readonly cashFlow: CashFlowClass;
+    readonly retainedEarnings: boolean;
+  }[];
+  readonly periods: readonly {
+    readonly periodId: string;
+    readonly startDate: string;
+    readonly endDate: string;
+  }[];
+  readonly journals: readonly {
+    readonly journalId: string;
+    readonly periodId: string;
+    readonly idempotencyKey: string;
+    readonly payloadHash: string;
+    readonly sourceRef: string;
+    readonly domainEventId: string;
+    readonly lines: readonly {
+      readonly lineId: string;
+      readonly accountId: string;
+      readonly lineNo: number;
+      readonly debitMinor: string;
+      readonly creditMinor: string;
+    }[];
+  }[];
 }
 
 export interface AuthUserRecord {
@@ -273,7 +335,9 @@ export interface IdentityStore {
   ping(): Promise<void>;
 }
 
-export interface LedgerStore extends IdentityStore {
+export type IngestionStore = ReturnType<typeof createIngestionStore>;
+
+export interface LedgerStore extends IdentityStore, IngestionStore {
   createTenant(input: {
     tenant: TenantRecord;
     ownerActorId: string;
@@ -320,6 +384,14 @@ export interface LedgerStore extends IdentityStore {
     audit: AuditWrite;
     domainEventId: string;
   }): Promise<JournalRecord>;
+  commitIngestionPost(
+    input: IngestionPostCommit,
+  ): Promise<{ readonly journalIds: readonly string[] }>;
+  runLockedIngestionPost<T>(
+    tenantId: string,
+    entityId: string,
+    fn: (snapshot: LedgerPostSnapshot) => Promise<T>,
+  ): Promise<T>;
   listPostedActivity(tenantId: string, entityId: string): Promise<readonly PostedActivityLine[]>;
   listAudit(tenantId: string): Promise<readonly AuditRecord[]>;
   insertCalculationRun(input: {

@@ -5,6 +5,10 @@ import { isPrintedAmount, printedAmountToDecimal } from "./decimal-text.js";
 export interface PdfTextItem {
   readonly x: number;
   readonly text: string;
+  readonly y?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly page?: number;
 }
 
 export interface PdfLine {
@@ -38,7 +42,7 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
   for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
     const page = await pdf.getPage(pageNo);
     const content = await page.getTextContent();
-    const items: { x: number; y: number; text: string }[] = [];
+    const items: { x: number; y: number; text: string; width: number; height: number }[] = [];
     for (const item of content.items) {
       if (!("str" in item)) continue;
       const text = item.str.replace(/\s+/g, " ").trim();
@@ -46,7 +50,9 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
       const x = item.transform[4];
       const y = item.transform[5];
       if (typeof x !== "number" || typeof y !== "number") continue;
-      items.push({ x, y, text });
+      const width = "width" in item && typeof item.width === "number" ? item.width : 0;
+      const height = "height" in item && typeof item.height === "number" ? item.height : 0;
+      items.push({ x, y, text, width, height });
     }
     textItems += items.length;
     items.sort((a, b) => b.y - a.y || a.x - b.x);
@@ -61,7 +67,13 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
           });
         current = { y: item.y, items: [] };
       }
-      current.items.push({ x: item.x, text: item.text });
+      current.items.push({
+        x: item.x,
+        y: item.y,
+        text: item.text,
+        width: item.width,
+        height: item.height,
+      });
     }
     if (current)
       lines.push({ page: pageNo, y: current.y, items: current.items.sort((a, b) => a.x - b.x) });
