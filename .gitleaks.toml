@@ -13,4 +13,5 @@ regexes = [
   '''ci-api-password''',
   '''correct horse battery staple''',
   '''replace-with-at-least-32-characters''',
+  '''8f0c0c4e-1b2a-4d5e-9c3a-0a1b2c3d4e5f''',
 ]
