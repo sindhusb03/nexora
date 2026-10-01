@@ -44,7 +44,7 @@ Force-push only on the feature branch, and only before review has started or aft
 
 ## CI
 
-Workflow: `.github/workflows/ci.yml`. Jobs: `verify`, `postgres-runtime`, `docker-images`, `financial-attestation`, `playwright`, `audit`, `secrets`.
+Workflow: `.github/workflows/ci.yml`. Jobs: `verify`, `postgres-runtime`, `docker-images`, `playwright`, `audit`, `secrets`. `.github/workflows/financial-attestation.yml` runs the `financial-attestation` check on pull request open, edit, synchronize and reopen, and skips pull requests opened and pushed by Dependabot.
 
 Node.js 22 and the `packageManager` pin in the root `package.json` are the CI runtime. A PR that changes dependencies must include `pnpm-lock.yaml`.
 
