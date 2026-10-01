@@ -267,6 +267,19 @@ export interface IdentityStore {
     createdAt: string;
     expiresAt: string;
   }): Promise<string | null>;
+  /** Atomically count a request, create its link, and record its audit under auth RLS. */
+  requestMagicLink(
+    input: {
+      subjectHash: string;
+      email: string;
+      tokenHash: string;
+      createdAt: string;
+      expiresAt: string;
+      eventId: string;
+      requestId: string;
+    },
+    updateLockout: (current: LockoutRecord | null) => LockoutRecord,
+  ): Promise<string | null>;
   consumeMagicLink(tokenHash: string, usedAt: string): Promise<string | null>;
   saveTotp(input: {
     actorId: string;
