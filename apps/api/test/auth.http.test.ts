@@ -450,7 +450,7 @@ describe("configuration", () => {
     const config = loadConfig({});
     expect(config.databaseUrl).toBeNull();
     expect(config.auth.devHeaders).toBe(false);
-    expect(config.auth.allowSignup).toBe(true);
+    expect(config.auth.allowSignup).toBe(false);
     expect(config.auth.secret.length).toBeGreaterThanOrEqual(32);
     expect(config.warnings.some((warning) => warning.includes("AUTH_SECRET"))).toBe(true);
   });
