@@ -266,6 +266,7 @@ export interface PlatformView {
   }[];
   readonly flags: readonly {
     readonly id: string;
+    readonly tenantId: string;
     readonly key: string;
     readonly label: string;
     readonly enabled: boolean;

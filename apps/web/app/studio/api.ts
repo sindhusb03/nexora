@@ -328,10 +328,15 @@ export async function setTenantStatus(
   return body;
 }
 
-export async function setFlag(csrf: string, id: string, enabled: boolean): Promise<PlatformView> {
+export async function setFlag(
+  csrf: string,
+  id: string,
+  tenantId: string,
+  enabled: boolean,
+): Promise<PlatformView> {
   const body = await request(
     `/v1/admin/flags/${id}`,
-    { method: "POST", body: JSON.stringify({ enabled }) },
+    { method: "POST", body: JSON.stringify({ enabled, tenantId }) },
     csrf,
   );
   if (!isPlatform(body)) throw new ApiFailure(500, "The flag update was not readable");
