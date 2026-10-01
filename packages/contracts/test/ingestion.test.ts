@@ -301,6 +301,81 @@ describe("resolution transitions", () => {
 });
 
 describe("bulk accept", () => {
+  it.each(["expected", "actual", "diff"] as const)(
+    "rejects accept and bulk accept for a header with non-null %s, including zero",
+    (field) => {
+      const header = exception({
+        type: "header_as_value",
+        severity: "info",
+        confidence: "0.9900",
+        values: { expected: null, actual: null, diff: null, currency: "USD", [field]: "0" },
+      });
+      const before = structuredClone(header);
+      const result = resolveException(header, request(), "sindhu", at);
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          code: "HEADER_VALUE_NOT_ACCEPTABLE",
+          message: expect.any(String),
+          details: { httpStatus: 422 },
+        },
+      });
+      expect(isBulkCandidate(header)).toBe(false);
+      expect(
+        bulkAcceptExceptions(
+          [header],
+          {
+            jobId: header.jobId,
+            exceptionIds: [header.id],
+            note: null,
+            idempotencyKey: "header-bulk",
+          },
+          "sindhu",
+          at,
+        ),
+      ).toMatchObject({ ok: false, error: { code: "INGESTION_BULK_REJECTED" } });
+      expect(header).toEqual(before);
+    },
+  );
+
+  it.each([
+    ["header_as_value", "0.9900", "100"],
+    ["low_confidence_extraction", "0.9900", null],
+    ["missing_period", "0.8999", null],
+  ] as const)("rejects a mixed bulk set atomically for %s at %s", (type, confidence, actual) => {
+    const eligible = exception({
+      id: "eligible",
+      type: "header_as_value",
+      severity: "info",
+      confidence: "0.9000",
+      values: { expected: null, actual: null, diff: null, currency: "USD" },
+    });
+    const excluded = {
+      ...eligible,
+      id: "excluded",
+      type,
+      confidence,
+      values: { ...eligible.values, actual },
+    };
+    const items = [eligible, excluded];
+    const before = structuredClone(items);
+    expect(isBulkCandidate(eligible)).toBe(true);
+    expect(
+      bulkAcceptExceptions(
+        items,
+        {
+          jobId: eligible.jobId,
+          exceptionIds: items.map((item) => item.id),
+          note: null,
+          idempotencyKey: "mixed-bulk",
+        },
+        "sindhu",
+        at,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "INGESTION_BULK_REJECTED" } });
+    expect(items).toEqual(before);
+  });
+
   const advisory = exception({
     id: "ex_header",
     type: "header_as_value",
