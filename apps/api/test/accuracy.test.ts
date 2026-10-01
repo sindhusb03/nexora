@@ -571,7 +571,7 @@ function heldOut(): HeldDoc[] {
         ["Date,Description,Amount,Balance", "01/02/2024,Payment,10.00,100.00"].join("\n"),
       ),
       cells: [],
-      issues: ["ambiguous_date"],
+      issues: ["ambiguous_date", "balance_mismatch"],
     },
     {
       id: "zero",

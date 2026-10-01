@@ -1,5 +1,8 @@
 import { parseMoneyToken, statementAmountToDecimal } from "./decimal-text.js";
 import type { PdfLine, PdfText } from "./bank-pdf.js";
+import { explicitYearEnd, parseLooseDate } from "./period.js";
+import { parseStatementSheet } from "./statement-xlsx.js";
+import type { SheetCell } from "./xlsx.js";
 import type {
   StatementLine,
   StatementPeriod,
@@ -7,9 +10,6 @@ import type {
   StatementType,
   StatementWorkbook,
 } from "./statement-xlsx.js";
-
-const DATE_TEXT =
-  /\b(\d{1,2} de [A-Za-zÁÉÍÓÚáéíóú]+ de \d{4}|\d{1,2} [A-Za-z]+ \d{4}|[A-Za-z]+ \d{1,2}, \d{4})\b/;
 
 /**
  * Reads statement pages from PDF text. Amounts stay the printed decimal strings.
@@ -82,10 +82,17 @@ function sectionToSheet(
 ):
   | { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] }
   | { reason: string; droppedAmounts?: readonly { raw: string; page: number | null }[] } {
-  const dated =
-    [...section.preamble, ...section.lines.slice(0, 8).map(lineText)]
-      .map(findDate)
-      .find((date) => date !== null) ?? null;
+  const anchored = headerAnchoredSheet(section);
+  if (anchored) return anchored;
+  const end = explicitYearEnd(
+    [section.title, ...section.preamble, ...section.lines.slice(0, 8).map(lineText)].join("\n"),
+  );
+  const titleDate = section.lines[0] ? lineText(section.lines[0]) : "";
+  const dated = end
+    ? `${end.year}-${String(end.month).padStart(2, "0")}-${String(end.day).padStart(2, "0")}`
+    : parseLooseDate(titleDate)
+      ? titleDate
+      : null;
   const split = section.lines.map(splitLine);
   const amountXs = split.flatMap((line) => line.amounts.map((amount) => amount.x));
   const centers = cluster(amountXs);
@@ -150,6 +157,62 @@ function sectionToSheet(
     },
     droppedAmounts: split.flatMap((line) => line.dropped),
   };
+}
+
+/** Use dated header geometry before inferring columns from printed amounts.
+ * This admits integer text only within a known financial column, excludes note
+ * numbers, and preserves split text runs instead of choosing the last token.
+ */
+function headerAnchoredSheet(
+  section: Section,
+): { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] } | null {
+  const headerIndex = section.lines.findIndex((line) =>
+    line.items.some(
+      (i) => /^(?:19|20)\d{2}$/.test(i.text.trim()) || parseLooseDate(i.text) !== null,
+    ),
+  );
+  if (headerIndex < 0) return null;
+  const header = section.lines[headerIndex]!;
+  const anchors = header.items
+    .filter(
+      (i) =>
+        /^(?:19|20)\d{2}$/.test(i.text.trim()) ||
+        parseLooseDate(i.text) !== null ||
+        /^notes?$/i.test(i.text.trim()),
+    )
+    .sort((a, b) => a.x - b.x);
+  if (!anchors.length) return null;
+  const cells: SheetCell[] = [];
+  for (const [index, line] of section.lines.slice(headerIndex).entries()) {
+    const groups = new Map<number, string[]>();
+    for (const item of line.items) {
+      let col = 1;
+      let distance = 55;
+      anchors.forEach((anchor, i) => {
+        const gap = Math.min(
+          Math.abs(item.x - anchor.x),
+          Math.abs(item.x + (item.width ?? 0) - anchor.x - (anchor.width ?? 0)),
+        );
+        if (gap < distance) {
+          distance = gap;
+          col = i + 2;
+        }
+      });
+      const group = groups.get(col) ?? [];
+      group.push(item.text);
+      groups.set(col, group);
+    }
+    for (const [col, runs] of groups)
+      cells.push({
+        row: index + 1,
+        col,
+        text: runs.join(" ").trim(),
+        kind: "string",
+        formula: false,
+      });
+  }
+  const sheet = parseStatementSheet({ name: section.title, cells }, section.title);
+  return "reason" in sheet ? null : { sheet, droppedAmounts: [...sheet.droppedAmounts] };
 }
 
 function columnLabel(
@@ -256,10 +319,6 @@ function lineText(line: PdfLine): string {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function findDate(text: string): string | null {
-  return DATE_TEXT.exec(text)?.[1] ?? null;
 }
 
 function cluster(xs: readonly number[]): number[] {

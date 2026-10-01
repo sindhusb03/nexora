@@ -160,7 +160,7 @@ describe("layout-agnostic extraction", () => {
     expect(mixed.issues.some((issue) => issue.code === "confirm_period_end")).toBe(true);
   });
 
-  it("posts a quarter as three months and sends a bare FY label to review", async () => {
+  it("sends interim periods and bare FY labels to review", async () => {
     expect(statementSpan("Three Months Ended March 31,\n")).toBe(3);
     expect(statementSpan("Year to date\n")).toBe(-1);
     expect(
@@ -171,12 +171,8 @@ describe("layout-agnostic extraction", () => {
       "Three Months Ended March 31,\nAccount,2026,2025\nRevenue,10.00,8.00\n",
       { month: 12, day: 31 },
     );
-    expect(quarter.cells.map((cell) => cell.periodEnd).sort()).toEqual([
-      "2025-03-31",
-      "2026-03-31",
-    ]);
-    expect(quarter.cells.every((cell) => cell.spanMonths === 3)).toBe(true);
-    expect(quarter.cells.some((cell) => cell.periodEnd.endsWith("-12-31"))).toBe(false);
+    expect(quarter.cells).toEqual([]);
+    expect(quarter.issues.some((issue) => issue.code === "confirm_period_end")).toBe(true);
 
     const fy = await csv("balance-sheet.csv", "Account,FY25\nCash,10.00\n");
     expect(fy.cells).toEqual([]);
@@ -219,7 +215,7 @@ describe("layout-agnostic extraction", () => {
       ),
     );
     expect(tally.cells.find((cell) => cell.label === "Sales Accounts")).toMatchObject({
-      amount: "1000",
+      amount: "-1000",
       periodEnd: "2025-03-31",
     });
 

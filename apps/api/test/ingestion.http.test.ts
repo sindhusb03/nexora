@@ -250,7 +250,7 @@ describe("comparative period posting", () => {
 
 describe("production mapping proposer", () => {
   it("does not trust a confidence marker embedded in the upload", async () => {
-    const app = await testApp({ production: true });
+    const app = await testApp({ production: true, passwordCost: 19456 });
     await sessions(app).register("platform-admin", "owner-1");
     const tenant = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
@@ -597,6 +597,126 @@ function nextYearWorkbook(): Uint8Array {
 function postingWorkbook(): Uint8Array {
   return packageWorkbook("31 December");
 }
+
+describe("new adversarial complete packages never auto-post ambiguity", () => {
+  let app: TestApp;
+  beforeAll(async () => {
+    app = await testApp();
+  });
+  const cases = [
+    "YTD",
+    "Q3",
+    "Half-year",
+    "Nine-months ended",
+    "Six months ended",
+    "Three months ended",
+    "conflict",
+    "FY",
+    "qualifier-current",
+    "qualifier-units",
+    "qualifier-brackets",
+    "qualifier-net",
+    "bank-mismatch",
+  ];
+  it.each(cases)("blocks %s with no journals or periods", async (variant) => {
+    const { tenantId, entityId } = await tenantEntity(app, variant, {});
+    const header = variant === "FY" ? "FY25" : "Year ended 31 December 2025";
+    const qualifier = variant.startsWith("qualifier")
+      ? ({
+          "qualifier-current": " current",
+          "qualifier-units": " (units)",
+          "qualifier-brackets": " [deferred]",
+          "qualifier-net": " (net of returns)",
+        }[variant] ?? "")
+      : "";
+    const preamble =
+      variant === "conflict"
+        ? "As at 30 June 2025"
+        : cases.slice(0, 6).includes(variant)
+          ? variant
+          : "Financial statements USD";
+    const bs = [
+      [preamble],
+      ["Account", "Year ended 31 December 2024", header],
+      ["Cash", "2600", "2940"],
+      ["Accounts payable", "600", "600"],
+      ["Retained earnings", "2000", "2340"],
+    ];
+    const income = [
+      [preamble],
+      ["Account", header],
+      [`Revenue${qualifier}`, "780"],
+      ["Operating expenses", "440"],
+    ];
+    const sheets = [
+      { name: "Balance Sheet", rows: bs },
+      { name: "Income Statement", rows: income },
+    ];
+    if (variant === "bank-mismatch")
+      sheets.push({
+        name: "Bank",
+        rows: [
+          ["USD"],
+          ["Date", "Description", "Amount", "Balance"],
+          ["2025-01-01", "Opening balance", "", "2600"],
+          ["2025-12-31", "Receipt", "340", "2940"],
+          ["2025-12-31", "Closing balance", "", "2941"],
+        ],
+      });
+    const bytes = writeXlsx(
+      sheets.map(({ name, rows }) => ({
+        name,
+        cells: rows.flatMap((r, i) =>
+          r.map((value, j) => ({ row: i + 1, col: j + 1, value, kind: "string" as const })),
+        ),
+      })),
+    );
+    const response = await uploadBytes(app, tenantId, entityId, variant, bytes);
+    expect(response.status).toBe(201);
+    const job = (await response.json()) as { status: string; counts: { exceptionsError: number } };
+    expect(job.status).toBe("needs_review");
+    expect(job.counts.exceptionsError).toBeGreaterThan(0);
+    expect(await journalCount(app, tenantId, entityId)).toBe(0);
+    expect(await periodEnds(app, tenantId, entityId)).toEqual([]);
+  });
+  it("posts the new control's exact annual periods despite report metadata", async () => {
+    const { tenantId, entityId } = await tenantEntity(app, "Date metadata control", {});
+    const rows = [
+      ["Report generated: as of 16 February 2026"],
+      ["Year ended 30 September 2025"],
+      ["Account", "2024", "2025"],
+      ["Cash", "2600", "2940"],
+      ["Accounts payable", "600", "600"],
+      ["Retained earnings", "2000", "2340"],
+    ];
+    const income = [
+      ["Run at: as of 16 February 2026"],
+      ["Year ended 30 September 2025"],
+      ["Account", "2025"],
+      ["Revenue", "780"],
+      ["Operating expenses", "440"],
+    ];
+    const bytes = writeXlsx(
+      [
+        { name: "Balance Sheet", rows },
+        { name: "Income Statement", rows: income },
+      ].map(({ name, rows: grid }) => ({
+        name,
+        cells: grid.flatMap((r, i) =>
+          r.map((value, j) => ({ row: i + 1, col: j + 1, value, kind: "string" as const })),
+        ),
+      })),
+    );
+    const response = await uploadBytes(app, tenantId, entityId, "new-control", bytes);
+    expect(response.status).toBe(201);
+    expect(((await response.json()) as { status: string }).status).toBe("posted");
+    expect((await periodEnds(app, tenantId, entityId)).sort()).toEqual([
+      "2024-09-30",
+      "2025-09-30",
+    ]);
+    expect(await journalCount(app, tenantId, entityId)).toBe(2);
+  });
+});
 
 async function uploadBytes(
   app: TestApp,

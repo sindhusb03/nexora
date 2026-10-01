@@ -345,7 +345,7 @@ async function revalidate(
     const confidence = "confidence" in proposal ? proposal.confidence : deterministic?.confidence;
     const accountCode = proposal.accountCode;
     const method = deterministic ? deterministic.method : "ai";
-    const accepted = mappingIsAutoAcceptable(confidence ?? "0");
+    const accepted = deterministic !== null && mappingIsAutoAcceptable(confidence ?? "0");
     const contra = deterministic?.contra === true || canonicalAccount(accountCode)?.contra === true;
     await store.updateExtractedValue({
       tenantId,
@@ -795,7 +795,10 @@ async function resolveLayout(
   return {
     ...parsed,
     cells,
-    issues: parsed.issues.filter((issue) => issue.code !== "layout_unresolved"),
+    // A proposal has not established provenance, scale or header semantics.
+    // Preserve the deterministic blocker; kernel arithmetic cannot validate
+    // whether an AI-proposed source value was actually printed in the file.
+    issues: parsed.issues,
   };
 }
 
@@ -887,6 +890,8 @@ export function decimalToMinor(
 ): string {
   let decimal = new AnalyticalDecimal(amount).mul(SCALE_FACTOR[scale]);
   if (contra && decimal.gt(0)) decimal = decimal.neg();
+  if (decimal.decimalPlaces() > currencyScale(currency))
+    throw new Error("Source amount has sub-minor precision; confirm before posting");
   return moneyFromDecimal(currency, decimal.toFixed(currencyScale(currency))).minor;
 }
 

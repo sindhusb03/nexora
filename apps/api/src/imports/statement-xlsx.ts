@@ -1,7 +1,12 @@
-import { canonicalAccount, mapLineLabel } from "@nexora/kernel";
+import {
+  AnalyticalDecimal,
+  canonicalAccount,
+  mapLineLabel,
+  mappingIsAutoAcceptable,
+} from "@nexora/kernel";
 
-import { excelNumberToDecimal, parseMoneyToken, trimBinaryNoise } from "./decimal-text.js";
-import { datedRangePhrase, explicitYearEnd } from "./period.js";
+import { excelNumberToDecimal, parseMoneyToken } from "./decimal-text.js";
+import { datedRangePhrase, explicitYearEnd, parseLooseDate } from "./period.js";
 import type { SheetCell, Worksheet } from "./xlsx.js";
 
 export type StatementType = "income_statement" | "balance_sheet" | "cash_flow" | "equity";
@@ -51,7 +56,7 @@ export interface StatementWorkbook {
 /** Excel's 1900 date system counts days from 1899-12-30. Serials in this range read as 1954–2119. */
 const SERIAL_MIN = 20_000;
 const SERIAL_MAX = 80_000;
-const MAX_HEADER_SCAN_ROWS = 25;
+const MAX_HEADER_SCAN_ROWS = 100;
 
 export function parseStatementWorkbook(
   sheets: readonly Worksheet[],
@@ -93,6 +98,13 @@ export function parseStatementSheet(
   let headerRow: number | null = null;
   let periods: StatementPeriod[] = [];
   for (const rowNo of rowNumbers.slice(0, MAX_HEADER_SCAN_ROWS)) {
+    const row = rows.get(rowNo) ?? [];
+    if (
+      /\b(?:print(?:ed)?|generated|run\s+(?:date|at)|report\s+date|prepared|downloaded)\b/i.test(
+        row.map((c) => c.text).join(" "),
+      )
+    )
+      continue;
     const candidates = (rows.get(rowNo) ?? []).filter(
       (cell) => cell.col >= 2 && !(cell.kind === "string" && cell.text.trim().length === 0),
     );
@@ -127,6 +139,8 @@ export function parseStatementSheet(
       reason: "No header row of period dates or period labels was found in the first 25 rows",
     };
   }
+  if (new Set(periods.map((p) => p.label)).size !== periods.length)
+    return { reason: "layout_unresolved" };
   const firstPeriodCol = Math.min(...periods.map((period) => period.col));
   const periodByCol = new Map(periods.map((period) => [period.col, period.label]));
   const annotationCols = new Set(
@@ -148,7 +162,13 @@ export function parseStatementSheet(
       .filter((cell) => cell.col >= firstPeriodCol)
       .map((cell) => cell.text.trim())
       .filter((text) => text.length > 0);
-    if (periodTexts.length > 0 && periodTexts.every((text) => /^(19|20)\d{2}$/.test(text)))
+    if (
+      periodTexts.length > 0 &&
+      periodTexts.every((text) => /^(19|20)\d{2}$/.test(text)) &&
+      cells
+        .filter((c) => c.col < firstPeriodCol)
+        .every((c) => !c.text.trim() || headerRole(c) === "label")
+    )
       continue;
     const label = cells
       .filter(
@@ -164,7 +184,7 @@ export function parseStatementSheet(
       const period = periodByCol.get(cell.col);
       if (period === undefined) continue;
       if (cell.kind === "string" && cell.text.trim().length === 0) continue;
-      const amount = statementCellAmount(cell.kind, cell.text);
+      const amount = statementCellAmount(cell.kind, cell.text, label);
       if (amount === null) {
         if (cell.kind === "string" && looksLikeMoney(cell.text)) {
           droppedAmounts.push({ raw: cell.text, page: null });
@@ -205,18 +225,37 @@ export function parseStatementSheet(
   };
 }
 
-function statementCellAmount(kind: SheetCell["kind"], text: string): string | null {
+function statementCellAmount(kind: SheetCell["kind"], text: string, label = ""): string | null {
+  const direction = /\s*(DR|CR)\s*$/i.exec(text);
+  if (direction) {
+    const debitNormal = accountDebitNormal(label);
+    const amount = parseMoneyToken(text.replace(/\s*(DR|CR)\s*$/i, ""));
+    if (debitNormal === null || amount === null || new AnalyticalDecimal(amount).isNegative())
+      return null;
+    return (direction[1]?.toUpperCase() === "DR") === debitNormal
+      ? amount
+      : new AnalyticalDecimal(amount).neg().toFixed();
+  }
   if (kind === "number") {
     const displayed = excelNumberToDecimal(text);
-    return displayed === null ? null : trimBinaryNoise(displayed);
+    return displayed;
   }
   return printedStatementAmount(text);
 }
 
+function accountDebitNormal(label: string): boolean | null {
+  const mapping = mapLineLabel(label);
+  if (!mapping || !mappingIsAutoAcceptable(mapping.confidence)) return null;
+  const account = canonicalAccount(mapping.accountCode);
+  if (!account || account.contra) return null;
+  return (
+    account.report === "asset" || account.report === "expense" || account.code === "distributions"
+  );
+}
+
 function printedStatementAmount(text: string): string | null {
   const trimmed = text.trim();
-  if (!/[(),.-]|\b(?:CR|DR)\b/i.test(trimmed)) return null;
-  if (/^(19|20)\d{2}$/.test(trimmed)) return null;
+  if (/^[-\u2013\u2014]$/.test(trimmed)) return "0";
   return parseMoneyToken(trimmed);
 }
 
@@ -290,7 +329,22 @@ function parseTallySheet(
       const debit = debitCol === undefined ? null : amountAt(row, debitCol);
       const credit = creditCol === undefined ? null : amountAt(row, creditCol);
       const single = amountCol === undefined ? null : amountAt(row, amountCol);
-      const amount = single ?? debit ?? credit;
+      let amount = single;
+      if (!amount && (debit || credit)) {
+        const debitNormal = accountDebitNormal(label);
+        if (debitNormal === null) {
+          droppedAmounts.push({
+            raw: `${label}: ${debit?.raw ?? ""} / ${credit?.raw ?? ""}`,
+            page: null,
+          });
+          continue;
+        }
+        const net = new AnalyticalDecimal(debit?.amount ?? "0").sub(credit?.amount ?? "0");
+        amount = {
+          amount: (debitNormal ? net : net.neg()).toFixed(),
+          raw: `${debit?.raw ?? ""} Dr / ${credit?.raw ?? ""} Cr`,
+        };
+      }
       if (label.length === 0 || !amount) continue;
       lines.push({
         sheetRow: dataRow,
@@ -413,13 +467,20 @@ function hasNumericAmount(rows: ReadonlyMap<number, SheetCell[]>): boolean {
 
 function periodLabel(cell: SheetCell): string | null {
   if (cell.kind === "number" && /^\d+$/.test(cell.text)) {
+    if (/^(19|20)\d{2}$/.test(cell.text)) return cell.text;
+    if (!cell.dateFormat) return null;
     const serial = Number.parseInt(cell.text, 10);
     if (serial < SERIAL_MIN || serial > SERIAL_MAX) return null;
-    return new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000).toISOString().slice(0, 10);
+    return new Date(
+      (cell.date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30)) + serial * 86_400_000,
+    )
+      .toISOString()
+      .slice(0, 10);
   }
   if (cell.kind === "string") {
     const text = cell.text.replace(/\s+/g, " ").trim();
     if (text.length === 0 || text.length > 48) return null;
+    if (parseLooseDate(text)) return text;
     if (/^(current month|year to date)( (this year|last year))?$/i.test(text)) return text;
     if (/^(this year|last year|ytd)$/i.test(text)) return text;
     if (/^(19|20)\d{2}$/.test(text)) return text;
@@ -439,9 +500,7 @@ function periodLabel(cell: SheetCell): string | null {
       return text;
     }
     if (
-      /^(FY|Q[1-4]|H[12]|[A-Za-z]{3,9})?[\s/-]*('?\d{2}|\d{4})([\s/-]*(Q[1-4]|[A-Za-z]{3,9}|\d{1,2}))?$/i.test(
-        text,
-      ) &&
+      /^(?:FY\s*(?:19|20)\d{2}|(?:Q[1-4]|H[12]|[A-Za-z]{3,9})[\s/-]+(?:19|20)\d{2})$/i.test(text) &&
       /\d/.test(text)
     )
       return text;

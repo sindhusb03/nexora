@@ -136,7 +136,17 @@ function stripCurrency(value: string): string {
 
 /** Full amount token. `1223456.78` stays intact; Indian and western grouping, brackets, and CR/DR are accepted. */
 export function parseMoneyToken(value: string): string | null {
-  const match = new RegExp(`^\\s*${MONEY_SOURCE}\\s*$`, "i").exec(stripCurrency(value));
+  let text = stripCurrency(value.normalize("NFKC").replace(/\u2212/g, "-")).trim();
+  // A decimal comma is unambiguous with two fractional digits. Three digits
+  // remain grouping; never remove an arbitrary comma as CSV previously did.
+  if (/\d,\d{2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+    if (/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+      text = text.replace(/\./g, "").replace(",", ".");
+    }
+  }
+  text = text.replace(/(\d)[ '\u2019](?=\d{3}(?:[ '\u2019.,)]|$))/g, "$1");
+  if (/^\(?-?\d+,\d{2}\)?$/.test(text)) text = text.replace(",", ".");
+  const match = new RegExp(`^\\s*${MONEY_SOURCE}\\s*$`, "i").exec(text);
   if (!match?.[1]) return null;
   return signedMoney(match[1], match[2] ?? null);
 }
@@ -144,7 +154,7 @@ export function parseMoneyToken(value: string): string | null {
 export function findMoneyTokens(text: string): { raw: string; amount: string }[] {
   const found: { raw: string; amount: string }[] = [];
   const pattern = new RegExp(
-    `(?<![\\w./-])(?:${CURRENCY_PREFIX}\\s*)?${MONEY_SOURCE}(?:\\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY))?(?![\\w/])`,
+    `(?<![\\w.,/-])(?:${CURRENCY_PREFIX}\\s*)?${MONEY_SOURCE}(?:\\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY))?(?![\\w/.,])`,
     "gi",
   );
   for (const match of text.matchAll(pattern)) {

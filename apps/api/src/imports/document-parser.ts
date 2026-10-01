@@ -13,6 +13,7 @@ import {
   normalizePeriod,
   periodDatesConflict,
   statementSpan,
+  parseLooseDate,
   type YearEnd,
 } from "./period.js";
 
@@ -104,12 +105,14 @@ export const xlsxDocumentParser: DocumentParser = {
   async parse({ fileName, bytes, yearEnd = null }) {
     const sheets = readWorkbook(bytes);
     const text = sheets.map(sheetText).join("\n");
-    const workbook = parseStatementWorkbook(sheets, fileName);
+    const statements = sheets.filter((s) => !looksLikeBank(sheetText(s)));
+    const workbook = parseStatementWorkbook(statements, fileName);
     const issues = workbookIssues(workbook);
     const cells = workbook.layoutUnresolved
       ? []
       : workbookToCells(workbook, sheets, [], text, yearEnd, issues);
     for (const sheet of sheets) {
+      if (!looksLikeBank(sheetText(sheet))) continue;
       const parsed = parseBankText(sheetText(sheet));
       if (parsed.bank) {
         cells.push(
@@ -258,7 +261,6 @@ function finish(
   const normalized = cells.map((cell) => ({
     ...cell,
     currency: cell.currency ?? currency,
-    scale: scale !== "units" ? scale : cell.scale,
   }));
   const recorded = [...issues];
   if (recorded.some((issue) => issue.code === "layout_unresolved")) {
@@ -338,22 +340,44 @@ function workbookToCells(
   const unresolved = new Set<string>();
   for (const sheet of workbook.sheets) {
     const source = sheets.find((candidate) => candidate.name === sheet.sheetName);
-    const text = [documentText, source ? sheetText(source) : ""]
-      .filter((part) => part.length > 0)
-      .join("\n");
+    const text = source
+      ? [sheetText(source), ...(sheets.length === 1 ? [documentText] : [])].join("\n")
+      : documentText;
     const scale = detectScale(text);
     const currency = detectCurrency(text);
-    const conflict = periodDatesConflict(text);
+    if (
+      detectedScales(text).length > 1 ||
+      /\bbillions?\b|\btrillions?\b|\bin hundreds\b|\bbn\b|万円|億円/i.test(text)
+    ) {
+      issues.push({
+        code: "layout_unresolved",
+        message: "Conflicting amount scales require confirmation",
+        raw: text.slice(0, 240),
+        page: null,
+      });
+      continue;
+    }
+    const titleEnd = explicitYearEnd(text);
+    const columnDates = sheet.periods.map((p) => parseLooseDate(p.label)).filter((d) => d !== null);
+    const conflict =
+      periodDatesConflict(text) ||
+      (titleEnd !== null &&
+        columnDates.some((d) => d.month !== titleEnd.month || d.day !== titleEnd.day));
     if (conflict) {
       unresolved.add("conflicting period ends");
     }
     const explicit = conflict ? null : explicitYearEnd(text);
+    const annualMonthDay = statementSpan(text) === 12 ? interimMonthDay(text) : null;
     const yearEnd = explicit
       ? { month: explicit.month, day: explicit.day }
       : conflict
         ? null
-        : orgYearEnd;
+        : (annualMonthDay ?? orgYearEnd);
     const span = statementSpan(text);
+    if (span !== null && span !== 12) {
+      unresolved.add("interim period requires confirmation");
+      continue;
+    }
     const interim = span !== null && span > 0 && span < 12 ? interimMonthDay(text) : null;
     const annual = !conflict && span === 12;
     sheet.lines.forEach((line, lineIndex) => {
@@ -366,7 +390,7 @@ function workbookToCells(
             ? interimColumnLabel(rawLabel, span, interim)
             : value.period;
         const period = conflict ? null : normalizePeriod(label, annual, false, yearEnd);
-        if (!period) {
+        if (!period || !parseLooseDate(period.periodEnd)) {
           if (rawLabel.length > 0) unresolved.add(rawLabel);
           return;
         }
@@ -382,7 +406,7 @@ function workbookToCells(
           page: located.page,
           sheet: sheet.sheetName,
           row: line.sheetRow,
-          col: valueIndex + 2,
+          col: sheet.periods.find((p) => p.label === value.period)?.col ?? valueIndex + 2,
           bbox: located.bbox,
           balanceKind: balanceKind(sheet, line, value.period),
           currency,
@@ -531,15 +555,35 @@ export function detectCurrency(text: string): string | null {
 }
 
 export function detectScale(text: string): AmountScale {
-  if (/crore/i.test(text)) return "crores";
-  if (/lakh/i.test(text)) return "lakhs";
-  if (/£\s*m\b|\$\s*m\b|\bmillion/i.test(text)) return "millions";
-  if (/in thousands|\b000s\b|'000|’000/i.test(text)) return "thousands";
-  return "units";
+  return detectedScales(text)[0] ?? "units";
+}
+
+function detectedScales(text: string): AmountScale[] {
+  const scales: AmountScale[] = [];
+  if (/crore/i.test(text)) scales.push("crores");
+  if (/lakh/i.test(text)) scales.push("lakhs");
+  if (/[£$€]\s*m\b|\bmillion|百万円/i.test(text)) scales.push("millions");
+  if (
+    /\bthousands?\b|\b000s\b|['’]000|千円|\(\s*(?:(?:USD|GBP|EUR|INR|SGD|AED|JPY|AUD)\s*)?000\s*\)/i.test(
+      text,
+    )
+  )
+    scales.push("thousands");
+  if (/amounts in units|figures in units/i.test(text)) scales.push("units");
+  return scales;
 }
 
 function sheetText(sheet: Worksheet): string {
-  return sheet.cells.map((cell) => cell.text).join("\n");
+  const rows = new Map<number, string[]>();
+  for (const cell of sheet.cells) {
+    const row = rows.get(cell.row) ?? [];
+    row[cell.col - 1] = cell.text;
+    rows.set(cell.row, row);
+  }
+  return [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, row]) => row.join("\t"))
+    .join("\n");
 }
 
 function stripCurrencyMarks(text: string): string {

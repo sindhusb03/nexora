@@ -25,7 +25,7 @@ const LABELS: readonly {
   { label: "Depreciation and amortisation", code: "depreciation", contra: false, auto: true },
   { label: "Share capital", code: "common_stock", contra: false, auto: true },
   { label: "Reserves and Surplus", code: "retained_earnings", contra: false, auto: true },
-  { label: "Borrowings", code: "long_term_debt", contra: false, auto: true },
+  { label: "Borrowings", code: "long_term_debt", contra: false, auto: false },
   { label: "Profit and Loss A/c", code: "retained_earnings", contra: false, auto: true },
   { label: "Checking", code: "cash", contra: false, auto: true },
   { label: "Purchases", code: "cogs", contra: false, auto: true },

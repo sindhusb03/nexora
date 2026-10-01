@@ -60,7 +60,9 @@ describe("extraction families dev set", () => {
         'Cash and cash equivalents,12,"1,50,000.00","1,20,000.00"',
       ].join("\n"),
     );
-    expect(schedule.cells.find((cell) => cell.periodEnd === "2025-03-31")?.amount).toBe("150000");
+    expect(schedule.cells.find((cell) => cell.periodEnd === "2025-03-31")?.amount).toBe(
+      "150000.00",
+    );
     expect(schedule.issues.some((issue) => issue.code === "layout_unresolved")).toBe(false);
 
     const multi = await csv(
@@ -71,9 +73,9 @@ describe("extraction families dev set", () => {
         'Inventories,"10.00","8.00"',
       ].join("\n"),
     );
-    expect(multi.cells.some((cell) => cell.label === "Inventories" && cell.amount === "10")).toBe(
-      true,
-    );
+    expect(
+      multi.cells.some((cell) => cell.label === "Inventories" && cell.amount === "10.00"),
+    ).toBe(true);
 
     const lakhs = await csv(
       "balance-sheet.csv",
@@ -85,7 +87,7 @@ describe("extraction families dev set", () => {
       ].join("\n"),
     );
     expect(lakhs.scale).toBe("lakhs");
-    expect(lakhs.cells[0]?.amount).toBe("123456");
+    expect(lakhs.cells[0]?.amount).toBe("123456.00");
 
     const ifrs = await csv(
       "balance-sheet.csv",
@@ -96,7 +98,7 @@ describe("extraction families dev set", () => {
       ].join("\n"),
     );
     expect(ifrs.cells.find((cell) => cell.periodEnd.startsWith("2025-12-31"))?.amount).toBe(
-      "-1000",
+      "-1000.00",
     );
 
     const thousands = await csv(

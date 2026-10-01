@@ -9,12 +9,11 @@ export function parseStatementCsv(text: string, fileName: string): StatementWork
     row.forEach((value, colIndex) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) return;
-      const numeric = csvNumber(trimmed);
       cells.push({
         row: rowIndex + 1,
         col: colIndex + 1,
-        kind: numeric === null ? "string" : "number",
-        text: numeric ?? trimmed,
+        kind: "string",
+        text: trimmed,
         formula: false,
       });
     });
@@ -22,15 +21,7 @@ export function parseStatementCsv(text: string, fileName: string): StatementWork
   return parseStatementWorkbook([{ name: fileName, cells }], fileName);
 }
 
-function csvNumber(value: string): string | null {
-  if (/^(19|20)\d{2}$/.test(value)) return null;
-  const negative = /^\(.*\)$/.test(value);
-  const body = value.replace(/[$,]/g, "").replace(/^\(|\)$/g, "");
-  if (!/^\d+(\.\d+)?$/.test(body)) return null;
-  return negative ? `-${body}` : body;
-}
-
-function parseGrid(text: string): string[][] {
+export function parseGrid(text: string): string[][] {
   const delimiter = detectDelimiter(text);
   const rows: string[][] = [];
   let row: string[] = [];
@@ -72,7 +63,13 @@ function parseGrid(text: string): string[][] {
 }
 
 function detectDelimiter(text: string): string {
-  const sample = text.split(/\r?\n/).slice(0, 8).join("\n");
+  const sample = text
+    .replace(/"(?:[^"]|"")*"/g, "")
+    .split(/\r?\n/)
+    .slice(0, 100)
+    .join("\n");
+  if (sample.includes("\t")) return "\t";
+  if (sample.includes(";")) return ";";
   const counts = [
     { mark: ",", count: sample.split(",").length },
     { mark: ";", count: sample.split(";").length },

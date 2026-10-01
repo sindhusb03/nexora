@@ -106,10 +106,8 @@ const SYNONYMS: Readonly<Record<string, string>> = {
   "reserves and surplus": "retained_earnings",
   "profit and loss account": "retained_earnings",
   "profit and loss a c": "retained_earnings",
-  borrowings: "long_term_debt",
   "long term borrowings": "long_term_debt",
   "short term borrowings": "short_term_debt",
-  "term loan": "long_term_debt",
   "income tax expense": "tax_expense",
   "current tax": "tax_expense",
   "net profit": "net_income",
@@ -219,7 +217,7 @@ export function normalizeLabel(label: string): string {
   return label
     .toLowerCase()
     .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
@@ -257,13 +255,10 @@ function baseMap(normalized: string): MappingHit | null {
  * current, net, total, units, and text in brackets, stay below auto-accept.
  */
 export function mapLineLabel(label: string): MappingHit | null {
+  if (/\[ai:/i.test(label)) return null;
   const full = mapNormalized(normalizeLabel(label));
-  if (!label.includes("[")) return full;
-  const bare = mapNormalized(normalizeLabel(label.replace(/\[[^\]]*\]/g, " ")));
-  if (!bare) return null;
-  if (!full || full.accountCode !== bare.accountCode || full.contra !== bare.contra) {
-    return full ? { ...full, confidence: REVIEW_CONFIDENCE, method: "regex" } : null;
-  }
+  if (full && /[%[\]()（）]/u.test(label))
+    return { ...full, confidence: REVIEW_CONFIDENCE, method: "regex" };
   return full;
 }
 
@@ -271,6 +266,8 @@ function mapNormalized(normalized: string): MappingHit | null {
   if (normalized.length === 0) return null;
   const role = statementRole(normalized);
   if (role === "heading") return null;
+  if (normalized === "borrowings" || normalized === "term loan")
+    return hit("long_term_debt", REVIEW_CONFIDENCE, "regex", role);
   const exact = EXACT[normalized];
   if (exact) return hit(exact, "1", "exact", role);
   const synonym = SYNONYMS[normalized];

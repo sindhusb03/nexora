@@ -51,7 +51,7 @@ export function normalizePeriod(
   periodEnd: string;
   spanMonths: number;
 } | null {
-  const text = label.replace(/\s+/g, " ").trim();
+  const text = normalizeDateText(label).replace(/\s+/g, " ").trim();
   const phrase =
     /^(?:(\d+|three|six|nine|twelve)\s+months?\s+ended|(?:for the )?year ended|as at|as of)\s+(.+)$/i.exec(
       text,
@@ -234,7 +234,7 @@ export function datedRangePhrase(text: string): string | null {
   if (!match?.[1] || !match[2]) return null;
   const start = parseLooseDate(match[1].replace(/[/-]/g, " "));
   const end = parseLooseDate(match[2].replace(/[/-]/g, " "));
-  if (!start || !end || start.day !== 1) return null;
+  if (!start || !end || start.day !== 1 || end.day !== lastDay(end.year, end.month)) return null;
   const span = (end.year - start.year) * 12 + (end.month - start.month) + 1;
   if (![3, 6, 9, 12].includes(span)) return null;
   const endText = `${end.day} ${MONTH_NAMES[end.month] ?? ""} ${end.year}`;
@@ -242,7 +242,16 @@ export function datedRangePhrase(text: string): string | null {
 }
 
 function headText(text: string): string {
-  return text.split(/\r?\n/).slice(0, 20).join("\n");
+  return text
+    .split(/\r?\n/)
+    .slice(0, 100)
+    .filter(
+      (line) =>
+        !/\b(?:print(?:ed)?|generated|run\s+(?:date|at)|report\s+date|prepared|downloaded)\b/i.test(
+          line,
+        ),
+    )
+    .join("\n");
 }
 
 /** Print, run, and generated dates are not the statement period. */
@@ -253,14 +262,14 @@ function isPrintPrefix(before: string): boolean {
 }
 
 function collectStatementDates(text: string): { dates: LooseDate[]; conflict: boolean } {
-  const head = headText(text);
+  const head = normalizeDateText(headText(text));
   const dates: LooseDate[] = [];
   const pattern =
-    /(?:(?:\d+|three|six|nine|twelve)\s+months?\s+ended|(?:for the )?year ended|as at|as of)\s+([^\n]{3,60})/gi;
+    /(?:(?:\d+|three|six|nine|twelve)\s+months?\s+ended|(?:for the )?year ended|as at|as of)\s+(\d{4}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?[\s-]+[A-Za-z]+[\s,-]+\d{4}|[A-Za-z]+\s+\d{1,2},?\s+\d{4}|\d{1,2}[./-]\d{1,2}[./-]\d{4})/gi;
   for (const match of head.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (isPrintPrefix(head.slice(Math.max(0, index - 48), index))) continue;
-    const raw = (match[1] ?? "").trim();
+    const raw = (match[1] ?? "").trim().replace(/"(?:[,;\t].*)?$/, "");
     const date = parseLooseDate(raw.replace(/[,;].*$/, "").trim()) ?? parseLooseDate(raw);
     if (!date) continue;
     const key = `${date.month}-${date.day}`;
@@ -286,9 +295,11 @@ export function periodDatesConflict(text: string): boolean {
 
 /** 3, 6, 9, or 12 when the header says so. -1 when lengths disagree or the span is YTD. */
 export function statementSpan(text: string): number | null {
-  const head = headText(text);
+  const head = headText(text).replace(/(three|six|nine|twelve|\d+)-months?/gi, "$1 months");
   const found = new Set<number>();
-  if (/\b(?:three|3)\s+months?\s+ended\b|\bquarters?\s+ended\b/i.test(head)) found.add(3);
+  for (const match of head.matchAll(/\b(\d+)\s+months?\s+ended\b/gi)) found.add(Number(match[1]));
+  if (/\b(?:one\s+)?month ended\b|\bmonthly\b/i.test(head)) found.add(1);
+  if (/\b(?:three|3)\s+months?\s+ended\b|\bquarters?\b|\bQ[1-4]\b/i.test(head)) found.add(3);
   if (/\b(?:six|6)\s+months?\s+ended\b|\bhalf[\s-]?years?\b/i.test(head)) found.add(6);
   if (/\b(?:nine|9)\s+months?\s+ended\b/i.test(head)) found.add(9);
   const annualHead = head.replace(/\bhalf[\s-]?years?\b/gi, " ");
@@ -305,7 +316,7 @@ export function statementSpan(text: string): number | null {
 
 /** Month and day from "three months ended March 31", even when the year is on the column. */
 export function interimMonthDay(text: string): { month: number; day: number } | null {
-  const match = /(?:months?\s+ended|quarter ended|half[\s-]?year ended)\s+([^\n]{3,40})/i.exec(
+  const match = /(?:months?\s+ended|quarter ended|(?:half[\s-]?)?year ended)\s+([^\n]{3,40})/i.exec(
     headText(text),
   );
   if (!match?.[1]) return null;
@@ -338,7 +349,20 @@ function parseMonthDay(text: string): { month: number; day: number } | null {
 }
 
 export function parseLooseDate(text: string): LooseDate | null {
-  const trimmed = text
+  const date = uncheckedDate(text);
+  if (
+    !date ||
+    date.month < 1 ||
+    date.month > 12 ||
+    date.day < 1 ||
+    date.day > lastDay(date.year, date.month)
+  )
+    return null;
+  return date;
+}
+
+function uncheckedDate(text: string): LooseDate | null {
+  const trimmed = normalizeDateText(text)
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[.)]$/, "")
@@ -374,6 +398,40 @@ export function parseLooseDate(text: string): LooseDate | null {
     return { year: Number(dayMon[3]), month, day: Number(dayMon[1]) };
   }
   return null;
+}
+
+/** Exact month names, not a jurisdiction-derived fiscal year end. */
+function normalizeDateText(text: string): string {
+  const months: Record<string, string> = {
+    janvier: "January",
+    fevrier: "February",
+    mars: "March",
+    avril: "April",
+    mai: "May",
+    juin: "June",
+    juillet: "July",
+    aout: "August",
+    septembre: "September",
+    octobre: "October",
+    novembre: "November",
+    decembre: "December",
+    januar: "January",
+    februar: "February",
+    marz: "March",
+    juni: "June",
+    juli: "July",
+    oktober: "October",
+    dezember: "December",
+  };
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b[a-z]+\b/gi, (word) => months[word.toLowerCase()] ?? word)
+    .replace(/(\d{1,2})\.\s+([A-Za-z]+)/g, "$1 $2")
+    .replace(
+      /(\d{4})年(\d{1,2})月(\d{1,2})日/g,
+      (_, y: string, m: string, d: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`,
+    );
 }
 
 function indianFiscal(startYear: number, endYear: number) {

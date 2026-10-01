@@ -154,7 +154,7 @@ function cell(
   text: string,
   formula = false,
 ): SheetCell {
-  return { row, col, kind, text, formula };
+  return { row, col, kind, text, formula, dateFormat: row === 1 && kind === "number" };
 }
 
 describe("statement sheets", () => {
@@ -227,13 +227,16 @@ function workbook(sheetName: string, rowsXml: string): string {
       '<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
     ),
     "xl/worksheets/sheet1.xml": strToU8(`<worksheet><sheetData>${rowsXml}</sheetData></worksheet>`),
+    "xl/styles.xml": strToU8(
+      '<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>',
+    ),
   });
   return Buffer.from(files).toString("base64");
 }
 
 const BALANCE_SHEET = workbook(
   "BS",
-  '<row r="1"><c r="B1"><v>45322</v></c><c r="C1"><v>45351</v></c></row>' +
+  '<row r="1"><c r="B1" s="1"><v>45322</v></c><c r="C1" s="1"><v>45351</v></c></row>' +
     '<row r="2"><c r="A2" t="inlineStr"><is><t>1000 · Cash</t></is></c><c r="B2"><v>100.5</v></c><c r="C2"><v>200.25</v></c></row>' +
     '<row r="3"><c r="A3" t="inlineStr"><is><t>Total Assets</t></is></c><c r="B3"><f>B2</f><v>100.5</v></c><c r="C3"><f>C2</f><v>200.25</v></c></row>',
 );
