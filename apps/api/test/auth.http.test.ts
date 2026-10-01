@@ -4,7 +4,15 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createApp, DEFAULT_HTTP, type AppOptions } from "../src/app.js";
 import { ConfigError, loadConfig } from "../src/config.js";
 import { jsonLogger, silentLogger } from "../src/observability.js";
-import { cookieFrom, json, sessions, TEST_PASSWORD, testAuth, type TestApp } from "./harness.js";
+import {
+  cookieFrom,
+  json,
+  sessions,
+  TEST_PASSWORD,
+  testAuth,
+  withTestStore,
+  type TestApp,
+} from "./harness.js";
 
 const OTHER_TENANT = "99999999-9999-4999-8999-999999999999";
 
@@ -14,7 +22,7 @@ describe("signed sessions", () => {
   let tenantId = "";
 
   function build(overrides: Partial<AppOptions> = {}): TestApp {
-    return createApp({
+    const app = createApp({
       store,
       platformAdminActorIds: ["platform-admin"],
       auth: testAuth(),
@@ -23,6 +31,7 @@ describe("signed sessions", () => {
       passwordCost: 1_024,
       ...overrides,
     });
+    return withTestStore(app, overrides.store ?? store);
   }
 
   beforeAll(async () => {
