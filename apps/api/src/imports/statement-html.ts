@@ -23,31 +23,19 @@ export function htmlToWorksheets(html: string): readonly Worksheet[] {
           .replace(/\s+/g, " ")
           .trim();
         if (text.length === 0) return;
-        const numeric = htmlNumber(text);
         cells.push({
           row: rowIndex + 1,
           col: colIndex + 1,
-          kind: numeric === null ? "string" : "number",
-          text: numeric ?? text,
+          // Printed HTML numbers have locale-dependent punctuation, unlike an
+          // XLSX numeric <v>. Keep their original text for document inference.
+          kind: "string",
+          text,
           formula: false,
         });
       });
     });
     return { name: `Table ${index + 1}`, cells };
   });
-}
-
-function htmlNumber(value: string): string | null {
-  if (/^(19|20)\d{2}$/.test(value)) return null;
-  const negative = /^\(.*\)$/.test(value) || /\bDR\b/i.test(value);
-  const body = value
-    .replace(/[$£€₹,]/g, "")
-    .replace(/[()]/g, "")
-    .replace(/\b(?:CR|DR)\b/gi, "")
-    .trim();
-  if (!/^-?\d+(\.\d+)?$/.test(body)) return null;
-  const unsigned = body.replace(/^-/, "");
-  return negative || body.startsWith("-") ? `-${unsigned}` : unsigned;
 }
 
 function decodeHtml(text: string): string {

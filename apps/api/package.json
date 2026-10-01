@@ -9,7 +9,8 @@
     "migrate": "tsx src/migrate.ts",
     "user:create": "tsx src/create-user.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run && vitest run --config vitest.accuracy.config.ts",
+    "test:accuracy": "vitest run --config vitest.accuracy.config.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.80",

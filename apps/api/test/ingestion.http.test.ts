@@ -5,6 +5,11 @@ import { ingestionJobSchema } from "@nexora/contracts";
 import { writeXlsx } from "../src/imports/xlsx-write.js";
 import { call, sessions, testApp, type TestApp } from "./harness.js";
 
+let sharedApp: Promise<TestApp> | undefined;
+function ingestionApp() {
+  return (sharedApp ??= testApp());
+}
+
 const unbalanced = [
   "Broken balance sheet,USD",
   "Year ended 31 December 2024",
@@ -22,7 +27,7 @@ describe("ingestion HTTP", () => {
   let otherTenantId = "";
 
   beforeAll(async () => {
-    app = await testApp();
+    app = await ingestionApp();
     await sessions(app).register("platform-admin", "owner-1", "owner-2");
     const tenant = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
@@ -171,7 +176,7 @@ describe("ingestion posting idempotency", () => {
   let entityId = "";
 
   beforeAll(async () => {
-    app = await testApp();
+    app = await ingestionApp();
     await sessions(app).register("platform-admin", "owner-1");
     const tenant = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
@@ -206,7 +211,7 @@ describe("ingestion posting idempotency", () => {
 
 describe("comparative period posting", () => {
   it("reconciles a comparative year instead of posting it again", async () => {
-    const app = await testApp();
+    const app = await ingestionApp();
     await sessions(app).register("platform-admin", "owner-1");
     const tenant = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
@@ -314,7 +319,7 @@ describe("production mapping proposer", () => {
 
 describe("fiscal year resolution", () => {
   it("posts a 30 June package into June periods", async () => {
-    const app = await testApp();
+    const app = await ingestionApp();
     const { tenantId, entityId } = await tenantEntity(app, "June Books", {});
     const uploaded = await uploadBytes(
       app,
@@ -331,7 +336,7 @@ describe("fiscal year resolution", () => {
   });
 
   it("blocks a bare year until the period end is confirmed", async () => {
-    const app = await testApp();
+    const app = await ingestionApp();
     const { tenantId, entityId } = await tenantEntity(app, "Bare Year", {});
     const uploaded = await uploadText(
       app,
@@ -358,7 +363,7 @@ describe("fiscal year resolution", () => {
   });
 
   it("uses the organisation fiscal year end for a year-only header", async () => {
-    const app = await testApp();
+    const app = await ingestionApp();
     const { tenantId, entityId } = await tenantEntity(app, "Org June", {
       fiscalYearEndMonth: 6,
       fiscalYearEndDay: 30,
@@ -373,7 +378,7 @@ describe("fiscal year resolution", () => {
   });
 
   it("blocks a period end that disagrees with the ledger or the organisation", async () => {
-    const app = await testApp();
+    const app = await ingestionApp();
     const { tenantId, entityId } = await tenantEntity(app, "December Books", {});
     const first = await uploadBytes(
       app,
@@ -601,7 +606,7 @@ function postingWorkbook(): Uint8Array {
 describe("new adversarial complete packages never auto-post ambiguity", () => {
   let app: TestApp;
   beforeAll(async () => {
-    app = await testApp();
+    app = await ingestionApp();
   });
   const cases = [
     "YTD",

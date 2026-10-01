@@ -22,6 +22,7 @@ describe("held-out extraction", () => {
       const parsed = await selectDocumentParser(doc.fileName, doc.bytes).parse({
         fileName: doc.fileName,
         bytes: doc.bytes,
+        functionalCurrency: doc.cells[0]?.currency ?? null,
       });
       const used = new Set<number>();
       let hits = 0;

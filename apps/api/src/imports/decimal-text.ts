@@ -135,8 +135,39 @@ function stripCurrency(value: string): string {
 }
 
 /** Full amount token. `1223456.78` stays intact; Indian and western grouping, brackets, and CR/DR are accepted. */
-export function parseMoneyToken(value: string): string | null {
+export type NumberConvention = "dot" | "comma" | "unknown" | "conflict";
+
+/** Infer once from amount cells, never from years, reference numbers, or currency alone. */
+export function numberConvention(values: readonly string[], context = ""): NumberConvention {
+  const evidence = new Set<"dot" | "comma">();
+  if (/\b(?:de-DE|de-AT|fr-FR|it-IT|es-ES|pt-PT|nl-NL)\b|Dezember|décembre/i.test(context))
+    evidence.add("comma");
+  if (/\b(?:en-US|en-GB|en-IN|en-AU|ja-JP)\b/i.test(context)) evidence.add("dot");
+  for (const raw of values) {
+    const token = stripCurrency(raw.normalize("NFKC")).replace(/[()\s+-]|CR|DR/gi, "");
+    if (/^\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?$/.test(token) || /^\d[\d.]*,\d{1,2}$/.test(token))
+      evidence.add("comma");
+    if (
+      /^\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?$/.test(token) ||
+      /^\d[\d,]*\.\d{1,2}$/.test(token) ||
+      /^\d+\.\d{4,}$/.test(token)
+    )
+      evidence.add("dot");
+    if (/^\d{1,3}(?:,\d{2})+,\d{3}(?:\.\d+)?$/.test(token)) evidence.add("dot");
+  }
+  return evidence.size > 1 ? "conflict" : ([...evidence][0] ?? "unknown");
+}
+
+export function parseMoneyToken(value: string, convention?: NumberConvention): string | null {
   let text = stripCurrency(value.normalize("NFKC").replace(/\u2212/g, "-")).trim();
+  text = text.replace(/(\d)[ '\u2019](?=\d{3}(?:[ '\u2019.,)]|$))/g, "$1");
+  if (convention === "conflict") return null;
+  if (convention === "unknown" && /\d[.,]\d{3}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
+  if (convention === "comma" || /\d{1,3}(?:\.\d{3}){2,}/.test(text)) {
+    if (!/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?(?:\)|-|\s*(?:CR|DR))?$/i.test(text))
+      return null;
+    text = text.replace(/\./g, "").replace(",", ".");
+  } else if (convention === "dot" && /,\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
   // A decimal comma is unambiguous with two fractional digits. Three digits
   // remain grouping; never remove an arbitrary comma as CSV previously did.
   if (/\d,\d{2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
@@ -144,7 +175,6 @@ export function parseMoneyToken(value: string): string | null {
       text = text.replace(/\./g, "").replace(",", ".");
     }
   }
-  text = text.replace(/(\d)[ '\u2019](?=\d{3}(?:[ '\u2019.,)]|$))/g, "$1");
   if (/^\(?-?\d+,\d{2}\)?$/.test(text)) text = text.replace(",", ".");
   const match = new RegExp(`^\\s*${MONEY_SOURCE}\\s*$`, "i").exec(text);
   if (!match?.[1]) return null;

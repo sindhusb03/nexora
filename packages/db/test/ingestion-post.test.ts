@@ -173,6 +173,43 @@ function commit(
 }
 
 describe("atomic ingestion post", () => {
+  it("reads committed ledger state inside the locked callback and isolates tenant and entity", async () => {
+    const store = await createPgliteStore();
+    const ids = await seed(store);
+    const other = await seed(store);
+    const payload = commit(ids);
+    // Queue a writer before the locked reader: the callback must see its committed state.
+    const writer = store.commitIngestionPost(payload);
+    const reader = store.runLockedIngestionPost(ids.tenantId, ids.entityId, async (snapshot) => {
+      expect(snapshot.journals.map((j) => j.journalId).sort()).toEqual(
+        payload.journals.map((j) => j.journalId).sort(),
+      );
+      expect(snapshot.periods.map((p) => p.periodId).sort()).toEqual(
+        payload.periods.map((p) => p.periodId).sort(),
+      );
+      expect(snapshot.accounts).toHaveLength(3);
+      expect(
+        snapshot.journals.flatMap((j) => j.lines).map((l) => [l.debitMinor, l.creditMinor]),
+      ).toEqual([
+        ["100", "0"],
+        ["0", "100"],
+        ["50", "0"],
+        ["0", "50"],
+      ]);
+      expect(snapshot.retainedEarningsAccountId).toBe(
+        payload.accounts.find((a) => a.retainedEarnings)?.accountId,
+      );
+      return { action: "observed" };
+    });
+    await writer;
+    expect(await reader).toEqual({ action: "observed" });
+    await store.runLockedIngestionPost(other.tenantId, other.entityId, async (snapshot) => {
+      expect(snapshot.journals).toEqual([]);
+      expect(snapshot.periods).toEqual([]);
+      expect(snapshot.accounts).toEqual([]);
+      return { action: "observed" };
+    });
+  });
   it("rolls back a mid-post fault and posts once on retry", async () => {
     const store = await createPgliteStore();
     const ids = await seed(store);

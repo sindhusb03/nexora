@@ -228,12 +228,22 @@ function spanCount(token: string | undefined): number {
  */
 export function datedRangePhrase(text: string): string | null {
   const match =
-    /(\d{1,2}\s*[-/]\s*[A-Za-z]{3,9}\s*[-/]\s*\d{4})\s+to\s+(\d{1,2}\s*[-/]\s*[A-Za-z]{3,9}\s*[-/]\s*\d{4})/i.exec(
+    /(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[-/]\s*(?:[A-Za-z]{3,9}|\d{1,2})\s*[-/]\s*\d{4})\s+to\s+(\d{4}-\d{2}-\d{2}|\d{1,2}\s*[-/]\s*(?:[A-Za-z]{3,9}|\d{1,2})\s*[-/]\s*\d{4})/i.exec(
       text,
     );
   if (!match?.[1] || !match[2]) return null;
-  const start = parseLooseDate(match[1].replace(/[/-]/g, " "));
-  const end = parseLooseDate(match[2].replace(/[/-]/g, " "));
+  const parts = [match[1], match[2]];
+  const numeric = parts.map((value) => /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(value));
+  const dmy = numeric.some((m) => m && Number(m[1]) > 12);
+  const mdy = numeric.some((m) => m && Number(m[2]) > 12);
+  if (dmy && mdy) return null;
+  const dates = parts.map((value, i) => {
+    const m = numeric[i];
+    if (!m) return parseLooseDate(value) ?? parseLooseDate(value.replace(/[/-]/g, " "));
+    if (!dmy && !mdy && m[1] !== m[2]) return null;
+    return parseLooseDate(`${m[3]}-${pad(Number(m[mdy ? 1 : 2]))}-${pad(Number(m[mdy ? 2 : 1]))}`);
+  });
+  const [start, end] = dates;
   if (!start || !end || start.day !== 1 || end.day !== lastDay(end.year, end.month)) return null;
   const span = (end.year - start.year) * 12 + (end.month - start.month) + 1;
   if (![3, 6, 9, 12].includes(span)) return null;

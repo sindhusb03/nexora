@@ -14,6 +14,7 @@ export interface SheetCell {
 export interface Worksheet {
   readonly name: string;
   readonly cells: readonly SheetCell[];
+  readonly merges?: readonly { row: number; col: number; endRow: number; endCol: number }[];
 }
 
 export class WorkbookError extends Error {
@@ -74,7 +75,15 @@ export function readWorkbook(bytes: Uint8Array): readonly Worksheet[] {
     const path = relId ? targets.get(relId) : undefined;
     const part = path ? files[path] : undefined;
     if (!part) continue;
-    sheets.push({ name, cells: readCells(strFromU8(part), strings, dateStyles, date1904) });
+    const xml = strFromU8(part);
+    const merges = [...xml.matchAll(/<mergeCell\b[^>]*\bref="([A-Z]+\d+):([A-Z]+\d+)"/g)].flatMap(
+      (m) => {
+        const start = parseRef(m[1]!);
+        const end = parseRef(m[2]!);
+        return start && end ? [{ ...start, endRow: end.row, endCol: end.col }] : [];
+      },
+    );
+    sheets.push({ name, cells: readCells(xml, strings, dateStyles, date1904), merges });
   }
   return sheets;
 }

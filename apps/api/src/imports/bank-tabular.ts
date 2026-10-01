@@ -1,6 +1,7 @@
 import { AnalyticalDecimal } from "@nexora/kernel";
 
-import { findMoneyTokens, parseMoneyToken } from "./decimal-text.js";
+import { findMoneyTokens, parseMoneyToken, numberConvention } from "./decimal-text.js";
+import { currencyEvidence } from "./currency.js";
 import type { PdfLine } from "./bank-pdf.js";
 import { parseGrid } from "./statement-csv.js";
 
@@ -97,13 +98,42 @@ function sourceFromText(text: string, row: number, page: number | null): SourceL
 }
 
 function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
+  // PDF text runs may split a single heading into "Withdrawal" and "(Dr)".
+  lines = lines.map((line) => {
+    const items: PdfLine["items"][number][] = [];
+    for (const item of line.items) {
+      if (!item.text.trim()) continue;
+      const previous = items.at(-1);
+      const gap = previous ? item.x - previous.x - (previous.width ?? 0) : Infinity;
+      const role = columnRole(item.text);
+      const priorRole = previous ? columnRole(previous.text) : "unknown";
+      if (
+        previous &&
+        gap >= 0 &&
+        gap <= 14 &&
+        previous.width !== undefined &&
+        ((role === priorRole && role !== "unknown" && role !== "note") ||
+          (priorRole === "unknown" && role !== "unknown" && role !== "note") ||
+          /^(?:date|\(?dr\)?|\(?cr\)?|out|in)$/i.test(item.text.trim())) &&
+        !findMoneyTokens(previous.text).length &&
+        !findMoneyTokens(item.text).length
+      ) {
+        items[items.length - 1] = {
+          ...previous,
+          text: `${previous.text} ${item.text}`,
+          width: item.x + (item.width ?? 0) - previous.x,
+        };
+      } else items.push(item);
+    }
+    return { ...line, items };
+  });
   const header = lines.find((line) =>
     isHeader(line.items.map((item) => item.text).filter((text) => text.trim().length > 0)),
   );
   if (!header) return lines.map((line, index) => sourceFromPdf(line, index + 1));
   const columns = header.items
     .filter((item) => item.text.trim().length > 0)
-    .map((item) => ({ x: item.x, text: item.text.trim() }));
+    .map((item) => ({ x: item.x, right: item.x + (item.width ?? 0), text: item.text.trim() }));
   return lines.map((line, index) => {
     const cells = columns.map(() => "");
     for (const item of line.items) {
@@ -112,13 +142,16 @@ function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
       let best = -1;
       let distance = 48;
       columns.forEach((column, columnIndex) => {
-        const gap = Math.abs(column.x - item.x);
+        const gap = Math.min(
+          Math.abs(column.x - item.x),
+          Math.abs(column.right - item.x - (item.width ?? 0)),
+        );
         if (gap < distance) {
           distance = gap;
           best = columnIndex;
         }
       });
-      if (best >= 0) cells[best] = text;
+      if (best >= 0) cells[best] = [cells[best], text].filter(Boolean).join(" ");
     }
     return {
       page: line.page ?? null,
@@ -181,7 +214,7 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
   const header = lines[headerIndex]?.cells ?? [];
   const roles = header.map(columnRole);
   if (
-    ["amount", "debit", "credit", "balance", "sign"].some(
+    ["amount", "debit", "credit", "balance", "sign", "fee", "posting_date", "value_date"].some(
       (r) => roles.filter((role) => role === r).length > 1,
     )
   ) {
@@ -197,20 +230,52 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
       ],
     };
   }
-  const hasDate = roles.includes("date") || roles.includes("value_date");
+  const hasDate = roles.some((r) => r === "date" || r === "value_date" || r === "posting_date");
   const hasFlow = roles.includes("debit") || roles.includes("credit") || roles.includes("amount");
   const classified = roles.map((role) =>
     role === "unknown" && hasDate && hasFlow ? "note" : role,
   );
-  const postingDate = classified.findIndex((role) => role === "date");
+  const postingDate = classified.findIndex((role) => role === "posting_date");
   const valueDate = classified.findIndex((role) => role === "value_date");
-  const dateCol = postingDate >= 0 ? postingDate : valueDate;
+  const genericDate = classified.findIndex((role) => role === "date");
+  const dateCol = postingDate >= 0 ? postingDate : valueDate >= 0 ? valueDate : genericDate;
   const narrationCol = classified.findIndex((role) => role === "narration");
   const withdrawalCol = classified.findIndex((role) => role === "debit");
   const depositCol = classified.findIndex((role) => role === "credit");
   const amountCol = classified.findIndex((role) => role === "amount");
   const balanceCol = classified.findIndex((role) => role === "balance");
   const signCol = classified.findIndex((role) => role === "sign");
+  const feeCol = classified.findIndex((role) => role === "fee");
+  const currencyCol = classified.findIndex((role) => role === "currency");
+  const accountCurrency = currencyOf(text);
+  const rowCurrencies =
+    currencyCol < 0
+      ? []
+      : lines
+          .slice(headerIndex + 1)
+          .filter((line) => !isHeader(line.cells))
+          .map((line) => line.cells[currencyCol]?.trim() ?? "")
+          .filter(Boolean);
+  const currencies = new Set(rowCurrencies.map((raw) => currencyEvidence(raw).currency));
+  if (accountCurrency) currencies.add(accountCurrency);
+  if (
+    currencies.size > 1 ||
+    currencies.has(null) ||
+    rowCurrencies.some((raw) => currencyEvidence(raw).conflict)
+  ) {
+    return {
+      bank: null,
+      issues: [
+        {
+          code: "layout_unresolved",
+          message: "Account and row currencies conflict or are unresolved",
+          raw: rowCurrencies.join(" | "),
+          page: null,
+        },
+      ],
+    };
+  }
+  const currency = [...currencies][0] ?? accountCurrency;
   if (dateCol < 0 || (amountCol < 0 && withdrawalCol < 0 && depositCol < 0)) {
     if (roles.some((role) => role === "unknown")) {
       return {
@@ -233,6 +298,35 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
     .filter((token) => token.length > 0);
   const locale = inferDateLocale(dateTokens);
   const issues: BankIssue[] = [];
+  const moneyCols = roles.flatMap((role, index) =>
+    ["amount", "debit", "credit", "balance", "fee"].includes(role) ? [index] : [],
+  );
+  const tokens = lines
+    .slice(headerIndex + 1)
+    .filter((line) => !isHeader(line.cells))
+    .flatMap((line) => moneyCols.map((col) => line.cells[col] ?? ""))
+    .filter((t) => t.trim() && !/^[-–—]$/.test(t));
+  const convention = numberConvention(
+    tokens,
+    lines
+      .slice(0, headerIndex)
+      .map((l) => l.text)
+      .join("\n"),
+  );
+  if (convention === "conflict" || tokens.some((t) => parseMoneyToken(t, convention) === null)) {
+    return {
+      bank: null,
+      issues: [
+        {
+          code: "layout_unresolved",
+          message: "Bank number convention or amount is unresolved",
+          raw: tokens.join(" | "),
+          page: null,
+        },
+      ],
+    };
+  }
+  const money = (raw: string) => parseMoneyToken(raw, convention);
   const transactions: TabularBankTransaction[] = [];
   let opening: string | null = null;
   let closing: string | null = null;
@@ -246,6 +340,7 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
   let running: InstanceType<typeof AnalyticalDecimal> | null = null;
   let balanceBroken = false;
   for (const line of lines.slice(headerIndex + 1)) {
+    if (isHeader(line.cells)) continue;
     const cells = line.cells;
     const dateToken = cells[dateCol]?.trim() ?? "";
     const narration = (cells[narrationCol] ?? "").trim();
@@ -260,13 +355,29 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
       });
       continue;
     }
-    const balance = balanceCol >= 0 ? moneyCell(cells[balanceCol] ?? "") : null;
-    const withdrawal = withdrawalCol >= 0 ? moneyCell(cells[withdrawalCol] ?? "") : null;
-    const deposit = depositCol >= 0 ? moneyCell(cells[depositCol] ?? "") : null;
+    const balance = balanceCol >= 0 ? money(cells[balanceCol] ?? "") : null;
+    const withdrawal = withdrawalCol >= 0 ? money(cells[withdrawalCol] ?? "") : null;
+    const deposit = depositCol >= 0 ? money(cells[depositCol] ?? "") : null;
     const unsigned =
-      amountCol >= 0 ? moneyCell(cells[amountCol] ?? "") : signedFlow(withdrawal, deposit);
-    const amount = unsigned && signCol >= 0 ? applyDrCr(unsigned, cells[signCol] ?? "") : unsigned;
-    if (/opening|beginning/i.test(narration) && balance) {
+      amountCol >= 0 ? money(cells[amountCol] ?? "") : signedFlow(withdrawal, deposit);
+    let amount = unsigned && signCol >= 0 ? applyDrCr(unsigned, cells[signCol] ?? "") : unsigned;
+    const fee = feeCol >= 0 ? money(cells[feeCol] ?? "") : null;
+    if (amount && fee !== null) {
+      if (new AnalyticalDecimal(fee).isNegative() || /\bnet\b/i.test(header[amountCol] ?? "")) {
+        issues.push({
+          code: "dropped_amount",
+          message: "Fee sign or net inclusion needs confirmation",
+          raw: line.text,
+          page: line.page,
+        });
+        continue;
+      }
+      amount = new AnalyticalDecimal(amount).sub(fee).toFixed();
+    }
+    if (
+      /opening|beginning|balance\s+(?:brought\s+forward|b\/?f)/i.test(narration || dateToken) &&
+      balance
+    ) {
       opening = balance;
       openingRaw = line.text;
       openingPage = line.page;
@@ -283,7 +394,16 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
       if (resolved) dates.push(resolved);
       continue;
     }
-    if (!resolved) continue;
+    if (!resolved) {
+      if (amount)
+        issues.push({
+          code: "ambiguous_date",
+          message: "A flow has no valid posting date",
+          raw: line.text,
+          page: line.page,
+        });
+      continue;
+    }
     if (!amount) {
       if (unsigned && signCol >= 0)
         issues.push({
@@ -347,7 +467,7 @@ function parseMatrix(lines: readonly SourceLine[], text: string): BankParse | nu
     bank: {
       periodStart,
       periodEnd,
-      currency: currencyOf(text),
+      currency,
       opening,
       closing,
       openingRaw,
@@ -502,7 +622,10 @@ export function resolveDate(
 ): string | "ambiguous" | null {
   const trimmed = value.trim();
   const isoPrefix = /^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/.exec(trimmed);
-  if (isoPrefix?.[1]) return isoPrefix[1];
+  if (isoPrefix?.[1]) {
+    const [year, month, day] = isoPrefix[1].split("-");
+    return iso(year!, Number(month), Number(day));
+  }
   const named = namedDate(trimmed);
   if (named) return named;
   const parts = /^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})$/.exec(trimmed);
@@ -559,12 +682,15 @@ function columnRole(
 ):
   | "date"
   | "value_date"
+  | "posting_date"
   | "narration"
   | "debit"
   | "credit"
   | "amount"
   | "balance"
   | "sign"
+  | "fee"
+  | "currency"
   | "note"
   | "unknown" {
   const text = cell
@@ -572,9 +698,14 @@ function columnRole(
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
   if (text.length === 0) return "note";
+  if (/^(?:currency|ccy|curr|account currency)$/.test(text)) return "currency";
   if (/^(dr cr|cr dr|direction|credit debit indicator|transaction type)$/.test(text)) return "sign";
+  if (/\b(?:completed|completion|booked|booking|posting|posted)\b/.test(text))
+    return "posting_date";
   if (/\bvalue date\b/.test(text)) return "value_date";
+  if (/\b(?:started|created|initiated|authori[sz]ed)\b/.test(text)) return "note";
   if (/\bdate\b/.test(text)) return "date";
+  if (/\b(?:fee|fees|charges?|commission)\b/.test(text)) return "fee";
   if (
     /\b(narration|narrative|description|particulars|particular|details|payee|beneficiary|remarks)\b/.test(
       text,
@@ -582,6 +713,8 @@ function columnRole(
   ) {
     return "narration";
   }
+  if (/\b(balance|bal)\b/.test(text)) return "balance";
+  if (/\bamount\b/.test(text) && /\bdr\b.*\bcr\b|\bcr\b.*\bdr\b/.test(text)) return "amount";
   if (/\b(withdrawal|withdrawals|debit|money out|paid out|dr)\b/.test(text)) {
     return "debit";
   }
@@ -605,20 +738,15 @@ function applyDrCr(amount: string, sign: string): string | null {
 
 function iso(year: string, month: number, day: number): string | null {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (new Date(Date.UTC(Number(year), month - 1, day)).getUTCMonth() !== month - 1) return null;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function isHeader(cells: readonly string[]): boolean {
   const roles = cells.map(columnRole);
-  const hasDate = roles.includes("date") || roles.includes("value_date");
+  const hasDate = roles.some((r) => r === "date" || r === "value_date" || r === "posting_date");
   const hasFlow = roles.includes("debit") || roles.includes("credit") || roles.includes("amount");
   return hasDate && hasFlow;
-}
-
-function moneyCell(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === "-" || trimmed === "—") return null;
-  return parseMoneyToken(trimmed);
 }
 
 function signedFlow(withdrawal: string | null, deposit: string | null): string | null {
@@ -637,9 +765,7 @@ function sumAmounts(transactions: readonly TabularBankTransaction[]): string {
 }
 
 function currencyOf(text: string): string | null {
-  if (/₹|\bINR\b|\bRs\.?\b/i.test(text)) return "INR";
-  if (/\bUSD\b/.test(text)) return "USD";
-  return null;
+  return currencyEvidence(text).currency;
 }
 
 function splitCsv(line: string): string[] {

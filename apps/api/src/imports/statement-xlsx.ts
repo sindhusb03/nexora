@@ -5,7 +5,12 @@ import {
   mappingIsAutoAcceptable,
 } from "@nexora/kernel";
 
-import { excelNumberToDecimal, parseMoneyToken } from "./decimal-text.js";
+import {
+  excelNumberToDecimal,
+  parseMoneyToken,
+  numberConvention,
+  type NumberConvention,
+} from "./decimal-text.js";
 import { datedRangePhrase, explicitYearEnd, parseLooseDate } from "./period.js";
 import type { SheetCell, Worksheet } from "./xlsx.js";
 
@@ -111,6 +116,19 @@ export function parseStatementSheet(
     if (candidates.length === 0) continue;
     const periodCells = candidates.filter((cell) => headerRole(cell) === "period");
     if (periodCells.length === 0) continue;
+    if (
+      periodCells.every((cell) => {
+        const merge = sheet.merges?.find((m) => m.row === cell.row && m.col === cell.col);
+        return !sheet.cells.some(
+          (c) =>
+            c.row > (merge?.endRow ?? cell.row) &&
+            c.col >= cell.col &&
+            c.col <= (merge?.endCol ?? cell.col) &&
+            (c.kind === "number" ? excelNumberToDecimal(c.text) : parseMoneyToken(c.text)) !== null,
+        );
+      })
+    )
+      continue;
     const nextNo = rowNumbers.find((candidate) => candidate > rowNo);
     const nextPeriods =
       nextNo === undefined
@@ -124,11 +142,34 @@ export function parseStatementSheet(
       .find((candidate) => headerRow !== null && candidate < headerRow);
     const below = following === undefined ? undefined : rows.get(following);
     const above = preceding === undefined ? undefined : rows.get(preceding);
-    periods = chosen.map((cell) => ({
-      col: cell.col,
-      label: composePeriod(periodLabel(cell) ?? "", above, below, cell.col),
-      derived: false,
-    }));
+    periods = chosen.map((cell) => {
+      const merge = sheet.merges?.find((m) => m.row === cell.row && m.col === cell.col);
+      const bodyCols = merge
+        ? [
+            ...new Set(
+              sheet.cells
+                .filter(
+                  (c) =>
+                    c.row > merge.endRow &&
+                    c.col >= merge.col &&
+                    c.col <= merge.endCol &&
+                    (c.kind === "number"
+                      ? excelNumberToDecimal(c.text)
+                      : parseMoneyToken(c.text)) !== null,
+                )
+                .map((c) => c.col),
+            ),
+          ]
+        : [];
+      // A merged year can cover a spacer and one amount column, never two competing amounts.
+      if (merge && bodyCols.length > 1) return { col: -1, label: "UNRESOLVED", derived: false };
+      return {
+        col: bodyCols[0] ?? cell.col,
+        label: composePeriod(periodLabel(cell) ?? "", above, below, cell.col),
+        derived: false,
+      };
+    });
+    if (periods.some((p) => p.col < 0)) return { reason: "layout_unresolved" };
     break;
   }
   if (headerRow === null) {
@@ -225,11 +266,16 @@ export function parseStatementSheet(
   };
 }
 
-function statementCellAmount(kind: SheetCell["kind"], text: string, label = ""): string | null {
+function statementCellAmount(
+  kind: SheetCell["kind"],
+  text: string,
+  label = "",
+  convention?: NumberConvention,
+): string | null {
   const direction = /\s*(DR|CR)\s*$/i.exec(text);
   if (direction) {
     const debitNormal = accountDebitNormal(label);
-    const amount = parseMoneyToken(text.replace(/\s*(DR|CR)\s*$/i, ""));
+    const amount = parseMoneyToken(text.replace(/\s*(DR|CR)\s*$/i, ""), convention);
     if (debitNormal === null || amount === null || new AnalyticalDecimal(amount).isNegative())
       return null;
     return (direction[1]?.toUpperCase() === "DR") === debitNormal
@@ -240,7 +286,7 @@ function statementCellAmount(kind: SheetCell["kind"], text: string, label = ""):
     const displayed = excelNumberToDecimal(text);
     return displayed;
   }
-  return printedStatementAmount(text);
+  return printedStatementAmount(text, convention);
 }
 
 function accountDebitNormal(label: string): boolean | null {
@@ -253,10 +299,10 @@ function accountDebitNormal(label: string): boolean | null {
   );
 }
 
-function printedStatementAmount(text: string): string | null {
+function printedStatementAmount(text: string, convention?: NumberConvention): string | null {
   const trimmed = text.trim();
   if (/^[-\u2013\u2014]$/.test(trimmed)) return "0";
-  return parseMoneyToken(trimmed);
+  return parseMoneyToken(trimmed, convention);
 }
 
 function looksLikeMoney(text: string): boolean {
@@ -292,7 +338,7 @@ function parseTallySheet(
   rows: ReadonlyMap<number, SheetCell[]>,
   rowNumbers: readonly number[],
   fileName: string,
-): StatementSheet | null {
+): StatementSheet | { reason: string } | null {
   let rememberedLabel: number | undefined;
   for (const rowNo of rowNumbers.slice(0, MAX_HEADER_SCAN_ROWS)) {
     const cells = rows.get(rowNo) ?? [];
@@ -313,6 +359,22 @@ function parseTallySheet(
       .flat()
       .map((cell) => cell.text)
       .join("\n");
+    const textAmounts = sheet.cells
+      .filter(
+        (c) =>
+          c.row > rowNo &&
+          [debitCol, creditCol, amountCol].includes(c.col) &&
+          c.kind === "string" &&
+          c.text.trim() &&
+          !/^[-–—]$/.test(c.text.trim()),
+      )
+      .map((c) => c.text);
+    const convention = numberConvention(textAmounts, joined);
+    if (
+      convention === "conflict" ||
+      textAmounts.some((raw) => parseMoneyToken(raw, convention) === null)
+    )
+      return { reason: "layout_unresolved" };
     const dated = explicitYearEnd(joined);
     const period = dated
       ? `Year ended ${dated.day} ${monthName(dated.month)} ${dated.year}`
@@ -326,9 +388,9 @@ function parseTallySheet(
         .filter((cell) => cell.col === labelCol && cell.kind === "string")
         .map((cell) => cell.text.trim())
         .join(" ");
-      const debit = debitCol === undefined ? null : amountAt(row, debitCol);
-      const credit = creditCol === undefined ? null : amountAt(row, creditCol);
-      const single = amountCol === undefined ? null : amountAt(row, amountCol);
+      const debit = debitCol === undefined ? null : amountAt(row, debitCol, convention);
+      const credit = creditCol === undefined ? null : amountAt(row, creditCol, convention);
+      const single = amountCol === undefined ? null : amountAt(row, amountCol, convention, label);
       let amount = single;
       if (!amount && (debit || credit)) {
         const debitNormal = accountDebitNormal(label);
@@ -388,10 +450,15 @@ function tallyRole(cell: SheetCell): "label" | "debit" | "credit" | "amount" | "
   return "other";
 }
 
-function amountAt(row: readonly SheetCell[], col: number): { amount: string; raw: string } | null {
+function amountAt(
+  row: readonly SheetCell[],
+  col: number,
+  convention: NumberConvention,
+  label = "",
+): { amount: string; raw: string } | null {
   const cell = row.find((candidate) => candidate.col === col);
   if (!cell) return null;
-  const amount = statementCellAmount(cell.kind, cell.text);
+  const amount = statementCellAmount(cell.kind, cell.text, label, convention);
   if (!amount) return null;
   return { amount, raw: cell.text };
 }

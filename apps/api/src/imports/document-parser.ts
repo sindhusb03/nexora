@@ -1,3 +1,5 @@
+import { currencyEvidence } from "./currency.js";
+import { numberConvention, parseMoneyToken } from "./decimal-text.js";
 import {
   canonicalAccount,
   mapLineLabel,
@@ -8,6 +10,7 @@ import {
 
 import {
   explicitYearEnd,
+  datedRangePhrase,
   interimColumnLabel,
   interimMonthDay,
   normalizePeriod,
@@ -80,6 +83,7 @@ export interface DocumentParser {
     readonly fileName: string;
     readonly bytes: Uint8Array;
     readonly yearEnd?: YearEnd | null;
+    readonly functionalCurrency?: string | null;
   }): Promise<ParsedDocument>;
 }
 
@@ -102,31 +106,31 @@ export const xlsxDocumentParser: DocumentParser = {
   supports({ bytes }) {
     return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
   },
-  async parse({ fileName, bytes, yearEnd = null }) {
+  async parse({ fileName, bytes, yearEnd = null, functionalCurrency = null }) {
     const sheets = readWorkbook(bytes);
-    const text = sheets.map(sheetText).join("\n");
+    const text = sheets.map((sheet) => sheetText(sheet)).join("\n");
     const statements = sheets.filter((s) => !looksLikeBank(sheetText(s)));
     const workbook = parseStatementWorkbook(statements, fileName);
     const issues = workbookIssues(workbook);
     const cells = workbook.layoutUnresolved
       ? []
-      : workbookToCells(workbook, sheets, [], text, yearEnd, issues);
+      : workbookToCells(workbook, sheets, [], text, yearEnd, issues, functionalCurrency);
     for (const sheet of sheets) {
       if (!looksLikeBank(sheetText(sheet))) continue;
-      const parsed = parseBankText(sheetText(sheet));
+      const parsed = parseBankText(sheetText(sheet, true));
       if (parsed.bank) {
         cells.push(
           ...bankCells(
             parsed.bank,
             sheet.name,
-            parsed.bank.currency ?? detectCurrency(sheetText(sheet)),
+            parsed.bank.currency ?? detectCurrency(sheetText(sheet), functionalCurrency),
             "units",
           ),
         );
       }
       issues.push(...parsed.issues);
     }
-    return finish("xlsx-text-0.1.0", cells, text, issues);
+    return finish("xlsx-text-0.1.0", cells, text, issues, functionalCurrency);
   },
 };
 
@@ -140,26 +144,35 @@ export const csvDocumentParser: DocumentParser = {
     if (looksLikeHtml(text)) return false;
     return !text.includes("\u0000") && /[,;\t]/.test(text);
   },
-  async parse({ fileName, bytes, yearEnd = null }) {
+  async parse({ fileName, bytes, yearEnd = null, functionalCurrency = null }) {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes).replace(/^\uFEFF/, "");
     const bank = looksLikeBank(text) ? parseBankText(text) : { bank: null, issues: [] };
     if (bank.bank || bank.issues.length > 0) {
       return finish(
         "csv-text-0.1.0",
         bank.bank
-          ? bankCells(bank.bank, fileName, bank.bank.currency ?? detectCurrency(text), "units")
+          ? bankCells(
+              bank.bank,
+              fileName,
+              bank.bank.currency ?? detectCurrency(text, functionalCurrency),
+              "units",
+            )
           : [],
         text,
         [...bank.issues],
+        functionalCurrency,
       );
     }
     const workbook = parseStatementCsv(stripCurrencyMarks(text), fileName);
     const issues = [...bank.issues, ...workbookIssues(workbook)];
     return finish(
       "csv-text-0.1.0",
-      workbook.layoutUnresolved ? [] : workbookToCells(workbook, [], [], text, yearEnd, issues),
+      workbook.layoutUnresolved
+        ? []
+        : workbookToCells(workbook, [], [], text, yearEnd, issues, functionalCurrency),
       text,
       issues,
+      functionalCurrency,
     );
   },
 };
@@ -174,7 +187,7 @@ export const htmlDocumentParser: DocumentParser = {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     return looksLikeHtml(text);
   },
-  async parse({ fileName, bytes, yearEnd = null }) {
+  async parse({ fileName, bytes, yearEnd = null, functionalCurrency = null }) {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     const sheets = htmlToWorksheets(text);
     const joined = sheets
@@ -185,10 +198,16 @@ export const htmlDocumentParser: DocumentParser = {
       return finish(
         "html-table-0.1.0",
         bank.bank
-          ? bankCells(bank.bank, fileName, bank.bank.currency ?? detectCurrency(text), "units")
+          ? bankCells(
+              bank.bank,
+              fileName,
+              bank.bank.currency ?? detectCurrency(text, functionalCurrency),
+              "units",
+            )
           : [],
         text,
         [...bank.issues],
+        functionalCurrency,
       );
     }
     const workbook = parseStatementWorkbook([...sheets], fileName);
@@ -197,9 +216,10 @@ export const htmlDocumentParser: DocumentParser = {
       "html-table-0.1.0",
       workbook.layoutUnresolved
         ? []
-        : workbookToCells(workbook, [...sheets], [], text, yearEnd, issues),
+        : workbookToCells(workbook, [...sheets], [], text, yearEnd, issues, functionalCurrency),
       text,
       issues,
+      functionalCurrency,
     );
   },
 };
@@ -209,7 +229,7 @@ export const pdfDocumentParser: DocumentParser = {
   supports({ bytes }) {
     return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
   },
-  async parse({ fileName, bytes, yearEnd = null }) {
+  async parse({ fileName, bytes, yearEnd = null, functionalCurrency = null }) {
     const text = await extractPdfText(bytes);
     if (text.textItems === 0) {
       return finish("pdf-text-layer-0.1.0", [], fileName, [
@@ -231,15 +251,20 @@ export const pdfDocumentParser: DocumentParser = {
     const issues = [...workbookIssues(workbook)];
     const cells = workbook.layoutUnresolved
       ? []
-      : workbookToCells(workbook, [], pdfItems, joined, yearEnd, issues);
+      : workbookToCells(workbook, [], pdfItems, joined, yearEnd, issues, functionalCurrency);
     const bank = parseBankPdfLines(text.lines);
     if (bank.bank) {
       cells.push(
-        ...bankCells(bank.bank, fileName, bank.bank.currency ?? detectCurrency(joined), "units"),
+        ...bankCells(
+          bank.bank,
+          fileName,
+          bank.bank.currency ?? detectCurrency(joined, functionalCurrency),
+          "units",
+        ),
       );
     }
     issues.push(...bank.issues);
-    return finish("pdf-text-layer-0.1.0", cells, joined, issues);
+    return finish("pdf-text-layer-0.1.0", cells, joined, issues, functionalCurrency);
   },
 };
 
@@ -255,14 +280,22 @@ function finish(
   cells: ParsedCell[],
   text: string,
   issues: BankIssue[] = [],
+  functionalCurrency: string | null = null,
 ): ParsedDocument {
-  const currency = detectCurrency(text);
+  const currency = detectCurrency(text, functionalCurrency);
   const scale = detectScale(text);
   const normalized = cells.map((cell) => ({
     ...cell,
     currency: cell.currency ?? currency,
   }));
   const recorded = [...issues];
+  if (currencyEvidence(text, functionalCurrency).conflict)
+    recorded.push({
+      code: "layout_unresolved",
+      message: "Conflicting statement currencies require confirmation",
+      raw: text.slice(0, 240),
+      page: null,
+    });
   if (recorded.some((issue) => issue.code === "layout_unresolved")) {
     return {
       parserId,
@@ -335,6 +368,7 @@ function workbookToCells(
   documentText = "",
   orgYearEnd: YearEnd | null = null,
   issues: BankIssue[] = [],
+  functionalCurrency: string | null = null,
 ): ParsedCell[] {
   const cells: ParsedCell[] = [];
   const unresolved = new Set<string>();
@@ -344,10 +378,10 @@ function workbookToCells(
       ? [sheetText(source), ...(sheets.length === 1 ? [documentText] : [])].join("\n")
       : documentText;
     const scale = detectScale(text);
-    const currency = detectCurrency(text);
+    const currency = detectCurrency(text, functionalCurrency);
     if (
       detectedScales(text).length > 1 ||
-      /\bbillions?\b|\btrillions?\b|\bin hundreds\b|\bbn\b|万円|億円/i.test(text)
+      /\bbillions?\b|\btrillions?\b|\bin hundreds\b|\bbn\b|(?<!百)万円|億円/i.test(text)
     ) {
       issues.push({
         code: "layout_unresolved",
@@ -357,23 +391,52 @@ function workbookToCells(
       });
       continue;
     }
-    const titleEnd = explicitYearEnd(text);
+    const isNativeNumber = (line: StatementLine, value: StatementLine["values"][number]) =>
+      source?.cells.some(
+        (c) =>
+          c.row === line.sheetRow &&
+          c.col === sheet.periods.find((p) => p.label === value.period)?.col &&
+          c.kind === "number",
+      ) ?? false;
+    const rawAmounts = sheet.lines
+      .flatMap((line) => line.values.filter((value) => !isNativeNumber(line, value)))
+      .filter((value) => !/\sDr \/ .* Cr$/.test(value.raw))
+      .map((v) => v.raw);
+    const convention = numberConvention(rawAmounts, text);
+    const reparsed = new Map(
+      rawAmounts.map((raw) => [
+        raw,
+        /^[-–—]$/.test(raw.trim()) ? "0" : parseMoneyToken(raw, convention),
+      ]),
+    );
+    if (convention === "conflict" || [...reparsed.values()].some((amount) => amount === null)) {
+      issues.push({
+        code: "layout_unresolved",
+        message: "Number convention cannot be established from the document",
+        raw: rawAmounts.join(" | "),
+        page: null,
+      });
+      continue;
+    }
+    const range = datedRangePhrase(text);
+    const periodText = range ? `${text}\n${range}` : text;
+    const titleEnd = explicitYearEnd(periodText);
     const columnDates = sheet.periods.map((p) => parseLooseDate(p.label)).filter((d) => d !== null);
     const conflict =
-      periodDatesConflict(text) ||
+      periodDatesConflict(periodText) ||
       (titleEnd !== null &&
         columnDates.some((d) => d.month !== titleEnd.month || d.day !== titleEnd.day));
     if (conflict) {
       unresolved.add("conflicting period ends");
     }
-    const explicit = conflict ? null : explicitYearEnd(text);
-    const annualMonthDay = statementSpan(text) === 12 ? interimMonthDay(text) : null;
+    const explicit = conflict ? null : explicitYearEnd(periodText);
+    const annualMonthDay = statementSpan(periodText) === 12 ? interimMonthDay(text) : null;
     const yearEnd = explicit
       ? { month: explicit.month, day: explicit.day }
       : conflict
         ? null
         : (annualMonthDay ?? orgYearEnd);
-    const span = statementSpan(text);
+    const span = statementSpan(periodText);
     if (span !== null && span !== 12) {
       unresolved.add("interim period requires confirmation");
       continue;
@@ -384,11 +447,13 @@ function workbookToCells(
       const role = statementRole(line.label);
       if (role === "heading") return;
       line.values.forEach((value, valueIndex) => {
-        const rawLabel = value.period.trim();
+        const rawLabel = (
+          /^total$/i.test(value.period.trim()) && range ? range : value.period
+        ).trim();
         const label =
           interim && span && /^(19|20)\d{2}$/.test(rawLabel)
             ? interimColumnLabel(rawLabel, span, interim)
-            : value.period;
+            : rawLabel;
         const period = conflict ? null : normalizePeriod(label, annual, false, yearEnd);
         if (!period || !parseLooseDate(period.periodEnd)) {
           if (rawLabel.length > 0) unresolved.add(rawLabel);
@@ -401,7 +466,11 @@ function workbookToCells(
           label: line.label,
           sectionId: `s${lineIndex}`,
           ...period,
-          amount: value.amount,
+          amount: isNativeNumber(line, value)
+            ? value.amount
+            : /\b(?:DR|CR)\s*$/i.test(value.raw)
+              ? `${value.amount.startsWith("-") ? "-" : ""}${(reparsed.get(value.raw) ?? value.amount).replace(/^-/, "")}`
+              : (reparsed.get(value.raw) ?? value.amount),
           rawText: value.raw,
           page: located.page,
           sheet: sheet.sheetName,
@@ -535,23 +604,18 @@ function bankCells(
 function looksLikeBank(text: string): boolean {
   const header =
     /\bdate\b/i.test(text) &&
-    /withdrawal|deposit|\bdebit\b|\bcredit\b|\bamount\b|money out|money in|paid out|paid in/i.test(
+    /withdrawal|deposit|\bdebit\b|\bcredit\b|\bdr\b|\bcr\b|\bamount\b|money out|money in|paid out|paid in/i.test(
       text,
     );
   const narrative = /opening balance/i.test(text) && /closing balance/i.test(text);
   return header || narrative;
 }
 
-export function detectCurrency(text: string): string | null {
-  if (/S\$|\bSGD\b/.test(text)) return "SGD";
-  if (/A\$|\bAUD\b/.test(text)) return "AUD";
-  if (/₹|\bINR\b|\bRs\.?\b/i.test(text)) return "INR";
-  if (/\bUSD\b|\$/.test(text)) return "USD";
-  if (/\bEUR\b|€/.test(text)) return "EUR";
-  if (/\bGBP\b|£/.test(text)) return "GBP";
-  if (/\bAED\b/.test(text)) return "AED";
-  if (/\bJPY\b/.test(text)) return "JPY";
-  return null;
+export function detectCurrency(
+  text: string,
+  functionalCurrency: string | null = null,
+): string | null {
+  return currencyEvidence(text, functionalCurrency).currency;
 }
 
 export function detectScale(text: string): AmountScale {
@@ -573,11 +637,19 @@ function detectedScales(text: string): AmountScale[] {
   return scales;
 }
 
-function sheetText(sheet: Worksheet): string {
+function sheetText(sheet: Worksheet, dates = false): string {
   const rows = new Map<number, string[]>();
   for (const cell of sheet.cells) {
     const row = rows.get(cell.row) ?? [];
-    row[cell.col - 1] = cell.text;
+    row[cell.col - 1] =
+      dates && cell.kind === "number" && cell.dateFormat
+        ? new Date(
+            (cell.date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30)) +
+              Number(cell.text) * 86_400_000,
+          )
+            .toISOString()
+            .slice(0, 10)
+        : cell.text;
     rows.set(cell.row, row);
   }
   return [...rows.entries()]

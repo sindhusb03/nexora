@@ -203,7 +203,7 @@ describe("layout-agnostic extraction", () => {
       ].join(""),
     );
     expect(html.cells.find((cell) => cell.label === "Revenue")).toMatchObject({
-      amount: "123456",
+      amount: "123456.00",
       periodEnd: "2025-12-31",
       spanMonths: 12,
     });

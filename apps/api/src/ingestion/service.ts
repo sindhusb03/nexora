@@ -210,7 +210,12 @@ async function upload(
         proposer,
         file.fileName,
         file.bytes,
-        await parser.parse({ fileName: file.fileName, bytes: file.bytes, yearEnd }),
+        await parser.parse({
+          fileName: file.fileName,
+          bytes: file.bytes,
+          yearEnd,
+          functionalCurrency: entity.functionalCurrency,
+        }),
       );
       const values = parsed.cells.map((cell, index) =>
         toStoredValue(cell, crypto.randomUUID(), documentId, entity.functionalCurrency, index),
