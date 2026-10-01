@@ -28,7 +28,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=installer --chown=node:node /app /app
 WORKDIR /app
-RUN corepack enable && pnpm prune --prod
+RUN corepack enable && CI=true pnpm prune --prod
 WORKDIR /app/apps/api
 USER node
 EXPOSE 8787
