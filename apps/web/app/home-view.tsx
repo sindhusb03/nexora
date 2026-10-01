@@ -9,6 +9,8 @@ import { useEffect, useState } from "react";
 import type { Session } from "./books/api";
 import {
   EMPTY_SOURCE,
+  dataSourceKey,
+  isCurrentDataSource,
   readDataSource,
   smartLedgerApplies,
   type DataSourceState,
@@ -98,15 +100,22 @@ const SIGNED_OUT: Session = { actorId: "", tenantId: "", region: "" };
 export function HomeView({ health }: { health: KernelHealth | null }) {
   const identity = useIdentity();
   const session = identity.state.status === "ready" ? identity.state.session : SIGNED_OUT;
-  const [source, setSource] = useState<DataSourceState>(EMPTY_SOURCE);
+  const [retainedSource, setSource] = useState<DataSourceState>(EMPTY_SOURCE);
+  const source =
+    identity.state.status === "ready" && isCurrentDataSource(retainedSource, session)
+      ? retainedSource
+      : EMPTY_SOURCE;
   const [hydrated, setHydrated] = useState(false);
   const requested = useSearchParams().get("section");
   const section: HomeSection = isHomeSection(requested) ? requested : "dashboard";
 
   useEffect(() => {
-    setSource(readDataSource());
+    const reload = () => setSource(readDataSource());
+    reload();
     setHydrated(true);
-  }, []);
+    window.addEventListener("nexora:data-source", reload);
+    return () => window.removeEventListener("nexora:data-source", reload);
+  }, [session.actorId, session.tenantId, identity.state.status]);
 
   const visibleSection: HomeSection =
     hydrated && section === "ledger" && !smartLedgerApplies(source.kind) ? "upload" : section;
@@ -192,11 +201,23 @@ export function HomeView({ health }: { health: KernelHealth | null }) {
         </>
       }
     >
-      {visibleSection === "upload" ? (
-        <UploadMap session={session} source={source} onChange={setSource} />
+      {visibleSection === "upload" && identity.state.status === "ready" ? (
+        <UploadMap
+          key={`${dataSourceKey(session)}:${source.cacheEpoch}`}
+          session={session}
+          source={source}
+          onChange={setSource}
+        />
       ) : null}
-      {visibleSection === "ledger" ? (
-        <SmartLedger session={session} source={source} onChange={setSource} />
+      {visibleSection === "ledger" &&
+      identity.state.status === "ready" &&
+      source.cacheKey === dataSourceKey(session) ? (
+        <SmartLedger
+          key={`${dataSourceKey(session)}:${source.cacheEpoch}`}
+          session={session}
+          source={source}
+          onChange={setSource}
+        />
       ) : null}
       {visibleSection === "operations" ? <Operations /> : null}
       {visibleSection === "admin" ? <Admin session={session} /> : null}

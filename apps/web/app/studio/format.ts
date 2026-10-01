@@ -1,53 +1,74 @@
 /** Presentation of server minor-unit strings. This does not add, allocate, or round money. */
 
-export function minorToDisplay(minor: string): string {
+const currencyFormats = new Map<string, Intl.NumberFormat>();
+
+function currencyFormat(currency: string): Intl.NumberFormat {
+  let format = currencyFormats.get(currency);
+  if (!format) {
+    format = new Intl.NumberFormat("en", { style: "currency", currency });
+    currencyFormats.set(currency, format);
+  }
+  return format;
+}
+
+function minorDigits(currency: string): number {
+  return currencyFormat(currency).resolvedOptions().maximumFractionDigits ?? 0;
+}
+
+export function minorToDisplay(minor: string, currency = "USD"): string {
   if (!/^-?\d+$/.test(minor)) return minor;
   const negative = minor.startsWith("-");
+  const scale = minorDigits(currency);
   const digits = (negative ? minor.slice(1) : minor).replace(/^0+(?=\d)/, "");
-  const padded = digits.padStart(3, "0");
-  const whole = padded.slice(0, -2);
-  const fraction = padded.slice(-2);
+  const padded = digits.padStart(scale + 1, "0");
+  const whole = scale ? padded.slice(0, -scale) : padded;
+  const fraction = scale ? `.${padded.slice(-scale)}` : "";
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${negative ? "-" : ""}${grouped}.${fraction}`;
+  return `${negative ? "-" : ""}${grouped}${fraction}`;
 }
 
 export function withCurrency(display: string, currency: string): string {
-  if (currency === "USD") {
-    const negative = display.startsWith("-");
-    return `${negative ? "-" : ""}$${negative ? display.slice(1) : display}`;
-  }
-  return `${display} ${currency}`;
+  const negative = display.startsWith("-");
+  let inserted = false;
+  return currencyFormat(currency)
+    .formatToParts(negative ? -1 : 1)
+    .map((part) => {
+      if (["integer", "group", "decimal", "fraction"].includes(part.type)) {
+        if (inserted) return "";
+        inserted = true;
+        return negative ? display.slice(1) : display;
+      }
+      return part.value;
+    })
+    .join("");
 }
 
-/** Chart axis scale only. Tooltips use the server display string, not this number. */
-export function axisCurrency(value: number): string {
+/** Chart axis scale only. Tooltips use exact strings. */
+export function axisCurrency(value: number, currency = "USD"): string {
   if (!Number.isFinite(value)) return "";
   const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
   if (abs >= 1_000_000) {
     const millions = abs / 1_000_000;
-    return `${sign}$${millions.toFixed(millions >= 10 ? 0 : 1)}M`;
+    return withCurrency(`${sign}${millions.toFixed(millions >= 10 ? 0 : 1)}M`, currency);
   }
   if (abs >= 1_000) {
     const thousands = abs / 1_000;
-    return `${sign}$${thousands.toFixed(thousands >= 10 ? 0 : 1)}k`;
+    return withCurrency(`${sign}${thousands.toFixed(thousands >= 10 ? 0 : 1)}k`, currency);
   }
-  return `${sign}$${abs.toFixed(0)}`;
+  return withCurrency(`${sign}${abs.toFixed(0)}`, currency);
 }
 
-/** Replaces "15000000 minor-unit" phrases with currency. The stored minor string is unchanged. */
+/** Replaces minor-unit phrases; the stored minor string is unchanged. */
 export function humanizeMinorPhrases(text: string, currency: string): string {
   return text.replace(/\b(\d+)\s+minor(?:-unit)?(?:\s+units?)?\b/g, (_match, digits: string) =>
-    withCurrency(minorToDisplay(digits), currency),
+    withCurrency(minorToDisplay(digits, currency), currency),
   );
 }
 
-export function minorToAxis(minor: string): number {
-  const negative = minor.startsWith("-");
-  const digits = (negative ? minor.slice(1) : minor).replace(/\D/g, "");
-  const padded = digits.padStart(3, "0");
-  const value = Number(`${padded.slice(0, -2)}.${padded.slice(-2)}`);
-  return negative ? -value : value;
+export function minorToAxis(minor: string, currency = "USD"): number {
+  if (!/^-?\d+$/.test(minor)) return Number.NaN;
+  return Number(minorToDisplay(minor, currency).replaceAll(",", ""));
 }
 
 /** Moves a kernel ratio two decimal places for display. "0.0533" becomes "5.33%". */
@@ -66,6 +87,8 @@ export function shortHash(value: string): string {
 }
 
 export function csvCell(value: string): string {
-  if (/[",\n]/.test(value)) return `"${value.replaceAll('"', '""')}"`;
+  // Only a complete plain decimal can be emitted as a numeric cell.
+  if (/^[=+@\t\r-]/.test(value) && !/^-?\d+(?:\.\d+)?$/.test(value)) value = `'${value}`;
+  if (/[",\n\r]/.test(value)) return `"${value.replaceAll('"', '""')}"`;
   return value;
 }

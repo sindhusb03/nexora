@@ -48,6 +48,31 @@ export function registerFileImportRoutes(app: Hono<AppEnv>, store: LedgerStore):
  * it once as an import batch keyed by the file's SHA-256. Nothing here posts journals.
  */
 export async function importFile(store: LedgerStore, actor: ActorContext, input: FileImportInput) {
+  const tenant = actor.tenantId ? await scope(store, actor) : null;
+  // Hash the base64 bytes for the existing content-addressed key before allocating/decoding a file.
+  const fileHash = createHash("sha256").update(input.contentBase64, "base64").digest("hex");
+  const cadence = input.kind === "financial_statements" ? (input.cadence ?? null) : null;
+  const key = `file:${input.kind}:${cadence ?? "-"}:${fileHash}`;
+  const existing = tenant ? await store.findImportBatch(tenant.tenantId, key) : null;
+  if (existing) {
+    if (existing.stateHash !== fileHash) {
+      throw new KernelError(
+        "FIN_IDEMPOTENCY_MISMATCH",
+        "This file key was already used for different content",
+      );
+    }
+    if (typeof existing.payload !== "object" || existing.payload === null) {
+      throw new KernelError("FIN_IDEMPOTENCY_MISMATCH", "Stored file summary is unavailable");
+    }
+    const { source: _source, ...summary } = existing.payload as Record<string, unknown>;
+    return {
+      ...summary,
+      stored: true as const,
+      replayed: true,
+      importBatchId: existing.id,
+      reason: null,
+    };
+  }
   const bytes = new Uint8Array(Buffer.from(input.contentBase64, "base64"));
   if (bytes.length === 0) {
     throw new ApiError(
@@ -64,7 +89,6 @@ export async function importFile(store: LedgerStore, actor: ActorContext, input:
     );
   }
   const format = sniffFormat(bytes, input.fileName);
-  const fileHash = createHash("sha256").update(bytes).digest("hex");
 
   const parsed =
     input.kind === "bank"
@@ -82,30 +106,12 @@ export async function importFile(store: LedgerStore, actor: ActorContext, input:
     ...parsed.view,
   };
 
-  if (!actor.tenantId) {
+  if (!tenant) {
     return {
       stored: false as const,
       replayed: false,
       importBatchId: null,
       reason: "No company is selected, so the kernel did not store this file.",
-      ...summary,
-    };
-  }
-  const tenant = await scope(store, actor);
-  const key = `file:${input.kind}:${summary.cadence ?? "-"}:${fileHash}`;
-  const existing = await store.findImportBatch(tenant.tenantId, key);
-  if (existing) {
-    if (existing.stateHash !== fileHash) {
-      throw new KernelError(
-        "FIN_IDEMPOTENCY_MISMATCH",
-        "This file key was already used for different content",
-      );
-    }
-    return {
-      stored: true as const,
-      replayed: true,
-      importBatchId: existing.id,
-      reason: null,
       ...summary,
     };
   }
