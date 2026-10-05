@@ -56,6 +56,8 @@ export { assertCanPublish, assertMakerChecker, assertTransition } from "./public
 export type { CalculationStatus, PublicationStatus } from "./publication.js";
 export { buildQoeBridge } from "./qoe.js";
 export type { QoeAdjustment, QoeBridge } from "./qoe.js";
+export { CALC_ENTRIES, CalcRegistry, calcRegistry } from "./registry.js";
+export type { CalcValueShape, FormulaEntry } from "./registry.js";
 export { explainVariance } from "./variance.js";
 export type { VarianceKind, VarianceLine, VarianceLineInput, VarianceResult } from "./variance.js";
 export { projectScenario } from "./scenario.js";
