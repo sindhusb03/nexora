@@ -31,12 +31,10 @@ export function productSections(kind: DataSourceKind | null): readonly ShellSect
       items: dataItems,
     },
     {
-      label: "Financial intelligence",
+      label: "Financials",
       items: [
         { id: "financials", label: "Actuals", href: "/books?tab=statements" },
         { id: "model", label: "Projections", href: "/program?tab=model" },
-        { id: "valuation", label: "Valuation", href: "/program?tab=valuation" },
-        { id: "board", label: "Board pack", href: "/program?tab=board" },
       ],
     },
     {
@@ -50,8 +48,33 @@ export function productSections(kind: DataSourceKind | null): readonly ShellSect
       ],
     },
     {
-      label: "Capital access",
-      items: [{ id: "capital", label: "Debt, equity, exit", href: "/program?tab=capital" }],
+      label: "Capital Markets",
+      items: [
+        { id: "capital", label: "Capital workbench", href: "/program?tab=capital" },
+        {
+          id: "debt",
+          label: "Debt",
+          lockedReason: "Debt workspace planned; debt rolls are in Capital workbench.",
+        },
+        {
+          id: "equity",
+          label: "Equity",
+          lockedReason: "Equity workspace planned; cap tables are in Capital workbench.",
+        },
+        {
+          id: "exit",
+          label: "Exit",
+          lockedReason: "Exit planning is on the Nexora roadmap.",
+        },
+      ],
+    },
+    {
+      label: "Valuation",
+      items: [{ id: "valuation", label: "DCF valuation", href: "/program?tab=valuation" }],
+    },
+    {
+      label: "Reports",
+      items: [{ id: "board", label: "Board pack", href: "/program?tab=board" }],
     },
     {
       label: "Transactions",
