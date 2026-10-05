@@ -20,6 +20,7 @@ import {
 } from "./period.js";
 import type { SheetCell, Worksheet } from "./xlsx.js";
 import { annotationHeader, localizedStatementType, nonPeriodHeader } from "./statement-locales.js";
+import { parseStatementBlocks } from "./statement-blocks.js";
 
 export type StatementType = "income_statement" | "balance_sheet" | "cash_flow" | "equity";
 
@@ -40,10 +41,22 @@ export interface StatementLine {
     readonly amount: string;
     readonly raw: string;
     readonly formula: boolean;
+    readonly col?: number;
+    readonly location?: {
+      readonly page: number;
+      readonly bbox: {
+        readonly x0: number;
+        readonly y0: number;
+        readonly x1: number;
+        readonly y1: number;
+      };
+    };
   }[];
 }
 
 export interface StatementSheet {
+  readonly sourceText?: string;
+  readonly explicitType?: boolean;
   readonly periodContext?: string;
   readonly sheetName: string;
   readonly statementType: StatementType;
@@ -80,6 +93,17 @@ export function parseStatementWorkbook(
   const droppedAmounts: DroppedAmount[] = [];
   let layoutUnresolved = false;
   for (const sheet of sheets) {
+    const blocks = parseStatementBlocks(sheet, parseStatementSheet);
+    if (blocks && !("reason" in blocks)) {
+      parsed.push(...blocks);
+      droppedAmounts.push(...blocks.flatMap((s) => s.droppedAmounts));
+      continue;
+    }
+    if (blocks && "reason" in blocks) {
+      layoutUnresolved = true;
+      skippedSheets.push({ sheetName: sheet.name, reason: blocks.reason });
+      continue;
+    }
     const outcome = parseStatementSheet(sheet, fileName);
     if ("reason" in outcome) {
       if (outcome.reason === "layout_unresolved") layoutUnresolved = true;
@@ -300,11 +324,13 @@ export function parseStatementSheet(
   }
   const statementType =
     classify(fileName, sheet.name, lines) ??
-    localizedStatementType(
+    classify(
+      fileName,
       sheet.cells
         .filter((c) => c.row <= headerRow!)
         .map((c) => c.text)
         .join("\n"),
+      lines,
     );
   if (statementType === null) {
     return {

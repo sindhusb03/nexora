@@ -446,6 +446,7 @@ function heldOut(): HeldDoc[] {
         ),
       ],
     },
+    // A "Closing Balance" column header names the running balance, not a closing-total line.
     {
       id: "hdfc",
       fileName: "hdfc-statement.csv",
@@ -484,17 +485,6 @@ function heldOut(): HeldDoc[] {
         cell(
           "Vendor payment",
           "-8000.00",
-          "bank",
-          "2024-04-01",
-          "2024-04-18",
-          "units",
-          "INR",
-          null,
-          false,
-        ),
-        cell(
-          "Closing balance",
-          "167000.00",
           "bank",
           "2024-04-01",
           "2024-04-18",
@@ -543,17 +533,6 @@ function heldOut(): HeldDoc[] {
         cell(
           "Wire out rent",
           "-3100.00",
-          "bank",
-          "2024-03-05",
-          "2024-03-22",
-          "units",
-          "USD",
-          null,
-          false,
-        ),
-        cell(
-          "Closing balance",
-          "24300.00",
           "bank",
           "2024-03-05",
           "2024-03-22",
@@ -643,21 +622,6 @@ function heldOut(): HeldDoc[] {
           page: 1,
           bbox: true,
         },
-        {
-          ...cell(
-            "Closing balance",
-            "175000.00",
-            "bank",
-            "2024-04-01",
-            "2024-04-18",
-            "units",
-            "INR",
-            null,
-            false,
-          ),
-          page: 1,
-          bbox: true,
-        },
       ],
     },
     {
@@ -709,21 +673,6 @@ function heldOut(): HeldDoc[] {
           ...cell(
             "ACH credit",
             "5400.00",
-            "bank",
-            "2024-03-05",
-            "2024-03-22",
-            "units",
-            "USD",
-            null,
-            false,
-          ),
-          page: 1,
-          bbox: true,
-        },
-        {
-          ...cell(
-            "Closing balance",
-            "27400.00",
             "bank",
             "2024-03-05",
             "2024-03-22",

@@ -8,11 +8,17 @@ import {
   type AmountScale,
 } from "@nexora/kernel";
 
-import { resolveStatementPeriods, parseLooseDate, type YearEnd } from "./period.js";
+import {
+  resolveStatementPeriods,
+  parseLooseDate,
+  isReportRunLine,
+  type YearEnd,
+} from "./period.js";
 
 import {
   parseBankPdfLines,
   parseBankText,
+  recognizesBankGrid,
   type BankIssue,
   type TabularBank,
 } from "./bank-tabular.js";
@@ -243,7 +249,10 @@ export const pdfDocumentParser: DocumentParser = {
     const cells = workbook.layoutUnresolved
       ? []
       : workbookToCells(workbook, [], pdfItems, joined, yearEnd, issues, functionalCurrency);
-    const bank = parseBankPdfLines(text.lines);
+    const bank =
+      workbook.sheets.length > 0 && !looksLikeBank(joined)
+        ? { bank: null, issues: [] }
+        : parseBankPdfLines(text.lines);
     if (bank.bank) {
       cells.push(
         ...bankCells(
@@ -376,9 +385,11 @@ function workbookToCells(
   const conventions = new Set<string>();
   for (const sheet of workbook.sheets) {
     const source = sheets.find((candidate) => candidate.name === sheet.sheetName);
-    const text = source
-      ? [sheetText(source), ...(sheets.length === 1 ? [documentText] : [])].join("\n")
-      : documentText;
+    const text =
+      sheet.sourceText ??
+      (source
+        ? [sheetText(source), ...(sheets.length === 1 ? [documentText] : [])].join("\n")
+        : documentText);
     const scale = detectScale(text);
     const currency = detectCurrency(text, functionalCurrency);
     if (
@@ -398,7 +409,7 @@ function workbookToCells(
       source?.cells.some(
         (c) =>
           c.row === line.sheetRow &&
-          c.col === sheet.periods.find((p) => p.label === value.period)?.col &&
+          c.col === (value.col ?? sheet.periods.find((p) => p.label === value.period)?.col) &&
           c.kind === "number",
       ) ?? false;
     const rawAmounts = sheet.lines
@@ -432,7 +443,7 @@ function workbookToCells(
       orgYearEnd,
     );
     sheet.lines.forEach((line, lineIndex) => {
-      const role = statementRole(line.label);
+      const role = line.kind === "total" ? "total" : statementRole(line.label);
       if (role === "heading") return;
       line.values.forEach((value, valueIndex) => {
         const rawLabel = value.period.trim();
@@ -441,12 +452,16 @@ function workbookToCells(
           if (rawLabel.length > 0) unresolved.add(rawLabel);
           return;
         }
-        const located = locateAmount(value.raw, source, pdfItems);
+        const located = value.location ?? locateAmount(value.raw, source, pdfItems);
         cells.push({
-          statementType: statementTypeFor(line.label, sheet.statementType),
+          statementType: sheet.explicitType
+            ? sheet.statementType === "income_statement"
+              ? "income_statement"
+              : "balance_sheet"
+            : statementTypeFor(line.label, sheet.statementType),
           role,
           label: line.label,
-          sectionId: `s${lineIndex}`,
+          sectionId: `s${workbook.sheets.indexOf(sheet)}-${lineIndex}`,
           ...period,
           amount: isNativeNumber(line, value)
             ? value.amount
@@ -457,7 +472,8 @@ function workbookToCells(
           page: located.page,
           sheet: sheet.sheetName,
           row: line.sheetRow,
-          col: sheet.periods.find((p) => p.label === value.period)?.col ?? valueIndex + 2,
+          col:
+            value.col ?? sheet.periods.find((p) => p.label === value.period)?.col ?? valueIndex + 2,
           bbox: located.bbox,
           balanceKind: balanceKind(sheet, line, value.period),
           currency,
@@ -534,7 +550,7 @@ function bankCells(
       txnDate: null,
     });
   }
-  if (bank.closing !== null) {
+  if (bank.closing !== null && bank.closingRaw.trim().length > 0) {
     cells.push({
       statementType: "bank",
       role: "line",
@@ -584,13 +600,17 @@ function bankCells(
 }
 
 function looksLikeBank(text: string): boolean {
+  text = text
+    .split(/\r?\n/)
+    .filter((line) => !isReportRunLine(line))
+    .join("\n");
   const header =
     /\bdate\b/i.test(text) &&
     /withdrawal|deposit|\bdebit\b|\bcredit\b|\bdr\b|\bcr\b|\bamount\b|money out|money in|paid out|paid in/i.test(
       text,
     );
   const narrative = /opening balance/i.test(text) && /closing balance/i.test(text);
-  return header || narrative;
+  return header || narrative || recognizesBankGrid(text);
 }
 
 export function detectCurrency(
@@ -627,7 +647,11 @@ function sheetText(sheet: Worksheet, dates = false): string {
   }
   return [...rows.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([, row]) => row.join("\t"))
+    .map(([, row]) =>
+      Array.from({ length: row.length }, (_, i) => `"${(row[i] ?? "").replace(/"/g, '""')}"`).join(
+        "\t",
+      ),
+    )
     .join("\n");
 }
 

@@ -1,3 +1,5 @@
+import { localizedAmountHeader } from "./statement-locales.js";
+
 export interface YearEnd {
   readonly month: number;
   readonly day: number;
@@ -228,13 +230,29 @@ function spanCount(token: string | undefined): number {
  * Other lengths become "N months ended" only for 3, 6, and 9.
  */
 export function datedRangePhrase(text: string): string | null {
+  // A shared year applies to both endpoints only within that calendar year.
+  // Cross-year ranges require two printed years or an explicit previous-year marker.
+  const head = normalizeDateText(headText(text)).replace(
+    /([A-Za-z]+)\s*\(?previous year\)?\s*(?:to|[-–—])\s*([A-Za-z]+)\s+(\d{4})/gi,
+    (_, start: string, end: string, year: string) =>
+      `${start} ${Number(year) - 1} to ${end} ${year}`,
+  );
+  const shared =
+    /((?:\d{1,2}\s+)?[A-Za-z]+)\s*(?:to|through|bis|au|al|[-–—])\s*((?:\d{1,2}\s+)?[A-Za-z]+),?\s+(\d{4})/i;
+  const expanded = head.replace(shared, (_, start: string, end: string, year: string) => {
+    const startMonth = MONTHS[start.split(/\s+/).at(-1)!.toLowerCase()];
+    const endMonth = MONTHS[end.split(/\s+/).at(-1)!.toLowerCase()];
+    return startMonth && endMonth && startMonth <= endMonth
+      ? `${start} ${year} to ${end} ${year}`
+      : "UNRESOLVED RANGE";
+  });
   const match = new RegExp(
-    `(${DATE_TOKEN}|[A-Za-z]+\\s+\\d{4})\\s*(?:to|bis|au|al|から|[-–—])\\s*(${DATE_TOKEN}|[A-Za-z]+\\s+\\d{4})`,
+    `(${DATE_TOKEN}|[A-Za-z]+\\s+\\d{4})\\s*(?:to|through|bis|au|al|から|至|[～〜–—-])\\s*(${DATE_TOKEN}|[A-Za-z]+\\s+\\d{4})`,
     "i",
-  ).exec(normalizeDateText(headText(text)));
+  ).exec(expanded);
   if (!match?.[1] || !match[2]) return null;
   const parts = [match[1], match[2]];
-  const numeric = parts.map((value) => /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(value));
+  const numeric = parts.map((value) => /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(value));
   const dmy = numeric.some((m) => m && Number(m[1]) > 12);
   const mdy = numeric.some((m) => m && Number(m[2]) > 12);
   if (dmy && mdy) return null;
@@ -269,6 +287,7 @@ export function isReportRunLine(line: string): boolean {
     /\b(?:print(?:ed)?|generated|run\s+(?:date|at)|report\s+date|prepared|downloaded)\b/i.test(
       line,
     ) ||
+    /印刷日|印刷日時|出力日|作成日/.test(line) ||
     /\b(?:basis|accrual|cash)\b.*\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b.*\d{1,2}:\d{2}/i.test(
       line,
     )
@@ -371,6 +390,11 @@ function statementPeriods(text: string) {
   const head = normalizeDateText(headText(text));
   const found: NonNullable<ReturnType<typeof normalizePeriod>>[] = [];
   for (const line of head.split(/\r?\n/)) {
+    const printedDate = parseLooseDate(line.trim());
+    if (printedDate) {
+      found.push(periodEnding(printedDate.year, printedDate.month, printedDate.day, 12));
+      continue;
+    }
     const range = datedRangePhrase(line);
     if (range) {
       const period = normalizePeriod(range, true);
@@ -397,8 +421,15 @@ function statementPeriods(text: string) {
 export function isStatementPeriodLabel(text: string): boolean {
   return (
     statementPeriods(text).length > 0 ||
-    /^(?:FY\s*\d{2,4}(?:[-/]\d{2,4})?|\d{4}[-/]\d{2,4}|selected period|total|amount|balance|comparison|previous year|prior year|last year|N-1|Vorjahr|year to date\s*\(prior\))$/i.test(
-      text.trim(),
+    localizedAmountHeader(text) ||
+    /^(?:FY\s*\d{2,4}(?:[-/]\d{2,4})?|\d{4}[-/]\d{2,4}|selected period|total|amount|balance|comparison|previous year|prior year|last year|N|N-1|Vorjahr|year to date\s*\(prior\))$/i.test(
+      normalizeDateText(text).trim(),
+    ) ||
+    /[A-Za-z]+\s*(?:to|through|bis|au|al|[-–—])\s*(?:\d{1,2}\s+)?[A-Za-z]+,?\s+\d{4}/i.test(
+      normalizeDateText(text),
+    ) ||
+    new RegExp(`${DATE_TOKEN}\\s*(?:to|bis|au|al|から|至|[～〜–—-])\\s*${DATE_TOKEN}`, "i").test(
+      normalizeDateText(text),
     )
   );
 }
@@ -430,13 +461,21 @@ export function resolveStatementPeriods(
   if (titleSpan !== null && titleSpan !== 12) return labels.map(() => null);
   const titleConflict = new Set(titles.map((p) => p.periodEnd.slice(5))).size > 1;
   const explicit = titles[0];
-  const monthDay = interimMonthDay(normalizeDateText(title));
+  const titleEnds = normalizeDateText(headText(title))
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const end = interimMonthDay(line);
+      return end ? [end] : [];
+    });
+  const monthDay = titleEnds[0] ?? null;
   const headerEnds = labels.flatMap((label) => {
     const end = statementSpan(label) === 12 ? interimMonthDay(normalizeDateText(label)) : null;
     return end ? [end] : [];
   });
   const sharedHeaderEnd =
     new Set(headerEnds.map((end) => `${end.month}-${end.day}`)).size === 1 ? headerEnds[0] : null;
+  if (new Set([...titleEnds, ...headerEnds].map((end) => `${end.month}-${end.day}`)).size > 1)
+    return labels.map(() => null);
   const yearEnd = explicit
     ? { month: Number(explicit.periodEnd.slice(5, 7)), day: Number(explicit.periodEnd.slice(8)) }
     : (monthDay ?? sharedHeaderEnd ?? orgYearEnd);
@@ -452,7 +491,9 @@ export function resolveStatementPeriods(
   // Different annual flow calendars require review. Point-in-time "as at"
   // columns can legitimately compare distinct reporting dates.
   const annualEnds = labels.flatMap((label, i) =>
-    statementSpan(label) === 12 && own[i] ? [own[i]!.periodEnd.slice(5)] : [],
+    statementSpan(datedRangePhrase(label) ?? label) === 12 && own[i]
+      ? [own[i]!.periodEnd.slice(5)]
+      : [],
   );
   if (new Set(annualEnds).size > 1) return labels.map(() => null);
   return labels.map((label, i) => {
@@ -469,11 +510,12 @@ export function resolveStatementPeriods(
     }
     if (
       !period &&
-      /^(?:selected period|total|amount|balance)$/i.test(label.trim()) &&
+      (/^(?:selected period|total|amount|balance|N)$/i.test(label.trim()) ||
+        (labels.length === 1 && localizedAmountHeader(label))) &&
       titles.length === 1
     )
       period = explicit ?? null;
-    const localSpan = statementSpan(label);
+    const localSpan = statementSpan(datedRangePhrase(label) ?? label);
     // Existing ingestion stores annual observations only. Retain interim columns in review.
     if (localSpan !== null && localSpan !== 12 && !prior) return null;
     if (!period) return null;
@@ -559,6 +601,31 @@ function uncheckedDate(text: string): LooseDate | null {
 /** Exact month names, not a jurisdiction-derived fiscal year end. */
 function normalizeDateText(text: string): string {
   const months: Record<string, string> = {
+    dicembre: "December",
+    dezembro: "December",
+    januari: "January",
+    februari: "February",
+    maart: "March",
+    april: "April",
+    mei: "May",
+    augustus: "August",
+    gennaio: "January",
+    febbraio: "February",
+    aprile: "April",
+    maggio: "May",
+    giugno: "June",
+    luglio: "July",
+    settembre: "September",
+    ottobre: "October",
+    novembro: "November",
+    janeiro: "January",
+    fevereiro: "February",
+    marco: "March",
+    maio: "May",
+    junho: "June",
+    julho: "July",
+    setembro: "September",
+    outubro: "October",
     enero: "January",
     febrero: "February",
     marzo: "March",
@@ -605,15 +672,23 @@ function normalizeDateText(text: string): string {
         : "UNRESOLVED";
     })
     .replace(/\b[a-z]+\b/gi, (word) => months[word.toLowerCase()] ?? word)
+    .replace(/\b(\d{1,2})er\b/gi, "$1")
     .replace(/(\d{1,2})\.\s+([A-Za-z]+)/g, "$1 $2")
     .replace(/\bde\s+(?=[A-Za-z]+|\d{4})/gi, "")
     .replace(
-      /\b(?:fiscal\s+year\s+ended|Geschaftsjahr\s+(?:zum|zum Ende des)|Jahr\s+zum|Exercice\s+clos\s+(?:le|au)|Ejercicio\s+(?:terminado|finalizado|cerrado)\s+(?:el|al))\s*/gi,
+      /\b(?:fiscal\s+year\s+ended|Geschaftsjahr\s+(?:zum|zum Ende des)|Jahr\s+zum|Exercice\s+clos\s+(?:le|au)|Ejercicio\s+(?:terminado|finalizado|cerrado)\s+(?:el|al)|Esercizio\s+(?:chiuso|terminato)\s+al|Boekjaar\s+(?:eindigend op|geeindigd op)|Exercicio\s+(?:encerrado|findo)\s+em)\s*/gi,
       "year ended ",
     )
     .replace(/\b(?:Bilanz\s+zum)\s+(?=\d{1,2}\s)/gi, "as at ")
     .replace(/\b(?:Bilan\s+au|Balance\s+al)\s+/gi, "as at ")
+    .replace(/(^|\n)\s*(?:zum|au|al)\s+(?=\d{1,2}[\s./-]|\d{4}-\d{2}-\d{2})/gi, "$1as at ")
+    .replace(
+      /\b(?:Geschaftsjahr|GJ|Exercice|Ejercicio|Esercizio|Exercicio|Boekjaar)\s+(\d{4})\b/gi,
+      "FY $1",
+    )
+    .replace(/(\d{4})年度/g, "FY $1")
     .replace(/\bquarter\s+ended/gi, "3 months ended")
+    .replace(/\bfiscal\s+year[ -]end\s*:?\s*(?=\d|[A-Za-z]+\s+\d)/gi, "year ended ")
     .replace(/\bhalf[ -]?year\s+ended/gi, "6 months ended")
     .replace(
       /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/g,

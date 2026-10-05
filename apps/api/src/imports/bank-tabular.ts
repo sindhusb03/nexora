@@ -5,6 +5,7 @@ import { bankDates } from "./bank-dates.js";
 import { currencyEvidence } from "./currency.js";
 import type { PdfLine } from "./bank-pdf.js";
 import { parseGrid } from "./statement-csv.js";
+import { bankLabel, bankDateToken } from "./bank-labels.js";
 
 export interface TabularBankTransaction {
   readonly date: string;
@@ -51,6 +52,7 @@ interface SourceLine {
   readonly text: string;
   readonly cells: readonly string[];
   readonly bbox: TabularBankTransaction["bbox"];
+  readonly unaligned?: boolean;
 }
 
 export interface BankParse {
@@ -82,10 +84,28 @@ export function parseBankText(text: string): BankParse {
   );
 }
 
+export function recognizesBankGrid(text: string): boolean {
+  if (!/[,;\t]/.test(text)) return false;
+  const rows = parseGrid(text);
+  return (
+    rows.some(isHeader) ||
+    rows.filter(
+      (cells) =>
+        cells.length >= 3 &&
+        cells.some((cell) =>
+          /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})$/.test(cell.trim()),
+        ) &&
+        cells.some((cell) => parseMoneyToken(cell) !== null),
+    ).length >= 2
+  );
+}
+
 export function parseBankSource(lines: readonly SourceLine[]): BankParse {
   const text = lines.map((line) => line.text).join("\n");
   const matrix = parseMatrix(lines);
   if (matrix && (matrix.bank || matrix.issues.length > 0)) return matrix;
+  const inferred = inferHeaderless(lines);
+  if (inferred) return inferred;
   // Numeric column order alone cannot establish debit, credit, or balance.
   return parseNarrative(lines, text);
 }
@@ -94,11 +114,180 @@ export function decimalAmount(value: string): string | null {
   return findMoneyTokens(value)[0]?.amount ?? null;
 }
 
+function isLegend(text: string): boolean {
+  return /^(?:\*\s*denotes\b|(?:legend|key)\s*:|txn\s+types\s*:|dr\s*=\s*debit\b|cr\s*=\s*credit\b)/i.test(
+    text.trim(),
+  );
+}
+
+/** Headerless roles are accepted only when the complete table has one
+ * reconciled interpretation. Balances are evidence, never fabricated values. */
+function inferHeaderless(lines: readonly SourceLine[]): BankParse | null {
+  const dateLike = (raw: string) =>
+    /^(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})$/.test(raw.trim());
+  const first = lines.findIndex((l) => l.cells.some(dateLike));
+  if (first < 0) return null;
+  const unresolved = (): BankParse => ({
+    bank: null,
+    issues: [
+      {
+        code: "layout_unresolved",
+        message:
+          "Headerless bank roles or direction are not uniquely supported by complete reconciliation",
+        raw: lines[first]!.text,
+        page: lines[first]!.page,
+      },
+    ],
+  });
+  const body = lines.slice(first).filter((l) => !summaryKind(l) && !isLegend(l.text));
+  if (
+    lines
+      .slice(0, first)
+      .some((l) => !summaryKind(l) && l.cells.some((cell) => parseMoneyToken(cell) !== null))
+  )
+    return unresolved();
+  const width = body[0]!.cells.length;
+  if (width < 3 || body.some((l) => l.cells.length !== width)) return unresolved();
+  const dateCols = Array.from({ length: width }, (_, i) => i).filter((i) =>
+    body.every((l) => dateLike(l.cells[i]!)),
+  );
+  if (dateCols.length !== 1) return unresolved();
+  const dateCol = dateCols[0]!;
+  const convention = numberConvention(body.flatMap((l) => l.cells.filter((_, i) => i !== dateCol)));
+  const numeric = Array.from({ length: width }, (_, i) => i).filter(
+    (i) =>
+      i !== dateCol &&
+      body.every((l) => !l.cells[i]!.trim() || parseMoneyToken(l.cells[i]!, convention) !== null) &&
+      body.some((l) => parseMoneyToken(l.cells[i]!, convention) !== null),
+  );
+  const signCols = Array.from({ length: width }, (_, i) => i).filter(
+    (i) =>
+      i !== dateCol &&
+      !numeric.includes(i) &&
+      body.every((l) => applyDrCr("1", l.cells[i]!) !== null),
+  );
+  const textCols = Array.from({ length: width }, (_, i) => i).filter(
+    (i) => i !== dateCol && !numeric.includes(i) && !signCols.includes(i),
+  );
+  if (textCols.length !== 1 || numeric.length < 1 || numeric.length > 3) return unresolved();
+  const candidates: BankParse[] = [];
+  for (const balanceCol of [-1, ...numeric]) {
+    const flows = numeric.filter((i) => i !== balanceCol);
+    if (flows.length < 1 || flows.length > 2) continue;
+    const openingLine = lines.slice(0, first).find((l) => summaryKind(l) === "opening");
+    const opening = openingLine?.cells
+      .map((c) => parseMoneyToken(c, convention))
+      .find((a) => a !== null);
+    if (
+      flows.length === 1 &&
+      balanceCol >= 0 &&
+      opening == null &&
+      !signCols.length &&
+      !body.every((l) => /(?:^[-(]|(?:CR|DR)\s*$|-\s*$)/i.test(l.cells[flows[0]!]!))
+    )
+      continue;
+    if (
+      balanceCol < 0 &&
+      (flows.length !== 1 ||
+        (!signCols.length &&
+          !body.every((l) => /(?:^[-(]|(?:CR|DR)\s*$|-\s*$)/i.test(l.cells[flows[0]!]!))))
+    )
+      continue;
+    for (const reverse of flows.length === 2 ? [false, true] : [false]) {
+      const header = Array.from({ length: width }, () => "Note");
+      header[dateCol] = "Date";
+      header[textCols[0]!] = "Description";
+      if (balanceCol >= 0) header[balanceCol] = "Balance";
+      for (const i of signCols) header[i] = "Dr Cr";
+      if (flows.length === 1) header[flows[0]!] = "Amount";
+      else {
+        header[flows[reverse ? 1 : 0]!] = "Debit";
+        header[flows[reverse ? 0 : 1]!] = "Credit";
+      }
+      let running = opening == null ? null : new AnalyticalDecimal(opening);
+      let invalid = false;
+      const adjusted = body.map((l) => {
+        const cells = [...l.cells];
+        if (balanceCol < 0) return l;
+        const balance = parseMoneyToken(cells[balanceCol]!, convention);
+        if (balance === null) {
+          invalid = true;
+          return l;
+        }
+        const delta = running === null ? null : new AnalyticalDecimal(balance).sub(running);
+        running = new AnalyticalDecimal(balance);
+        if (flows.length === 1) {
+          const raw = cells[flows[0]!]!;
+          const amount = parseMoneyToken(raw, convention);
+          if (
+            amount === null ||
+            (delta !== null && !delta.abs().eq(new AnalyticalDecimal(amount).abs())) ||
+            (delta !== null && /(?:^[-(]|DR\s*$|CR\s*$|-\s*$)/i.test(raw) && !delta.eq(amount))
+          )
+            invalid = true;
+          // Direction comes from the reconciled balance delta. Keep original
+          // raw text and provenance while giving the matrix an explicit cue.
+          if (delta !== null && !signCols.length)
+            cells[flows[0]!] =
+              `${raw.replace(/\s*(?:CR|DR)$/i, "")} ${delta.isNegative() ? "Dr" : "Cr"}`;
+        }
+        return { ...l, cells };
+      });
+      if (invalid) continue;
+      const replacements = new Map(body.map((l, i) => [l, adjusted[i]!]));
+      const source = [
+        ...lines.slice(0, first),
+        { ...lines[first]!, text: header.join(" "), cells: header, row: 0 },
+        ...lines.slice(first).map((l) => replacements.get(l) ?? l),
+      ];
+      const parsed = parseMatrix(source);
+      if (
+        parsed?.bank &&
+        parsed.bank.transactions.length === body.length &&
+        parsed.issues.every(
+          (issue) =>
+            issue.code === "balance_mismatch" &&
+            issue.message.startsWith("Bank requires independently stated"),
+        )
+      )
+        candidates.push(parsed);
+    }
+  }
+  return candidates.length === 1 ? candidates[0]! : unresolved();
+}
+
 function sourceFromText(text: string, row: number, page: number | null): SourceLine {
   return { page, row, text: text.trim(), cells: splitCsv(text), bbox: null };
 }
 
 function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
+  const combined: PdfLine[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const next = lines[index + 1];
+    if (
+      next &&
+      next.page === line.page &&
+      Math.abs(next.y - line.y) <= 20 &&
+      next.items.every(
+        (item) =>
+          !item.text.trim() || /^(?:date|amount|\(?dr\)?|\(?cr\)?)$/i.test(item.text.trim()),
+      ) &&
+      line.items.some((item) => /withdrawal|deposit|value/i.test(item.text))
+    ) {
+      const items = line.items.map((item) => {
+        const tail = next.items.find((part) => Math.abs(part.x - item.x) <= 16 && part.text.trim());
+        return tail ? { ...item, text: `${item.text} ${tail.text}` } : item;
+      });
+      if (isHeader(items.map((item) => item.text))) {
+        combined.push({ ...line, items });
+        index++;
+        continue;
+      }
+    }
+    combined.push(line);
+  }
+  lines = combined;
   // PDF text runs may split a single heading into "Withdrawal" and "(Dr)".
   lines = lines.map((line) => {
     const items: PdfLine["items"][number][] = [];
@@ -132,11 +321,15 @@ function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
     isHeader(line.items.map((item) => item.text).filter((text) => text.trim().length > 0)),
   );
   if (!header) return lines.map((line, index) => sourceFromPdf(line, index + 1));
-  const columns = header.items
-    .filter((item) => item.text.trim().length > 0)
-    .map((item) => ({ x: item.x, right: item.x + (item.width ?? 0), text: item.text.trim() }));
+  const headerColumns = (line: PdfLine) =>
+    line.items
+      .filter((item) => item.text.trim().length > 0)
+      .map((item) => ({ x: item.x, right: item.x + (item.width ?? 0), text: item.text.trim() }));
+  let columns = headerColumns(header);
   return lines.map((line, index) => {
+    if (isHeader(line.items.map((item) => item.text))) columns = headerColumns(line);
     const cells = columns.map(() => "");
+    let unaligned = false;
     for (const item of line.items) {
       const text = item.text.trim();
       if (text.length === 0) continue;
@@ -153,6 +346,8 @@ function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
         }
       });
       if (best >= 0) cells[best] = [cells[best], text].filter(Boolean).join(" ");
+      else if (findMoneyTokens(text).length || /^\d{1,4}[/.-]\d{1,2}[/.-]/.test(text))
+        unaligned = true;
     }
     return {
       page: line.page ?? null,
@@ -164,6 +359,7 @@ function alignPdfBank(lines: readonly PdfLine[]): SourceLine[] {
         .trim(),
       cells,
       bbox: amountBBox(line),
+      unaligned,
     };
   });
 }
@@ -217,6 +413,22 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   const issue = (code: BankIssue["code"], message: string, line?: SourceLine) => {
     issues.push({ code, message, raw: line?.text ?? header.join(" | "), page: line?.page ?? null });
   };
+  const malformed = lines
+    .slice(headerIndex + 1)
+    .find(
+      (line) =>
+        (line.unaligned || line.cells.length !== header.length) &&
+        !summaryKind(line) &&
+        !isLegend(line.text),
+    );
+  if (malformed) {
+    issue(
+      "layout_unresolved",
+      "Transaction width or PDF column alignment differs from the header",
+      malformed,
+    );
+    return { bank: null, issues };
+  }
   const metadata = lines
     .slice(0, headerIndex)
     .filter((l) => !summaryKind(l))
@@ -240,7 +452,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
     .find((index) => index >= 0)!;
   const hasDate = (line: SourceLine) =>
     /^(?:\d{1,4}[/.-]\d{1,2}[/.-]|\d{1,2}[-\s][a-z]{3,9}\b|[a-z]{3,9}\s+\d{1,2}\b)/i.test(
-      line.cells[sourceDateCol]?.trim() ?? "",
+      bankDateToken(line.cells[sourceDateCol] ?? "", lines.map((l) => l.text).join("\n")),
     );
   const datedRows = lines.slice(headerIndex + 1).filter(hasDate);
   // Export headers such as Details and Type can both carry direction codes.
@@ -254,6 +466,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
       roles[i] = "sign";
   });
   const classify = (line: SourceLine) => {
+    if (isLegend(line.text)) return "footer";
     // Some exports date their aggregate row. Two nonzero flow totals and no
     // running balance distinguish that row from a single transaction amount.
     if (
@@ -270,7 +483,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
       (role, i) =>
         role === "narration" &&
         !!line.cells[i]?.trim() &&
-        !SUMMARY_LABEL.test(line.cells[i]!.trim()),
+        !SUMMARY_LABEL.test(bankLabel(line.cells[i]!).trim()),
     );
     if (
       (hasDate(line) || described) &&
@@ -398,7 +611,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   const tokenAt = (l: SourceLine, i: number) => l.cells[i]?.trim() ?? "";
   const summaryTokens = (l: SourceLine) =>
     l.cells.flatMap((c) => {
-      const tail = c
+      const tail = bankLabel(c)
         .replace(SUMMARY_LABEL, "")
         .replace(/^\s*[:=]\s*/, "")
         .trim();
@@ -440,7 +653,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
     context,
     currency,
     (raw, order) => {
-      const date = resolveDate(raw, order);
+      const date = resolveDate(bankDateToken(raw, context), order);
       return date === "ambiguous" ? null : date;
     },
   );
@@ -489,9 +702,22 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   }
   if (ambiguousBalances.has("opening")) opening = null;
   if (ambiguousBalances.has("closing")) closing = null;
+  let previousDate: string | undefined;
+  let previousPage: number | null | undefined;
+  // A blank date can group activity only in a resolved table with a running
+  // balance. Date carry never crosses a page or an intervening header.
+  const declaredGrouping =
+    /(?:grouped by date|date (?:is )?(?:shown|printed) (?:only )?once)/i.test(metadata);
+  const carryDate =
+    narrationCol >= 0 && ((balanceCol >= 0 && signCols.length === 0) || declaredGrouping);
   for (const line of body) {
-    const date = resolvedDates.get(line);
+    let date = resolvedDates.get(line);
     const narration = tokenAt(line, narrationCol);
+    if (line.cells.length !== header.length) {
+      issue("layout_unresolved", "Transaction field count differs from the header", line);
+      if (!date) issue("ambiguous_date", "A transaction has no printed date", line);
+      continue;
+    }
     let debit = money(tokenAt(line, debitCol));
     const credit = money(tokenAt(line, creditCol));
     if (/CR\s*$/i.test(tokenAt(line, debitCol)) || /DR\s*$/i.test(tokenAt(line, creditCol))) {
@@ -561,6 +787,21 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
       }
       amount = new AnalyticalDecimal(amount).sub(fee).toFixed();
     }
+    if (
+      !date &&
+      !tokenAt(line, dateCol) &&
+      amount !== null &&
+      (balance !== null || declaredGrouping) &&
+      carryDate &&
+      previousPage === line.page
+    ) {
+      const prior = lines.indexOf(line);
+      const lastTxn = transactions.at(-1);
+      const lastIndex = lastTxn
+        ? lines.findIndex((l) => l.row === lastTxn.row && l.page === lastTxn.page)
+        : -1;
+      if (!lines.slice(lastIndex + 1, prior).some(repeatedHeader)) date = previousDate;
+    }
     if (!date) {
       if (amount !== null || balance !== null)
         issue("ambiguous_date", "A flow or balance has no valid posting date", line);
@@ -599,6 +840,8 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
       bbox: line.bbox,
     };
     transactions.push(transaction);
+    previousDate = date;
+    previousPage = line.page;
     if (balance !== null) balances.set(transaction, { amount: balance, line });
   }
   // Reconcile in chronological order. Preserve source order and provenance in output.
@@ -673,16 +916,13 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
         issue("balance_mismatch", "Unclassified statement total requires review", line);
     }
   }
-  // A retained row's balance is not evidence of statement closing after a gap,
-  // failed reconciliation, conflicting summary, or uncertain source ordering.
-  if (closing === null && finalBalance && issues.length === 0) {
-    closing = finalBalance.amount;
-    closingLine = finalBalance.line;
-  }
+  // Running balances can reconcile transactions, but only labelled summaries
+  // supply a closing value for persistence.
+  const checkClosing = closing ?? (issues.length === 0 ? (finalBalance?.amount ?? null) : null);
   if (
     opening === null ||
-    closing === null ||
-    !new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(closing)
+    checkClosing === null ||
+    !new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(checkClosing)
   )
     issue(
       "balance_mismatch",
@@ -692,6 +932,16 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   const periodStart = dateResult.period?.start ?? dates.slice().sort()[0];
   const periodEnd = dateResult.period?.end ?? dates.slice().sort().at(-1);
   if (!periodStart || !periodEnd) return { bank: null, issues };
+  // Never retain a possibly shifted, incomplete, or unreconciled grouped table.
+  // Ordinary legacy layouts still expose independently printed safe facts.
+  if (
+    carryDate &&
+    body.some(
+      (l) => !tokenAt(l, dateCol) && moneyCols.some((i) => money(tokenAt(l, i)) !== null),
+    ) &&
+    issues.length
+  )
+    return { bank: null, issues };
   return {
     bank: {
       periodStart,
@@ -713,12 +963,12 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
 }
 
 const SUMMARY_LABEL =
-  /^(?:(?:opening|beginning|closing|ending)(?:\s+bal(?:ance)?)?|(?:balance\s+)?(?:brought|carried)\s+forward|balance\s+b\/?f|(?:number\s+of\s+|total\s+)?(?:transactions?|debits?|credits?|withdrawals?|deposits?)\s+count|number\s+of\s+(?:transactions?|debits?|credits?)|(?:total\s+)?(?:debits?|credits?|withdrawals?|deposits?)|(?:grand\s+)?totals?)(?=\s|:|=|$)/i;
+  /^(?:(?:opening|beginning|closing|ending)(?:\s+bal(?:ance)?)?|(?:balance\s+)?(?:brought|carried)\s+forward|(?:balance\s+)?b\/?f|(?:number\s+of\s+|total\s+)?(?:transactions?|debits?|credits?|withdrawals?|deposits?)\s+count|number\s+of\s+(?:transactions?|debits?|credits?)|(?:total\s+)?(?:debits?|credits?|withdrawals?|deposits?)|(?:grand\s+)?totals?)(?=\s|:|=|$)/i;
 function summaryKind(
   line: SourceLine,
 ): "opening" | "closing" | "debit" | "credit" | "count" | "total" | "footer" | null {
   const label = line.cells
-    .map((c) => c.trim())
+    .map((c) => bankLabel(c).trim())
     .find((c) => {
       const match = SUMMARY_LABEL.exec(c);
       if (!match) return false;
@@ -880,9 +1130,9 @@ export function resolveDate(
   locale: "DMY" | "MDY" | "unknown",
 ): string | "ambiguous" | null {
   const trimmed = value.trim();
-  const isoPrefix = /^(\d{4}-\d{2}-\d{2})(?:[T\s].*)?$/.exec(trimmed);
+  const isoPrefix = /^(\d{4}[-/]\d{1,2}[-/]\d{1,2})(?:[T\s].*)?$/.exec(trimmed);
   if (isoPrefix?.[1]) {
-    const [year, month, day] = isoPrefix[1].split("-");
+    const [year, month, day] = isoPrefix[1].split(/[-/]/);
     return iso(year!, Number(month), Number(day));
   }
   const named = namedDate(trimmed);
@@ -952,7 +1202,7 @@ function columnRole(
   | "currency"
   | "note"
   | "unknown" {
-  const text = cell
+  const text = bankLabel(cell)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
@@ -966,7 +1216,7 @@ function columnRole(
   if (/\bdate\b/.test(text)) return "date";
   if (/\b(?:fee|fees|charges?|commission)\b/.test(text)) return "fee";
   if (
-    /\b(narration|narrative|description|particulars|particular|details|payee|beneficiary|remarks)\b/.test(
+    /\b(narration|narrative|description|memo|particulars|particular|details|payee|beneficiary|remarks)\b/.test(
       text,
     )
   ) {

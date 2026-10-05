@@ -65,6 +65,7 @@ export { stateHash } from "./state-hash.js";
 export { canonicalAccount, listCanonicalAccounts } from "./ingestion-chart.js";
 export type { CanonicalAccount } from "./ingestion-chart.js";
 export { runIngestionChecks } from "./ingestion-checks.js";
+export { statementAmountsEqual } from "./statement-equation.js";
 export {
   mapLineLabel,
   mappingIsAutoAcceptable,

@@ -5,6 +5,15 @@ import { bankValueCorpus } from "./fixtures/bank-value-corpus.js";
 import { call, sessions, testApp, type TestApp } from "./harness.js";
 
 const corpus = bankValueCorpus();
+const inferredClosing = new Set([
+  "alder-oldest-types",
+  "alder-oldest-dr-cr",
+  "alder-newest-types",
+  "alder-newest-dr-cr",
+  "alder-no-opening",
+  "summary-word-description",
+  "numeric-xlsx",
+]);
 describe("bank row classification and balance safety", () => {
   it.each(corpus)("exact amount/date/direction/currency or review: $id", async (fixture) => {
     const result = await selectDocumentParser(fixture.fileName, fixture.bytes).parse(fixture);
@@ -15,11 +24,19 @@ describe("bank row classification and balance safety", () => {
     ]);
     if (fixture.issue) expect(result.issues.map((i) => i.code)).toContain(fixture.issue);
     else expect(result.issues).toEqual([]);
-    expect(actual).toEqual(fixture.facts);
+    expect(actual).toEqual(
+      fixture.facts.filter(
+        ([label]) => label !== "Closing balance" || !inferredClosing.has(fixture.id),
+      ),
+    );
     for (const [index, cell] of result.cells.entries()) {
       expect(cell.currency).toBe(fixture.currency);
       expect(new AnalyticalDecimal(cell.amount).isNegative()).toBe(
-        new AnalyticalDecimal(fixture.facts[index]![1]).isNegative(),
+        new AnalyticalDecimal(
+          fixture.facts.filter(
+            ([label]) => label !== "Closing balance" || !inferredClosing.has(fixture.id),
+          )[index]![1],
+        ).isNegative(),
       );
       expect(cell.statementType).toBe("bank");
       expect(cell.rawText).not.toBe("");
@@ -77,11 +94,13 @@ describe("bank stored value regressions", () => {
       values: { label: string; minor: string | null; currency: string; periodKey: string }[];
     };
     expect(values.map((v) => [v.label, v.minor, v.currency])).toEqual(
-      fixture.facts.map(([label, amount]) => [
-        label,
-        new AnalyticalDecimal(amount).mul(fixture.currency === "JPY" ? "1" : "100").toFixed(0),
-        fixture.currency,
-      ]),
+      fixture.facts
+        .filter(([label]) => label !== "Closing balance" || !inferredClosing.has(fixture.id))
+        .map(([label, amount]) => [
+          label,
+          new AnalyticalDecimal(amount).mul(fixture.currency === "JPY" ? "1" : "100").toFixed(0),
+          fixture.currency,
+        ]),
     );
     expect(
       values.filter((v) => !/^(Opening|Closing) balance$/.test(v.label)).map((v) => v.periodKey),

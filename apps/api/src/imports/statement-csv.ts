@@ -105,10 +105,27 @@ export function parseStatementCsv(text: string, fileName: string): StatementWork
       ...sheet,
       lines: sheet.lines.map((line) => ({
         ...line,
-        values: sheet.periods.flatMap((period) => {
-          const raw = (grid[line.sheetRow - 1]?.[period.col - 1] ?? "").trim();
+        values: (sheet.explicitType
+          ? line.values
+          : sheet.periods.map((p) => ({
+              period: p.label,
+              col: p.col,
+              amount: "",
+              raw: "",
+              formula: false,
+            }))
+        ).flatMap((value) => {
+          const col =
+            value.col ?? sheet.periods.find((period) => period.label === value.period)!.col;
+          const raw = (grid[line.sheetRow - 1]?.[col - 1] ?? "").trim();
           const amount = readNumber(raw);
-          return amount === null ? [] : [{ period: period.label, amount, raw, formula: false }];
+          return amount === null
+            ? []
+            : [
+                sheet.explicitType
+                  ? { ...value, amount, raw, formula: false }
+                  : { period: value.period, amount, raw, formula: false },
+              ];
         }),
       })),
     })),
@@ -217,11 +234,9 @@ export function parseGrid(input: string): string[][] {
 }
 
 function detectDelimiter(text: string): string {
-  const counts = new Map([
-    [",", 0],
-    [";", 0],
-    ["\t", 0],
-  ]);
+  const candidates = [",", ";", "\t"];
+  let counts = candidates.map(() => 0);
+  const records: number[][] = [];
   let quoted = false;
   let lines = 0;
   for (let index = 0; index < text.length && lines < 100; index += 1) {
@@ -230,14 +245,28 @@ function detectDelimiter(text: string): string {
       if (quoted && text[index + 1] === '"') index += 1;
       else quoted = !quoted;
     } else if (!quoted) {
-      if (char === "\n" || (char === "\r" && text[index + 1] !== "\n")) lines += 1;
-      if (counts.has(char)) counts.set(char, (counts.get(char) ?? 0) + 1);
+      if (char === "\n" || (char === "\r" && text[index + 1] !== "\n")) {
+        lines += 1;
+        records.push(counts);
+        counts = candidates.map(() => 0);
+      }
+      const candidate = candidates.indexOf(char);
+      if (candidate >= 0) counts[candidate] = counts[candidate]! + 1;
     }
   }
-  // Bank exports can have title rows and unquoted decimal commas.
-  if (counts.get("\t")) return "\t";
-  if (counts.get(";")) return ";";
-  return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ",";
+  records.push(counts);
+  // Prefer a repeated column width across logical records. A single tab or
+  // semicolon in metadata cannot override a consistently delimited table.
+  const scores = candidates.map((delimiter, index) => {
+    const widths = new Map<number, number>();
+    for (const record of records) {
+      const count = record[index]!;
+      if (count > 0) widths.set(count, (widths.get(count) ?? 0) + 1);
+    }
+    const mode = [...widths].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0];
+    return { delimiter, rows: mode?.[1] ?? 0, width: mode?.[0] ?? 0 };
+  });
+  return scores.sort((a, b) => b.rows - a.rows || b.width - a.width)[0]!.delimiter;
 }
 
 type AmountResult = { ok: true; minor: string; scale: number } | { ok: false; reason: string };

@@ -5,7 +5,7 @@ import type { AmountScale } from "@nexora/kernel";
 const TITLES: readonly [StatementType, RegExp][] = [
   [
     "income_statement",
-    /compte de r[ée]sultat|gewinn[-\s]+und verlustrechnung|cuenta de p[ée]rdidas y ganancias|損益計算書|statement of profit and loss/i,
+    /compte de r[ée]sultat|gewinn[-\s]+und verlustrechnung|cuenta de p[ée]rdidas y ganancias|損益計算書|statement of profit and loss|conto economico|winst[-\s]+en[-\s]+verliesrekening|jaarrekening|demonstra[cç][aã]o do resultado(?: do exerc[ií]cio)?|\bDRE\b/i,
   ],
   ["balance_sheet", /\bbilan\b|\bbilanz\b|balance de situaci[oó]n|貸借対照表/i],
 ];
@@ -35,11 +35,11 @@ const SCALES: readonly [AmountScale, RegExp][] = [
   ["millions", /[£$€]\s*m\b|\bmillion|百万円|\bMio\.?\s*(?:EUR|Euro)/i],
   [
     "thousands",
-    /\bthousands?\b|\b000s\b|['’]000|千円|\(\s*(?:(?:USD|GBP|EUR|INR|SGD|AED|JPY|AUD)\s*)?000\s*\)|\bmilliers\b|\bTausend\b|\bTEUR\b|\bmiles de euros\b/i,
+    /\bthousands?\b|\b000s\b|['’]000|千円|\(\s*(?:(?:USD|GBP|EUR|INR|SGD|AED|JPY|AUD)\s*)?000\s*\)|\bmilliers\b|\bTausend\b|\bTEUR\b|\bmiles de euros\b|\b(?:importi|valori) in migliaia di euro\b|\bx\s*(?:€|EUR)?\s*1\.000\b|\bem milhares de reais\b|R\$\s*mil\b/i,
   ],
   [
     "units",
-    /amounts in units|figures in units|\ben euros\b|\bin Euro\b|単位\s*[:：]?\s*円(?:\s|$|[)）])/i,
+    /amounts in units|figures in units|\bvalori in euro\b|\bbedragen in euro\b|\ben euros\b|\bin Euro\b|単位\s*[:：]?\s*円(?:\s|$|[)）])/i,
   ],
 ];
 export function statementScales(text: string): AmountScale[] {
@@ -59,4 +59,9 @@ export function unknownScale(text: string): boolean {
         statementScales(line).length === 0 &&
         !/\b(?:amounts|figures)\s+in\s+(?:USD|EUR|GBP|INR|JPY|AUD|SGD|AED)\s*$/i.test(line),
     );
+}
+
+/** A lone amount column can borrow an explicit statement title period. */
+export function localizedAmountHeader(text: string): boolean {
+  return /^(?:amount|total|importe|monto|金額|[$€£¥₹])$/i.test(text.trim());
 }

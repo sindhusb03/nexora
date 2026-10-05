@@ -7,6 +7,23 @@ import { bankRound3aCorpus } from "./fixtures/bank-round3a-corpus.js";
 import { bankValueCorpus } from "./fixtures/bank-value-corpus.js";
 import { AnalyticalDecimal } from "@nexora/kernel";
 
+// These source documents print running balances but no explicit closing balance.
+const inferredClosing = new Set([
+  "locale-direction",
+  "currency-date-cue",
+  "explicit-denominations",
+  "monotonic-evidence",
+  "summary-words-in-narration",
+  "boundary-date-evidence",
+  "metadata-fx",
+  "alder-oldest-types",
+  "alder-oldest-dr-cr",
+  "alder-newest-types",
+  "alder-newest-dr-cr",
+  "alder-no-opening",
+  "summary-word-description",
+]);
+
 describe("merged CSV delimiter handling", () => {
   it("strips a BOM for direct grid consumers", () => {
     expect(parseGrid('\uFEFF"Date";"Amount"\r\n2025-01-01;12.50')).toEqual([
@@ -86,7 +103,11 @@ describe("CSV display and ingestion compatibility", () => {
         new AnalyticalDecimal(cell.amount).toFixed(),
         cell.txnDate,
       ]),
-    ).toEqual(fixture.facts);
+    ).toEqual(
+      fixture.facts.filter(
+        ([label]) => label !== "Closing balance" || !inferredClosing.has(fixture.id),
+      ),
+    );
     if (fixture.issue) expect(parsed.issues.map((issue) => issue.code)).toContain(fixture.issue);
     else expect(parsed.issues).toEqual([]);
     expect(

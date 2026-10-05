@@ -1,7 +1,13 @@
 import { parseMoneyToken, statementAmountToDecimal } from "./decimal-text.js";
 import type { PdfLine, PdfText } from "./bank-pdf.js";
-import { explicitYearEnd, parseLooseDate, isStatementPeriodLabel } from "./period.js";
-import { parseStatementSheet } from "./statement-xlsx.js";
+import {
+  explicitYearEnd,
+  parseLooseDate,
+  isStatementPeriodLabel,
+  isReportRunLine,
+} from "./period.js";
+import { parseStatementSheet, parseStatementWorkbook } from "./statement-xlsx.js";
+import { amountColumnRole, blockTitle } from "./statement-blocks.js";
 import type { SheetCell } from "./xlsx.js";
 import { annotationHeader, localizedStatementType, nonPeriodHeader } from "./statement-locales.js";
 import type {
@@ -17,6 +23,8 @@ import type {
  * A page with no text layer never reaches this function.
  */
 export function parseStatementPdf(text: PdfText, fileName: string): StatementWorkbook {
+  const multiBlock = semanticPdfWorkbook(text, fileName);
+  if (multiBlock) return multiBlock;
   const sections = collectSections(text.lines);
   const sheets: StatementSheet[] = [];
   const skippedSheets: { sheetName: string; reason: string }[] = [];
@@ -43,6 +51,88 @@ export function parseStatementPdf(text: PdfText, fileName: string): StatementWor
   if (layoutUnresolved)
     return { sheets: [], skippedSheets, droppedAmounts, layoutUnresolved: true };
   return { sheets, skippedSheets, droppedAmounts, layoutUnresolved: false };
+}
+
+/** Keep both labels and all component amounts in geometric columns before splitting blocks. */
+function semanticPdfWorkbook(text: PdfText, fileName: string): StatementWorkbook | null {
+  const headers = text.lines.filter((line) =>
+    line.items.some((i) =>
+      /^(?:particulars|account(?: name)?|description|liabilities|assets|expenses|income|actif|passif)$/i.test(
+        i.text.trim(),
+      ),
+    ),
+  );
+  const titleCount = text.lines.flatMap((line) =>
+    line.items.filter((i) => blockTitle(i.text)),
+  ).length;
+  if (
+    !headers.some(
+      (line) =>
+        line.items.some((i) => amountColumnRole(i.text)) ||
+        line.items.filter((i) =>
+          /^(?:particulars|liabilities|assets|expenses|income)$/i.test(i.text.trim()),
+        ).length >= 2,
+    ) &&
+    titleCount < 2
+  )
+    return null;
+  const xs = [
+    ...new Set([
+      ...headers.flatMap((line) => line.items.map((i) => i.x)),
+      ...text.lines.flatMap((line) =>
+        line.items
+          .filter((i) => parseMoneyToken(i.text) !== null && !/^(19|20)\d{2}$/.test(i.text.trim()))
+          .map((i) => i.x),
+      ),
+      ...text.lines.flatMap((line) => line.items.filter((i) => blockTitle(i.text)).map((i) => i.x)),
+    ]),
+  ].sort((a, b) => a - b);
+  const cells: SheetCell[] = [];
+  text.lines.forEach((line, row) => {
+    const groups = new Map<number, string[]>();
+    for (const item of line.items) {
+      const col = nearest(item.x, xs);
+      if (col === null) continue;
+      const runs = groups.get(col + 1) ?? [];
+      runs.push(item.text);
+      groups.set(col + 1, runs);
+    }
+    for (const [col, runs] of groups)
+      cells.push({ row: row + 1, col, kind: "string", text: runs.join(" "), formula: false });
+  });
+  const workbook = parseStatementWorkbook([{ name: fileName, cells }], fileName);
+  return {
+    ...workbook,
+    sheets: workbook.sheets.map((sheet) => ({
+      ...sheet,
+      lines: sheet.lines.map((line) => ({
+        ...line,
+        values: line.values.map((value) => {
+          const source = text.lines[line.sheetRow - 1];
+          const item = source?.items.find(
+            (i) =>
+              nearest(i.x, xs) ===
+                (value.col ?? sheet.periods.find((p) => p.label === value.period)!.col) - 1 &&
+              i.text === value.raw,
+          );
+          return item && source
+            ? {
+                ...value,
+                location: {
+                  page: source.page,
+                  bbox: {
+                    x0: item.x,
+                    y0: source.y,
+                    x1: item.x + (item.width ?? 0),
+                    y1: source.y + (item.height ?? 0),
+                  },
+                },
+              }
+            : value;
+        }),
+      })),
+    })),
+  };
 }
 
 interface Section {
@@ -175,15 +265,17 @@ function headerAnchoredSheet(
   | { sheet: StatementSheet; droppedAmounts: { raw: string; page: number | null }[] }
   | { reason: string }
   | null {
-  const headerIndex = section.lines.findIndex((line) =>
-    line.items.some(
-      (i) =>
-        i.x > 150 &&
-        (/^(?:FY\s*)?(?:19|20)\d{2}$/.test(i.text.trim()) ||
-          parseLooseDate(i.text) !== null ||
-          isStatementPeriodLabel(i.text) ||
-          /^(?:year ended|\d{4}年)$/i.test(i.text.trim())),
-    ),
+  const headerIndex = section.lines.findIndex(
+    (line) =>
+      !isReportRunLine(lineText(line)) &&
+      line.items.some(
+        (i) =>
+          i.x > 150 &&
+          (/^(?:FY\s*)?(?:19|20)\d{2}$/.test(i.text.trim()) ||
+            parseLooseDate(i.text) !== null ||
+            isStatementPeriodLabel(i.text) ||
+            /^(?:year ended|\d{4}年)$/i.test(i.text.trim())),
+      ),
   );
   if (headerIndex < 0) return null;
   const header = section.lines[headerIndex]!;
@@ -272,6 +364,7 @@ function columnLabel(
 ): string {
   const phrases: string[] = [];
   for (const header of headers) {
+    if (isReportRunLine(header.items.map((item) => item.text).join(" "))) continue;
     const phrase = header.items
       .filter(
         (item) =>
