@@ -61,23 +61,34 @@ describe("workspace MVP", () => {
     );
     expect(viewer.status).toBe(403);
 
-    const copilot = await call(app, "POST", "/v1/copilot", {
-      actor: "sindhu",
-      tenant,
-      body: { message: "Explain revenue and cash.", agent: "general" },
-    });
-    expect(copilot.status).toBe(200);
-    const answer = (await copilot.json()) as {
-      mode: string;
-      accepted: boolean;
-      text: string;
-      rejectedNumbers: string[];
-    };
-    expect(answer.mode).toBe("mock");
-    expect(answer.accepted).toBe(true);
-    expect(answer.rejectedNumbers).toEqual([]);
-    expect(answer.text).toContain("15800000");
-    expect(answer.text.toLowerCase()).not.toContain("agi");
+    const aiEnvKeys = ["AI_API_KEY", "OPENAI_API_KEY", "AI_BASE_URL"] as const;
+    const previousAiEnv = aiEnvKeys.map((key) => process.env[key]);
+    for (const key of aiEnvKeys) delete process.env[key];
+    try {
+      const copilot = await call(app, "POST", "/v1/copilot", {
+        actor: "sindhu",
+        tenant,
+        body: { message: "Explain revenue and cash.", agent: "general" },
+      });
+      expect(copilot.status).toBe(200);
+      const answer = (await copilot.json()) as {
+        mode: string;
+        accepted: boolean;
+        text: string;
+        rejectedNumbers: string[];
+      };
+      expect(answer.mode).toBe("mock");
+      expect(answer.accepted).toBe(true);
+      expect(answer.rejectedNumbers).toEqual([]);
+      expect(answer.text).toContain("15800000");
+      expect(answer.text.toLowerCase()).not.toContain("agi");
+    } finally {
+      for (const [index, key] of aiEnvKeys.entries()) {
+        const previous = previousAiEnv[index];
+        if (previous === undefined) delete process.env[key];
+        else process.env[key] = previous;
+      }
+    }
 
     const platform = await call(app, "GET", "/v1/admin/platform", { actor: "platform-admin" });
     expect(platform.status).toBe(200);
