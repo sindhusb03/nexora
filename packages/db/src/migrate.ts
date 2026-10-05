@@ -35,6 +35,17 @@ const BASELINE_MARKERS: Readonly<Record<string, string>> = {
   "0003_identity.sql": "auth_user",
   "0004_workspace.sql": "workspace_record",
   "0005_auth_hosting.sql": "auth_audit_event",
+  "0006_ingestion.sql": "ingestion_job",
+};
+
+/**
+ * Column markers for migrations that alter an existing table. Keying 0007 off
+ * legal_entity itself would skip the ALTER on a database that predates the column.
+ */
+const BASELINE_COLUMNS: Readonly<
+  Record<string, { readonly table: string; readonly column: string }>
+> = {
+  "0007_fiscal_year_end.sql": { table: "legal_entity", column: "fiscal_year_end_month" },
 };
 
 export async function runMigrations(
@@ -126,6 +137,11 @@ async function baseline(
     const marker = BASELINE_MARKERS[migration.name];
     if (marker && (await tableExists(db, marker))) {
       present.push(migration);
+      continue;
+    }
+    const column = BASELINE_COLUMNS[migration.name];
+    if (column && (await columnExists(db, column.table, column.column))) {
+      present.push(migration);
     }
   }
   if (present.length > 0 && !allowed) {
@@ -165,6 +181,17 @@ function assertKnown(migrations: readonly Migration[], applied: ReadonlyMap<stri
       `The database has migrations this build does not know: ${unknown.join(", ")}. Deploy the matching build.`,
     );
   }
+}
+
+async function columnExists(db: SqlExecutor, table: string, column: string): Promise<boolean> {
+  const result = await db.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+     ) AS present`,
+    [table, column],
+  );
+  return result.rows[0]?.present === true;
 }
 
 async function tableExists(db: SqlExecutor, table: string): Promise<boolean> {

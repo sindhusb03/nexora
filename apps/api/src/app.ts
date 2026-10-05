@@ -16,6 +16,8 @@ import { requireIdentity } from "./auth/session.js";
 import { ConfigError, type AuthConfig, type HttpConfig } from "./config.js";
 import { ApiError, readActor, statusFor, type AppContext, type AppEnv } from "./http.js";
 import { registerFileImportRoutes } from "./imports/file-import.js";
+import { reviewMappingProposer, stubMappingProposer } from "./ingestion/proposer.js";
+import { registerIngestionRoutes } from "./ingestion/routes.js";
 import { errorFields, jsonLogger, requestLog, type Logger } from "./observability.js";
 import { noopReporter, type ErrorReporter } from "./reporting.js";
 import {
@@ -113,6 +115,7 @@ export function createApp(options: AppOptions) {
   });
   app.use("/v1/*", corsMiddleware);
   app.use("/auth/*", corsMiddleware);
+  app.use("/ingestion/*", corsMiddleware);
 
   const credentialLimit = rateLimit({
     name: "sign-in",
@@ -137,6 +140,7 @@ export function createApp(options: AppOptions) {
   app.use("/auth/2fa/disable", credentialLimit);
   app.use("/auth/*", generalLimit);
   app.use("/v1/*", generalLimit);
+  app.use("/ingestion/*", generalLimit);
 
   const limitBody = bodyLimit({
     maxSize: http.bodyLimitBytes,
@@ -153,6 +157,7 @@ export function createApp(options: AppOptions) {
   });
   app.use("/v1/*", limitBody);
   app.use("/auth/*", limitBody);
+  app.use("/ingestion/*", limitBody);
   app.use("/v1/*", async (c, next) => {
     await next();
     c.header("cache-control", "no-store");
@@ -161,8 +166,16 @@ export function createApp(options: AppOptions) {
     await next();
     c.header("cache-control", "no-store");
   });
+  app.use("/ingestion/*", async (c, next) => {
+    await next();
+    c.header("cache-control", "no-store");
+  });
   app.use(
     "/v1/*",
+    requireIdentity({ store: options.store, auth: options.auth, webOrigins: http.webOrigins }),
+  );
+  app.use(
+    "/ingestion/*",
     requireIdentity({ store: options.store, auth: options.auth, webOrigins: http.webOrigins }),
   );
 
@@ -342,6 +355,11 @@ export function createApp(options: AppOptions) {
 
   registerProgramRoutes(app, program);
   registerFileImportRoutes(app, options.store);
+  registerIngestionRoutes(app, {
+    store: options.store,
+    platformAdminActorIds: options.platformAdminActorIds,
+    proposer: options.production ? reviewMappingProposer() : stubMappingProposer(),
+  });
   registerWorkspaceRoutes(app, {
     store: options.store,
     directory: options.directory ?? createDirectory(),

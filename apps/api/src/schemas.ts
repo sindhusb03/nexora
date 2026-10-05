@@ -16,10 +16,23 @@ export const membershipSchema = z.object({
   role: z.enum(["owner", "controller", "viewer", "auditor"]),
 });
 
-export const entitySchema = z.object({
-  legalName: z.string().trim().min(1).max(200),
-  functionalCurrency: z.string().regex(/^[A-Z]{3}$/),
-});
+export const entitySchema = z
+  .object({
+    legalName: z.string().trim().min(1).max(200),
+    functionalCurrency: z.string().regex(/^[A-Z]{3}$/),
+    fiscalYearEndMonth: z.number().int().min(1).max(12).optional(),
+    fiscalYearEndDay: z.number().int().min(1).max(31).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasMonth = value.fiscalYearEndMonth !== undefined;
+    const hasDay = value.fiscalYearEndDay !== undefined;
+    if (hasMonth !== hasDay) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Fiscal year end needs both a month and a day",
+      });
+    }
+  });
 
 export const accountSchema = z.object({
   entityId: uuid,

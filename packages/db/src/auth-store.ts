@@ -24,6 +24,7 @@ type AuthMethods = Pick<
   | "rotateSession"
   | "createMagicLink"
   | "createMagicLinkForEmail"
+  | "requestMagicLink"
   | "consumeMagicLink"
   | "saveTotp"
   | "confirmTotp"
@@ -49,6 +50,42 @@ type AuthMethods = Pick<
 
 export function createAuthStore(db: AppDatabase): AuthMethods {
   return {
+    ...magicLinkMethods(db),
+    requestMagicLink(input, updateLockout) {
+      return authTx(db, async (tx) => {
+        const scoped = magicLinkMethods(tx, (_db, work) => work(tx));
+        const lockout = updateLockout(await scoped.readLockout(input.subjectHash));
+        // One statement writes all three effects. The audit must succeed before commit.
+        const inserted = await tx.execute(sql`
+          WITH counted AS (
+            INSERT INTO auth_lockout (subject_hash, failures, window_started_at, locked_until)
+            VALUES (${input.subjectHash}, ${lockout.failures},
+                    ${lockout.windowStartedAt}::timestamptz, ${lockout.lockedUntil}::timestamptz)
+            ON CONFLICT (subject_hash) DO UPDATE
+              SET failures = EXCLUDED.failures,
+                  window_started_at = EXCLUDED.window_started_at,
+                  locked_until = EXCLUDED.locked_until
+            RETURNING subject_hash
+          ), link AS (
+            INSERT INTO auth_magic_link (token_hash, actor_id, created_at, expires_at)
+            SELECT ${input.tokenHash}, actor_id, ${input.createdAt}::timestamptz,
+                   ${input.expiresAt}::timestamptz
+              FROM auth_user CROSS JOIN counted
+             WHERE lower(email) = ${input.email} AND disabled = false
+            RETURNING actor_id
+          )
+          INSERT INTO auth_audit_event
+            (event_id, event_type, occurred_at, actor_id, tenant_id, request_id, outcome, payload)
+          SELECT ${input.eventId}::uuid, 'magic_link_sent', ${new Date().toISOString()}::timestamptz,
+                 (SELECT actor_id FROM link), NULL, ${input.requestId},
+                 CASE WHEN EXISTS (SELECT 1 FROM link) THEN 'success' ELSE 'failure' END, '{}'::jsonb
+          RETURNING actor_id
+        `);
+        const row = firstRow(inserted);
+        const actorId = row?.actor_id ?? row?.actorId;
+        return typeof actorId === "string" ? actorId : null;
+      });
+    },
     sessionState(sessionId) {
       return appTx(db, async (tx) => {
         const rows = await tx
@@ -255,31 +292,6 @@ export function createAuthStore(db: AppDatabase): AuthMethods {
           )
           .returning({ codeHash: authRecoveryCode.codeHash });
         return rows.length === 1;
-      });
-    },
-
-    readLockout(subjectHash) {
-      return authTx(db, async (tx) => {
-        const rows = await tx
-          .select({
-            subjectHash: authLockout.subjectHash,
-            failures: authLockout.failures,
-            windowStartedAt: sql<string>`to_char(${authLockout.windowStartedAt} AT TIME ZONE 'UTC', ${sql.raw(ISO_UTC)})`,
-            lockedUntil: sql<
-              string | null
-            >`to_char(${authLockout.lockedUntil} AT TIME ZONE 'UTC', ${sql.raw(ISO_UTC)})`,
-          })
-          .from(authLockout)
-          .where(eq(authLockout.subjectHash, subjectHash))
-          .limit(1);
-        const row = rows[0];
-        if (!row) return null;
-        return {
-          subjectHash: row.subjectHash,
-          failures: row.failures,
-          windowStartedAt: row.windowStartedAt,
-          lockedUntil: row.lockedUntil,
-        } satisfies LockoutRecord;
       });
     },
 
@@ -503,6 +515,39 @@ async function insertAudit(
     outcome: input.outcome,
     payload: input.payload,
   });
+}
+
+/** Reuse the lockout read inside the request transaction without nesting transactions. */
+function magicLinkMethods(
+  db: AppDatabase,
+  transact: typeof authTx = authTx,
+): Pick<IdentityStore, "readLockout"> {
+  return {
+    readLockout(subjectHash) {
+      return transact(db, async (tx) => {
+        const rows = await tx
+          .select({
+            subjectHash: authLockout.subjectHash,
+            failures: authLockout.failures,
+            windowStartedAt: sql<string>`to_char(${authLockout.windowStartedAt} AT TIME ZONE 'UTC', ${sql.raw(ISO_UTC)})`,
+            lockedUntil: sql<
+              string | null
+            >`to_char(${authLockout.lockedUntil} AT TIME ZONE 'UTC', ${sql.raw(ISO_UTC)})`,
+          })
+          .from(authLockout)
+          .where(eq(authLockout.subjectHash, subjectHash))
+          .limit(1);
+        const row = rows[0];
+        if (!row) return null;
+        return {
+          subjectHash: row.subjectHash,
+          failures: row.failures,
+          windowStartedAt: row.windowStartedAt,
+          lockedUntil: row.lockedUntil,
+        } satisfies LockoutRecord;
+      });
+    },
+  };
 }
 
 export async function appTx<T>(db: AppDatabase, fn: (tx: AppDatabase) => Promise<T>): Promise<T> {

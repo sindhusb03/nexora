@@ -85,25 +85,37 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     const body = magicSchema.parse(await c.req.json());
     const subject = lockoutSubject("magic", body.email);
     const now = new Date();
-    const current = await store.readLockout(subject);
-    const status = lockoutStatus(current, now);
-    if (status.locked) {
-      c.header("retry-after", String(status.retryAfterSeconds));
-      throw new ApiError(
-        429,
-        "AUTH_LOCKED",
-        "Sign-in is temporarily unavailable. Try again later.",
-      );
-    }
-    await store.writeLockout({ subjectHash: subject, ...nextLockout(current, now) });
+    // Include database work in the floor so account lookup and insertion cannot expose existence.
     const started = performance.now();
     const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, "");
-    const createdAt = now.toISOString();
-    const actorId = await store.createMagicLinkForEmail({
-      email: body.email,
-      tokenHash: sha256(token),
-      createdAt,
-      expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
+    const actorId = await store.requestMagicLink(
+      {
+        subjectHash: subject,
+        email: body.email,
+        tokenHash: sha256(token),
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + MAGIC_TTL_MS).toISOString(),
+        eventId: crypto.randomUUID(),
+        requestId: c.get("requestId"),
+      },
+      (current) => {
+        const status = lockoutStatus(current, now);
+        if (status.locked) {
+          c.header("retry-after", String(status.retryAfterSeconds));
+          throw new ApiError(
+            429,
+            "AUTH_LOCKED",
+            "Sign-in is temporarily unavailable. Try again later.",
+          );
+        }
+        return { subjectHash: subject, ...nextLockout(current, now) };
+      },
+    );
+    logger[actorId ? "info" : "warn"]("auth.magic_link_sent", {
+      requestId: c.get("requestId"),
+      actorId,
+      tenantId: null,
+      outcome: actorId ? "success" : "failure",
     });
     const origin = deps.webOrigins[0] ?? "http://127.0.0.1:4317";
     const text = `Sign in to Nexora: ${origin}/studio?magic=${token}\nThis link expires in 15 minutes and works once.`;
@@ -119,13 +131,6 @@ export function registerFactorRoutes(app: Hono<AppEnv>, deps: FactorDeps): void 
     } else {
       void Promise.resolve(text.length);
     }
-    await recordAuth(store, logger, {
-      eventType: "magic_link_sent",
-      outcome: actorId ? "success" : "failure",
-      actorId,
-      tenantId: null,
-      requestId: c.get("requestId"),
-    });
     await holdMagicResponse(started);
     return c.json(
       { message: "If an account exists for that address, a sign-in link was sent." },

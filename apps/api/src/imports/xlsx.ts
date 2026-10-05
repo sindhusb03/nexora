@@ -7,11 +7,14 @@ export interface SheetCell {
   /** The stored text exactly as written in the file (the raw `<v>` for numbers). */
   readonly text: string;
   readonly formula: boolean;
+  readonly dateFormat?: boolean;
+  readonly date1904?: boolean;
 }
 
 export interface Worksheet {
   readonly name: string;
   readonly cells: readonly SheetCell[];
+  readonly merges?: readonly { row: number; col: number; endRow: number; endCol: number }[];
 }
 
 export class WorkbookError extends Error {
@@ -31,6 +34,7 @@ export function readWorkbook(bytes: Uint8Array): readonly Worksheet[] {
           file.name === "xl/workbook.xml" ||
           file.name === "xl/_rels/workbook.xml.rels" ||
           file.name === "xl/sharedStrings.xml" ||
+          file.name === "xl/styles.xml" ||
           /^xl\/worksheets\/[^/]+\.xml$/.test(file.name);
         if (!wanted) return false;
         total += file.originalSize;
@@ -61,6 +65,9 @@ export function readWorkbook(bytes: Uint8Array): readonly Worksheet[] {
     : [];
 
   const sheets: Worksheet[] = [];
+  const date1904 = /<workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(strFromU8(workbookXml));
+  const styles = files["xl/styles.xml"] ? strFromU8(files["xl/styles.xml"]) : "";
+  const dateStyles = readDateStyles(styles);
   for (const sheet of strFromU8(workbookXml).matchAll(/<sheet\b([^>]*?)\/?>/g)) {
     const attrs = sheet[1] ?? "";
     const name = decodeXml(attr(attrs, "name") ?? "");
@@ -68,7 +75,15 @@ export function readWorkbook(bytes: Uint8Array): readonly Worksheet[] {
     const path = relId ? targets.get(relId) : undefined;
     const part = path ? files[path] : undefined;
     if (!part) continue;
-    sheets.push({ name, cells: readCells(strFromU8(part), strings) });
+    const xml = strFromU8(part);
+    const merges = [...xml.matchAll(/<mergeCell\b[^>]*\bref="([A-Z]+\d+):([A-Z]+\d+)"/g)].flatMap(
+      (m) => {
+        const start = parseRef(m[1]!);
+        const end = parseRef(m[2]!);
+        return start && end ? [{ ...start, endRow: end.row, endCol: end.col }] : [];
+      },
+    );
+    sheets.push({ name, cells: readCells(xml, strings, dateStyles, date1904), merges });
   }
   return sheets;
 }
@@ -84,7 +99,31 @@ function readSharedStrings(xml: string): string[] {
   return out;
 }
 
-function readCells(xml: string, strings: readonly string[]): SheetCell[] {
+function readDateStyles(xml: string): ReadonlySet<number> {
+  const custom = new Map<number, string>();
+  for (const match of xml.matchAll(/<numFmt\b([^>]*?)\/?\s*>/g)) {
+    custom.set(
+      Number(attr(match[1] ?? "", "numFmtId")),
+      decodeXml(attr(match[1] ?? "", "formatCode") ?? ""),
+    );
+  }
+  const styles = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(xml)?.[1] ?? "";
+  const dates = new Set<number>();
+  [...styles.matchAll(/<xf\b([^>]*?)\/?\s*>/g)].forEach((m, i) => {
+    const id = Number(attr(m[1] ?? "", "numFmtId"));
+    const format = (custom.get(id) ?? "").replace(/"[^"]*"|\\.|\[[^\]]*\]/g, "");
+    if ((id >= 14 && id <= 17) || id === 22 || (id >= 27 && id <= 36) || /[yd]/i.test(format))
+      dates.add(i);
+  });
+  return dates;
+}
+
+function readCells(
+  xml: string,
+  strings: readonly string[],
+  dateStyles: ReadonlySet<number>,
+  date1904: boolean,
+): SheetCell[] {
   const cells: SheetCell[] = [];
   for (const rowMatch of xml.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     const rowNo = Number.parseInt(attr(rowMatch[1] ?? "", "r") ?? "", 10);
@@ -112,14 +151,22 @@ function readCells(xml: string, strings: readonly string[]): SheetCell[] {
       if (type === "s") {
         const text = strings[Number.parseInt(value, 10)];
         if (text !== undefined) cells.push({ row, col, kind: "string", text, formula });
-      } else if (type === "str") {
+      } else if (type === "str" || type === "d") {
         cells.push({ row, col, kind: "string", text: decodeXml(value), formula });
       } else if (type === "b") {
         cells.push({ row, col, kind: "boolean", text: value, formula });
       } else if (type === "e") {
         cells.push({ row, col, kind: "error", text: decodeXml(value), formula });
       } else {
-        cells.push({ row, col, kind: "number", text: value.trim(), formula });
+        cells.push({
+          row,
+          col,
+          kind: "number",
+          text: value.trim(),
+          formula,
+          dateFormat: dateStyles.has(Number(attr(attrs, "s") ?? 0)),
+          date1904,
+        });
       }
     }
   }

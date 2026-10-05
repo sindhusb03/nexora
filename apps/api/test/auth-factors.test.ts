@@ -630,7 +630,7 @@ describe("auth regressions", () => {
     });
     const clock = vi.spyOn(performance, "now").mockReturnValue(1_000);
     const hash = vi.spyOn(oidc, "sha256");
-    const create = vi.spyOn(store, "createMagicLinkForEmail");
+    const create = vi.spyOn(store, "requestMagicLink");
     const realTimeout = globalThis.setTimeout;
     const releases: (() => void)[] = [];
     let scheduled!: () => void;

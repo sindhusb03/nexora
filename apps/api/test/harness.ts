@@ -32,7 +32,7 @@ export function testAuth(overrides: Partial<AuthConfig> = {}): AuthConfig {
 
 export async function testApp(overrides: Partial<AppOptions> = {}): Promise<TestApp> {
   return createApp({
-    store: await createPgliteStore(),
+    store: overrides.store ?? (await createPgliteStore()),
     platformAdminActorIds: ["platform-admin"],
     auth: testAuth(),
     http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 100_000 } },

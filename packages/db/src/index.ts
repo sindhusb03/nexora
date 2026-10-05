@@ -14,7 +14,9 @@ export type {
   CalculationRunRecord,
   EntityRecord,
   IdentityStore,
+  IngestionPostCommit,
   JournalRecord,
+  LedgerPostSnapshot,
   LedgerStore,
   LockoutRecord,
   PeriodRecord,
@@ -26,4 +28,5 @@ export type {
 export { currentRlsSession, runWithRlsSession } from "./session-context.js";
 export type { RlsSessionContext } from "./session-context.js";
 export { schema } from "./schema.js";
+export { ingestionSchema } from "./ingestion-schema.js";
 export { createLedgerStore, isUniqueViolation } from "./store.js";

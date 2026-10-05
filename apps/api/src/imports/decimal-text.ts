@@ -121,3 +121,107 @@ export function printedAmountToDecimal(text: string): string | null {
 export function isPrintedAmount(text: string): boolean {
   return STATEMENT_AMOUNT.test(text.trim());
 }
+
+const GROUPED_NUMBER = "\\d{1,3}(?:,\\d{2})*,\\d{3}|\\d{1,3}(?:,\\d{3})+|\\d+";
+const CURRENCY_PREFIX =
+  "S\\$|A\\$|US\\$|C\\$|NZ\\$|HK\\$|R\\$|₹|¥|£|€|\\$|Rs\\.?|INR|AED|USD|EUR|GBP|SGD|AUD|JPY";
+const MONEY_SOURCE = `((?:\\((?:${GROUPED_NUMBER})(?:\\.\\d+)?\\)|-?(?:${GROUPED_NUMBER})(?:\\.\\d+)?)-?)(?:\\s*(CR|DR))?`;
+
+function stripCurrency(value: string): string {
+  return value
+    .replace(new RegExp(`^(?:${CURRENCY_PREFIX})\\s*`, "i"), "")
+    .replace(/\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY)$/i, "")
+    .trim();
+}
+
+/** Full amount token. `1223456.78` stays intact; Indian and western grouping, brackets, and CR/DR are accepted. */
+export type NumberConvention = "dot" | "comma" | "unknown" | "conflict";
+
+/** Infer once from amount cells, never from years, reference numbers, or currency alone. */
+export function numberConvention(values: readonly string[], context = ""): NumberConvention {
+  const evidence = new Set<"dot" | "comma">();
+  if (/\b(?:de-DE|de-AT|fr-FR|it-IT|es-ES|pt-PT|nl-NL)\b|Dezember|décembre/i.test(context))
+    evidence.add("comma");
+  if (/\b(?:en-US|en-GB|en-IN|en-AU|ja-JP)\b/i.test(context)) evidence.add("dot");
+  for (const raw of values) {
+    const token = stripCurrency(raw.normalize("NFKC")).replace(/[()\s+-]|CR|DR/gi, "");
+    if (/^\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?$/.test(token) || /^\d[\d.]*,\d{1,2}$/.test(token))
+      evidence.add("comma");
+    if (
+      /^\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?$/.test(token) ||
+      /^\d[\d,]*\.\d{1,2}$/.test(token) ||
+      /^\d+\.\d{4,}$/.test(token)
+    )
+      evidence.add("dot");
+    if (/^\d{1,3}(?:,\d{2})+,\d{3}(?:\.\d+)?$/.test(token)) evidence.add("dot");
+  }
+  return evidence.size > 1 ? "conflict" : ([...evidence][0] ?? "unknown");
+}
+
+export function parseMoneyToken(value: string, convention?: NumberConvention): string | null {
+  let text = stripCurrency(value.normalize("NFKC").replace(/\u2212/g, "-")).trim();
+  text = text.replace(/(\d)[ '\u2019](?=\d{3}(?:[ '\u2019.,)]|$))/g, "$1");
+  if (convention === "conflict") return null;
+  if (convention === "unknown" && /\d[.,]\d{3}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
+  if (convention === "comma" || /\d{1,3}(?:\.\d{3}){2,}/.test(text)) {
+    if (!/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?(?:\)|-|\s*(?:CR|DR))?$/i.test(text))
+      return null;
+    text = text.replace(/\./g, "").replace(",", ".");
+  } else if (convention === "dot" && /,\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
+  // A decimal comma is unambiguous with one or two fractional digits. Three digits
+  // remain grouping; never remove an arbitrary comma as CSV previously did.
+  if (/\d,\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+    if (/^(?:\(?-?)(?:\d{1,3}(?:\.\d{3})+|\d+),\d{1,2}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) {
+      text = text.replace(/\./g, "").replace(",", ".");
+    }
+  }
+  if (/^\(?-?\d+,\d{2}\)?$/.test(text)) text = text.replace(",", ".");
+  const match = new RegExp(`^\\s*${MONEY_SOURCE}\\s*$`, "i").exec(text);
+  if (!match?.[1]) return null;
+  return signedMoney(match[1], match[2] ?? null);
+}
+
+export function findMoneyTokens(text: string): { raw: string; amount: string }[] {
+  const found: { raw: string; amount: string }[] = [];
+  const pattern = new RegExp(
+    `(?<![\\w.,/-])(?:${CURRENCY_PREFIX}\\s*)?${MONEY_SOURCE}(?:\\s*(?:INR|AED|USD|EUR|GBP|SGD|AUD|JPY))?(?![\\w/.,])`,
+    "gi",
+  );
+  for (const match of text.matchAll(pattern)) {
+    const raw = match[0] ?? "";
+    const amount = parseMoneyToken(raw);
+    if (!amount) continue;
+    found.push({ raw, amount });
+  }
+  return found;
+}
+
+function signedMoney(body: string, marker: string | null): string | null {
+  let negative = false;
+  let number = body.trim();
+  if (number.startsWith("(") && number.endsWith(")")) {
+    negative = true;
+    number = number.slice(1, -1).trim();
+  }
+  if (number.startsWith("-")) {
+    negative = true;
+    number = number.slice(1).trim();
+  }
+  if (number.endsWith("-")) {
+    negative = true;
+    number = number.slice(0, -1).trim();
+  }
+  if (!isGroupedNumber(number)) return null;
+  if (marker && /^DR$/i.test(marker)) negative = true;
+  const digits = number.replace(/,/g, "").replace(/^0+(?=\d)/, "");
+  const normalized = digits.length === 0 ? "0" : digits;
+  return negative && normalized !== "0" ? `-${normalized}` : normalized;
+}
+
+function isGroupedNumber(value: string): boolean {
+  return (
+    /^\d+(\.\d+)?$/.test(value) ||
+    /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(value) ||
+    /^\d{1,3}(?:,\d{2})*,\d{3}(?:\.\d+)?$/.test(value)
+  );
+}

@@ -62,6 +62,45 @@ export { projectScenario } from "./scenario.js";
 export { valueDcfSensitivity } from "./sensitivity.js";
 export type { DcfShock } from "./sensitivity.js";
 export { stateHash } from "./state-hash.js";
+export { canonicalAccount, listCanonicalAccounts } from "./ingestion-chart.js";
+export type { CanonicalAccount } from "./ingestion-chart.js";
+export { runIngestionChecks } from "./ingestion-checks.js";
+export { statementAmountsEqual } from "./statement-equation.js";
+export {
+  mapLineLabel,
+  mappingIsAutoAcceptable,
+  normalizeLabel,
+  statementRole,
+} from "./ingestion-mapping.js";
+export type { MappingHit, MappingMethod } from "./ingestion-mapping.js";
+export { buildLinkedModel, cumulativeLedgerBalances } from "./ingestion-model.js";
+export type {
+  LinkedModel,
+  LinkedModelResult,
+  ModelJournal,
+  ModelJournalLine,
+} from "./ingestion-model.js";
+export {
+  INGESTION_CHECK_IDS,
+  INGESTION_FORMULA_VERSION,
+  MAPPING_AUTO_ACCEPT_CONFIDENCE,
+} from "./ingestion-types.js";
+export type {
+  AmountRole,
+  AmountScale,
+  BalanceKind,
+  IngestionAmount,
+  IngestionBank,
+  IngestionCheckFailure,
+  IngestionCheckId,
+  IngestionCheckInput,
+  IngestionCheckReport,
+  IngestionCheckResult,
+  IngestionCoverage,
+  IngestionDocument,
+  IngestionSeverity,
+  IngestionStatement,
+} from "./ingestion-types.js";
 export { buildStatements } from "./statements.js";
 export type { CashFlowClass, ClassifiedLine, ReportClass, StatementSet } from "./statements.js";
 export { translateTrialBalance } from "./translation.js";

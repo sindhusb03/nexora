@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   char,
+  smallint,
   check,
   date,
   index,
@@ -44,6 +45,8 @@ export const legalEntity = pgTable("legal_entity", {
     .references(() => tenant.tenantId),
   legalName: text("legal_name").notNull(),
   functionalCurrency: char("functional_currency", { length: 3 }).notNull(),
+  fiscalYearEndMonth: smallint("fiscal_year_end_month"),
+  fiscalYearEndDay: smallint("fiscal_year_end_day"),
   retainedEarningsAccountId: uuid("retained_earnings_account_id"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
 });
@@ -199,6 +202,7 @@ export const domainEvent = pgTable("domain_event", {
 });
 
 import { identitySchema } from "./identity-schema.js";
+import { ingestionSchema } from "./ingestion-schema.js";
 import { programSchema } from "./program-schema.js";
 import { workspaceRecord } from "./workspace-schema.js";
 
@@ -216,4 +220,5 @@ export const schema = {
   ...programSchema,
   ...identitySchema,
   workspaceRecord,
+  ...ingestionSchema,
 };
