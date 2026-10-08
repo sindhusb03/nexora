@@ -11,6 +11,7 @@ export const MIGRATION_NAMES = [
   "0005_auth_hosting.sql",
   "0006_ingestion.sql",
   "0007_fiscal_year_end.sql",
+  "0008_actor_company_read.sql",
 ] as const;
 
 export interface Migration {

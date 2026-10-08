@@ -10,6 +10,17 @@ export interface TenantRecord {
   readonly createdAt: string;
 }
 
+/** A company the signed-in actor can open. Suspended and left seats are omitted. */
+export interface ActorCompany {
+  readonly tenantId: string;
+  readonly name: string;
+  readonly homeRegion: string;
+  readonly status: "active" | "suspended";
+  readonly entityId: string;
+  readonly periodId: string;
+  readonly members: readonly { readonly actorId: string; readonly role: string }[];
+}
+
 export interface EntityRecord {
   readonly entityId: string;
   readonly tenantId: string;
@@ -370,6 +381,12 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
   }): Promise<void>;
   getTenant(tenantId: string): Promise<TenantRecord | null>;
   listRoles(tenantId: string, actorId: string): Promise<readonly Role[]>;
+  /** Companies whose active membership matches this actor. No tenant is selected. */
+  listActorCompanies(actorId: string): Promise<readonly ActorCompany[]>;
+  /** Active seats in one tenant. The caller must already be inside that tenant. */
+  listMemberships(
+    tenantId: string,
+  ): Promise<readonly { readonly actorId: string; readonly role: string }[]>;
   createEntity(input: { entity: EntityRecord; audit: AuditWrite }): Promise<EntityRecord>;
   getEntity(tenantId: string, entityId: string): Promise<EntityRecord | null>;
   listEntities(tenantId: string): Promise<readonly EntityRecord[]>;

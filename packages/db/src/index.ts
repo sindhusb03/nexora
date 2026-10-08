@@ -5,6 +5,7 @@ export { MigrationError, migrationStatus, runMigrations } from "./migrate.js";
 export type { MigrationReport, MigrationStatus, SqlExecutor } from "./migrate.js";
 export type {
   AccountRecord,
+  ActorCompany,
   AuditRecord,
   AuditWrite,
   AuthAuditEventType,

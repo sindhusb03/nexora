@@ -50,6 +50,7 @@ import {
   setFlag,
   setTenantStatus,
 } from "./api";
+import { CompanySwitcher } from "./company-switcher";
 import { NAV_GROUPS, STUDIO_COMMANDS, type CommandItem } from "./commands";
 import { Palette } from "./palette";
 import {
@@ -265,16 +266,27 @@ export function StudioApp() {
       let active = session;
       if (!active.tenantId) {
         if (!provisioned.current) {
-          const tenant = await provisionTenant(active.csrfToken, {
-            name: input.name,
-            homeRegion: active.region,
-            ownerActorId: active.actorId,
-          });
-          provisioned.current = {
-            tenantId: tenant.tenantId,
-            name: tenant.name,
-            csrf: active.csrfToken,
-          };
+          const listed = await listCompanies(active.csrfToken);
+          const existing =
+            listed.find((company) => company.name === input.name) ?? listed[0] ?? null;
+          if (existing) {
+            provisioned.current = {
+              tenantId: existing.tenantId,
+              name: existing.name,
+              csrf: active.csrfToken,
+            };
+          } else {
+            const tenant = await provisionTenant(active.csrfToken, {
+              name: input.name,
+              homeRegion: active.region,
+              ownerActorId: active.actorId,
+            });
+            provisioned.current = {
+              tenantId: tenant.tenantId,
+              name: tenant.name,
+              csrf: active.csrfToken,
+            };
+          }
         }
         active = await selectTenant(provisioned.current.csrf, provisioned.current.tenantId);
         setSession(active);
@@ -428,7 +440,26 @@ export function StudioApp() {
     try {
       const active = await selectTenant(session.csrfToken, tenantId);
       setSession(active);
-      setWorkspace(await fetchWorkspace(active.csrfToken));
+      setWorkspace(null);
+      setOpened(null);
+      try {
+        const snapshot = await fetchWorkspace(active.csrfToken);
+        setWorkspace(snapshot);
+        setPeriodIndex(Math.max(0, snapshot.statements.periods.length - 1));
+      } catch (caught) {
+        if (!isUnreadyCompany(caught)) throw caught;
+        const entities = await listLegalEntities(active.csrfToken);
+        const entity = entities[0];
+        if (entity) {
+          setOpened({
+            name: entity.legalName,
+            legalName: entity.legalName,
+            currency: entity.functionalCurrency,
+            region: active.region,
+            fiscalYearEndLabel: null,
+          });
+        }
+      }
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "The company could not be opened.");
     }
@@ -559,26 +590,12 @@ export function StudioApp() {
             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
-        <label className="nx-switcher">
-          <span className="nx-nav-label">Workspace</span>
-          <select
-            value={workspace?.context.tenantId ?? ""}
-            data-testid="tenant-switch"
-            onChange={(event) => void onTenant(event.target.value)}
-            title={workspace?.context.tenantName ?? "Workspace"}
-          >
-            {companies.length === 0 ? (
-              <option value={workspace?.context.tenantId ?? ""}>
-                {workspace?.context.tenantName ?? "No company"}
-              </option>
-            ) : null}
-            {companies.map((company) => (
-              <option key={company.tenantId} value={company.tenantId}>
-                {company.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CompanySwitcher
+          companies={companies}
+          tenantId={session.tenantId ?? workspace?.context.tenantId ?? ""}
+          currentName={workspace?.context.tenantName ?? opened?.name ?? null}
+          onSwitch={(tenantId) => void onTenant(tenantId)}
+        />
         <nav>
           {NAV_GROUPS.map((group) => {
             const items = navCommands.filter((command) => command.group === group);

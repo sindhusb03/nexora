@@ -85,17 +85,17 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
   app.get("/v1/workspace/companies", async (c) => {
     const actor = readActor(c);
     const now = Date.now();
-    const companies = deps.directory.list().filter((card) => {
-      const member = card.members.some((item) => item.actorId === actor.actorId);
-      const support = card.members.some(
-        (item) => item.actorId === actor.actorId && item.role === "auditor",
-      );
-      return member || support || deps.platformAdminActorIds.includes(actor.actorId);
-    });
+    const companies = await deps.store.listActorCompanies(actor.actorId);
     return c.json({
       companies: await Promise.all(
         companies.map(async (card) => ({
-          ...card,
+          tenantId: card.tenantId,
+          name: card.name,
+          region: card.homeRegion,
+          status: card.status,
+          entityId: card.entityId,
+          periodId: card.periodId,
+          members: card.members,
           support: supportActive(
             await deps.store.listWorkspaceRecords(card.tenantId, "support"),
             actor.actorId,
@@ -786,9 +786,7 @@ async function snapshot(
       excerpt: text(item.payload.body).slice(0, 280),
     })),
     admin: {
-      members: (
-        deps.directory.list().find((card) => card.tenantId === tenantId)?.members ?? []
-      ).map((member) => ({ ...member })),
+      members: [...(await deps.store.listMemberships(tenantId))],
       policies: policies.map((item) => ({
         id: item.id,
         name: text(item.payload.name),

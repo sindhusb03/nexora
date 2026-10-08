@@ -10,7 +10,7 @@ import {
   type ReportClass,
   type Role,
 } from "@nexora/kernel";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 import type { AppDatabase } from "./client.js";
@@ -18,6 +18,7 @@ import type {
   AccountRecord,
   AuditRecord,
   AuditWrite,
+  ActorCompany,
   CalculationRunRecord,
   EntityRecord,
   IdentityStore,
@@ -134,8 +135,60 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
         const rows = await tx
           .select({ role: membership.role })
           .from(membership)
-          .where(and(eq(membership.tenantId, tenantId), eq(membership.actorId, actorId)));
+          .where(
+            and(
+              eq(membership.tenantId, tenantId),
+              eq(membership.actorId, actorId),
+              eq(membership.status, "active"),
+            ),
+          );
         return rows.map((row) => asRole(row.role));
+      });
+    },
+
+    async listActorCompanies(actorId) {
+      const visible = await actorTx(db, actorId, async (tx) => {
+        const rows = await tx
+          .select({
+            tenantId: tenant.tenantId,
+            name: tenant.name,
+            homeRegion: tenant.homeRegion,
+            status: tenant.status,
+          })
+          .from(membership)
+          .innerJoin(tenant, eq(membership.tenantId, tenant.tenantId))
+          .where(and(eq(membership.actorId, actorId), eq(membership.status, "active")));
+        const byTenant = new Map<string, (typeof rows)[number]>();
+        for (const row of rows) byTenant.set(row.tenantId, row);
+        return [...byTenant.values()];
+      });
+      const companies: ActorCompany[] = [];
+      for (const row of visible) {
+        const detail = await tenantTx(db, row.tenantId, async (tx) =>
+          companyDetail(tx, row.tenantId),
+        );
+        companies.push({
+          tenantId: row.tenantId,
+          name: row.name,
+          homeRegion: row.homeRegion,
+          status: row.status === "suspended" ? "suspended" : "active",
+          entityId: detail.entityId,
+          periodId: detail.periodId,
+          members: detail.members,
+        });
+      }
+      companies.sort((left, right) => left.name.localeCompare(right.name));
+      return companies;
+    },
+
+    async listMemberships(tenantId) {
+      return tenantTx(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select({ actorId: membership.actorId, role: membership.role })
+          .from(membership)
+          .where(and(eq(membership.tenantId, tenantId), eq(membership.status, "active")))
+          .orderBy(asc(membership.actorId), asc(membership.role));
+        return rows;
       });
     },
 
@@ -995,6 +1048,52 @@ export async function tenantTx<T>(
   } catch (error) {
     rethrowDomain(error);
   }
+}
+
+/** Sets the actor and the app role without a tenant, so actor-scoped policies apply. */
+export async function actorTx<T>(
+  db: AppDatabase,
+  actorId: string,
+  fn: (tx: AppDatabase) => Promise<T>,
+): Promise<T> {
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));
+      await tx.execute(sql`SELECT set_config('app.tenant_id', '', true)`);
+      await tx.execute(sql`SELECT set_config('app.actor_id', ${actorId}, true)`);
+      return fn(tx as unknown as AppDatabase);
+    });
+  } catch (error) {
+    rethrowDomain(error);
+  }
+}
+
+async function companyDetail(
+  tx: AppDatabase,
+  tenantId: string,
+): Promise<Pick<ActorCompany, "entityId" | "periodId" | "members">> {
+  const members = await tx
+    .select({ actorId: membership.actorId, role: membership.role })
+    .from(membership)
+    .where(and(eq(membership.tenantId, tenantId), eq(membership.status, "active")))
+    .orderBy(asc(membership.actorId), asc(membership.role));
+  const [entity] = await tx
+    .select({ id: legalEntity.legalEntityId })
+    .from(legalEntity)
+    .where(eq(legalEntity.tenantId, tenantId))
+    .orderBy(asc(legalEntity.createdAt), asc(legalEntity.legalEntityId))
+    .limit(1);
+  const [period] = await tx
+    .select({ id: accountingPeriod.periodId })
+    .from(accountingPeriod)
+    .where(eq(accountingPeriod.tenantId, tenantId))
+    .orderBy(desc(accountingPeriod.endDate), desc(accountingPeriod.startDate))
+    .limit(1);
+  return {
+    members,
+    entityId: entity?.id ?? "",
+    periodId: period?.id ?? "",
+  };
 }
 
 export async function writeAudit(

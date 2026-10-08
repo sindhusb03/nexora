@@ -1210,7 +1210,7 @@ export function AdminView({
         <h2>Members</h2>
         <ul className="nx-list">
           {workspace.admin.members.map((member) => (
-            <li key={member.actorId}>
+            <li key={`${member.actorId}:${member.role}`} data-testid={`member-${member.actorId}`}>
               <span>{member.actorId}</span>
               <strong>{member.role}</strong>
             </li>

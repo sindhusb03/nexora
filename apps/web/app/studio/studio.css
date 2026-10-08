@@ -719,8 +719,10 @@ html.dark {
   display: none;
 }
 
-.nx.is-collapsed .nx-switcher select {
+.nx.is-collapsed .nx-switcher button {
   width: 44px;
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .nx-nav-group {
@@ -743,7 +745,7 @@ html.dark {
   color: var(--muted);
   font-size: 0.72rem;
 }
-.nx-switcher select,
+.nx-switcher button,
 .nx-top select {
   height: 32px;
   max-width: 220px;

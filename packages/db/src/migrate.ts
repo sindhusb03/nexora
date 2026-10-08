@@ -46,6 +46,7 @@ const BASELINE_COLUMNS: Readonly<
   Record<string, { readonly table: string; readonly column: string }>
 > = {
   "0007_fiscal_year_end.sql": { table: "legal_entity", column: "fiscal_year_end_month" },
+  "0008_actor_company_read.sql": { table: "membership", column: "status" },
 };
 
 export async function runMigrations(

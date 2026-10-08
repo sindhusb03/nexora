@@ -33,6 +33,7 @@ export const membership = pgTable(
       .references(() => tenant.tenantId),
     actorId: text("actor_id").notNull(),
     role: text("role").notNull(),
+    status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [uniqueIndex("membership_actor_role").on(table.tenantId, table.actorId, table.role)],
