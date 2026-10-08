@@ -57,6 +57,7 @@ const envSchema = z.object({
   AUTH_SECRET: z.string().optional(),
   AUTH_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(604_800).default(28_800),
   AUTH_ALLOW_SIGNUP: z.enum(["true", "false"]).optional(),
+  AUTH_ALLOW_SIGNUP_WITH_PLATFORM_ADMINS: z.enum(["true", "false"]).default("false"),
   AUTH_COOKIE_SECURE: z.enum(["true", "false"]).optional(),
   AUTH_COOKIE_SAMESITE: z.enum(["Strict", "Lax", "None"]).default("Lax"),
   NEXORA_DEV_HEADERS: z.enum(["true", "false"]).optional(),
@@ -75,6 +76,7 @@ const envSchema = z.object({
   OTEL_METRICS_EXPORTER: z.enum(["otlp", "none"]).optional(),
   SENTRY_DSN: z.string().optional(),
   DEMO_MODE: z.enum(["true", "false"]).optional(),
+  NEXORA_SEED_DEMO: z.enum(["true", "false"]).optional(),
   OIDC_PROVIDERS: z.string().optional(),
 });
 
@@ -142,7 +144,7 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
     throw new ConfigError("AUTH_COOKIE_SECURE=false is refused when NODE_ENV=production.");
   }
 
-  const allowSignup = values.AUTH_ALLOW_SIGNUP ? values.AUTH_ALLOW_SIGNUP === "true" : !production;
+  const allowSignup = values.AUTH_ALLOW_SIGNUP === "true";
   if (devHeaders) {
     warnings.push(
       "NEXORA_DEV_HEADERS=true: x-actor-id, x-tenant-id, and x-region are trusted. Never enable this outside local development.",
@@ -158,6 +160,24 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
   if (demoMode) {
     warnings.push(
       "DEMO_MODE is on. The seeded company and demo password are available. Turn this off outside local development.",
+    );
+  }
+
+  const seedDemo =
+    demoMode && !production && !values.DATABASE_URL && values.NEXORA_SEED_DEMO !== "false";
+  const platformAdminActorIds = (
+    values.PLATFORM_ADMIN_ACTOR_IDS ?? (seedDemo ? "platform-admin" : "")
+  )
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0);
+  if (
+    allowSignup &&
+    platformAdminActorIds.length > 0 &&
+    values.AUTH_ALLOW_SIGNUP_WITH_PLATFORM_ADMINS !== "true"
+  ) {
+    throw new ConfigError(
+      "AUTH_ALLOW_SIGNUP=true with PLATFORM_ADMIN_ACTOR_IDS requires AUTH_ALLOW_SIGNUP_WITH_PLATFORM_ADMINS=true. Reserved and platform-admin identities still cannot sign up.",
     );
   }
 
@@ -223,10 +243,7 @@ export function loadConfig(env: Record<string, string | undefined>): ApiConfig {
     production,
     port: values.PORT,
     databaseUrl: values.DATABASE_URL ?? null,
-    platformAdminActorIds: (values.PLATFORM_ADMIN_ACTOR_IDS ?? (production ? "" : "platform-admin"))
-      .split(",")
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0),
+    platformAdminActorIds,
     auth: {
       secret,
       sessionTtlSeconds: values.AUTH_SESSION_TTL_SECONDS,

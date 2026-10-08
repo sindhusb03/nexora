@@ -462,6 +462,14 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
     membershipId: string;
     audit: AuditWrite;
   }): Promise<void>;
+  expireSupportGrant(input: {
+    tenantId: string;
+    grantId: string;
+    membershipId: string;
+    updatedAt: string;
+    membershipAudit: AuditWrite;
+    grantAudit: AuditWrite;
+  }): Promise<boolean>;
 }
 
 export interface VersionWrite {

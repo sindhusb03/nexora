@@ -1,6 +1,7 @@
-import { createPgliteStore } from "@nexora/db";
+import { createPgliteStore, type IdentityStore } from "@nexora/db";
 
 import { createApp, DEFAULT_HTTP, type AppOptions } from "../src/app.js";
+import { hashPassword } from "../src/auth/crypto.js";
 import type { AuthConfig } from "../src/config.js";
 import { silentLogger } from "../src/observability.js";
 
@@ -30,16 +31,32 @@ export function testAuth(overrides: Partial<AuthConfig> = {}): AuthConfig {
   };
 }
 
+/**
+ * Actors that self sign-up must refuse (reserved/platform-admin IDs). Tests provision them
+ * directly in the store, the way an operator would with `user:create`.
+ */
+const OPERATOR_PROVISIONED = new Set(["platform-admin"]);
+
+const testStores = new WeakMap<TestApp, IdentityStore>();
+
+/** Lets the session client provision operator-only actors for an app built outside testApp. */
+export function withTestStore(app: TestApp, store: IdentityStore): TestApp {
+  testStores.set(app, store);
+  return app;
+}
+
 export async function testApp(overrides: Partial<AppOptions> = {}): Promise<TestApp> {
-  return createApp({
-    store: overrides.store ?? (await createPgliteStore()),
+  const store = overrides.store ?? (await createPgliteStore());
+  const app = createApp({
     platformAdminActorIds: ["platform-admin"],
     auth: testAuth(),
     http: { ...DEFAULT_HTTP, rateLimit: { windowMs: 60_000, max: 100_000, authMax: 100_000 } },
     logger: silentLogger,
     passwordCost: 1_024,
     ...overrides,
+    store,
   });
+  return withTestStore(app, store);
 }
 
 export interface CallOptions {
@@ -66,6 +83,18 @@ class SessionClient {
   async register(...actors: string[]): Promise<void> {
     for (const actor of actors) {
       if (this.registered.has(actor)) continue;
+      if (OPERATOR_PROVISIONED.has(actor)) {
+        const store = testStores.get(this.app);
+        if (!store) throw new Error(`${actor} must be provisioned directly; use withTestStore`);
+        const outcome = await store.createUser({
+          actorId: actor,
+          passwordHash: await hashPassword(TEST_PASSWORD, 1_024),
+          createdAt: new Date().toISOString(),
+        });
+        if (outcome === "email_taken") throw new Error(`provisioning ${actor} returned ${outcome}`);
+        this.registered.add(actor);
+        continue;
+      }
       const response = await this.app.request(
         "/auth/signup",
         json("POST", { actorId: actor, password: TEST_PASSWORD }),
