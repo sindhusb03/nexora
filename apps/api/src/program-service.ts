@@ -39,10 +39,10 @@ import {
 import {
   CONSOLIDATION_RATE_POLICY,
   consolidateTranslations,
-  netDebitPositiveBalances,
+  trialBalanceFromClassifiedLines,
 } from "./consolidation-ledger.js";
 import { ApiError, type ActorContext } from "./http.js";
-import { computeStatementsForPeriod } from "./service.js";
+import { computeStatementsForPeriod, loadClassifiedActivity } from "./service.js";
 
 const STATUSES = ["draft", "validated", "review", "approved", "published", "rejected"] as const;
 const STATE_ALLOW = [
@@ -732,45 +732,22 @@ async function loadPostedTrialBalance(
   entityId: string,
   periodId: string,
 ) {
-  const entity = await store.getEntity(tenantId, entityId);
-  if (!entity) {
-    throw new KernelError("FIN_NOT_FOUND", "Entity not found");
-  }
-  const period = await store.getPeriod(tenantId, periodId);
-  if (!period || period.entityId !== entity.entityId) {
-    throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
-  }
-  const journals = await store.listJournals(tenantId, entity.entityId, period.periodId);
-  if (journals.length === 0) {
-    throw new KernelError(
-      "FIN_STATEMENT_IMBALANCE",
-      "No posted ledger entries for this entity and period",
-    );
-  }
-  for (const journal of journals) {
-    if (journal.currency !== entity.functionalCurrency) {
-      throw new KernelError(
-        "FIN_CURRENCY_MISMATCH",
-        "Posted journal currency does not match the entity functional currency",
-      );
-    }
-  }
-  const accounts = await store.listAccounts(tenantId, entity.entityId);
-  const lines = netDebitPositiveBalances(
-    journals,
-    new Map(accounts.map((account) => [account.accountId, account.report])),
-  );
+  const activity = await loadClassifiedActivity(store, tenantId, entityId, periodId);
+  const lines = trialBalanceFromClassifiedLines(activity.lines, activity.retainedEarningsAccountId);
   if (lines.length === 0) {
     throw new KernelError(
       "FIN_STATEMENT_IMBALANCE",
       "Posted ledger entries net to an empty trial balance",
     );
   }
+  const journalIds = [
+    ...new Set(activity.lines.flatMap((line) => (line.journalId ? [line.journalId] : []))),
+  ].sort();
   return {
-    entityId: entity.entityId,
-    periodId: period.periodId,
-    sourceCurrency: entity.functionalCurrency,
-    journalIds: journals.map((journal) => journal.journalId).sort(),
+    entityId,
+    periodId,
+    sourceCurrency: activity.currency,
+    journalIds,
     lines,
   };
 }

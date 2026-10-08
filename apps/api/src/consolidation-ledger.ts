@@ -1,5 +1,6 @@
 import {
   KernelError,
+  type ClassifiedLine,
   type RateType,
   type ReportClass,
   type TrialBalanceLine,
@@ -28,41 +29,70 @@ export function rateTypeForReport(report: ReportClass): RateType {
   }
 }
 
-export function netDebitPositiveBalances(
-  journals: readonly {
-    readonly lines: readonly {
-      readonly accountId: string;
-      readonly debitMinor: string;
-      readonly creditMinor: string;
-    }[];
-  }[],
-  reportByAccount: ReadonlyMap<string, ReportClass>,
+/**
+ * Trial balance for translation. Uses the statements' opening and movement split:
+ * balance-sheet accounts keep their closing balance, income is current-period movement,
+ * and prior-period income is added to retained earnings (equity, historical rate).
+ */
+export function trialBalanceFromClassifiedLines(
+  lines: readonly ClassifiedLine[],
+  retainedEarningsAccountId: string,
 ): TrialBalanceLine[] {
-  const nets = new Map<string, bigint>();
-  for (const journal of journals) {
-    for (const line of journal.lines) {
-      const net = BigInt(line.debitMinor) - BigInt(line.creditMinor);
-      nets.set(line.accountId, (nets.get(line.accountId) ?? 0n) + net);
+  const positions = new Map<string, { report: ReportClass; opening: bigint; movement: bigint }>();
+  for (const line of lines) {
+    const delta = BigInt(line.debitMinor) - BigInt(line.creditMinor);
+    const existing = positions.get(line.accountId);
+    if (existing && existing.report !== line.report) {
+      throw new KernelError(
+        "FIN_STATEMENT_IMBALANCE",
+        `Account ${line.accountId} has conflicting classification`,
+      );
+    }
+    const position = existing ?? { report: line.report, opening: 0n, movement: 0n };
+    if (line.period === "opening") {
+      position.opening += delta;
+    } else {
+      position.movement += delta;
+    }
+    positions.set(line.accountId, position);
+  }
+
+  let priorEarnings = 0n;
+  const balances = new Map<string, { report: ReportClass; amount: bigint }>();
+  for (const [accountId, position] of positions) {
+    if (position.report === "revenue" || position.report === "expense") {
+      priorEarnings += position.opening;
+      if (position.movement !== 0n) {
+        balances.set(accountId, { report: position.report, amount: position.movement });
+      }
+      continue;
+    }
+    const closing = position.opening + position.movement;
+    if (closing !== 0n) {
+      balances.set(accountId, { report: position.report, amount: closing });
+    }
+  }
+  if (priorEarnings !== 0n) {
+    const retained = balances.get(retainedEarningsAccountId);
+    const amount = (retained?.amount ?? 0n) + priorEarnings;
+    if (amount === 0n) {
+      balances.delete(retainedEarningsAccountId);
+    } else {
+      balances.set(retainedEarningsAccountId, { report: "equity", amount });
     }
   }
 
-  const lines: TrialBalanceLine[] = [];
-  for (const accountId of [...nets.keys()].sort()) {
-    const net = nets.get(accountId) ?? 0n;
-    if (net === 0n) {
-      continue;
+  return [...balances.keys()].sort().map((accountId) => {
+    const balance = balances.get(accountId);
+    if (!balance) {
+      throw new KernelError("FIN_STATEMENT_IMBALANCE", "Trial balance line missing");
     }
-    const report = reportByAccount.get(accountId);
-    if (!report) {
-      throw new KernelError("FIN_NOT_FOUND", "Posted line references an unknown account");
-    }
-    lines.push({
+    return {
       accountId,
-      rateType: rateTypeForReport(report),
-      debitPositiveMinor: net.toString(),
-    });
-  }
-  return lines;
+      rateType: rateTypeForReport(balance.report),
+      debitPositiveMinor: balance.amount.toString(),
+    };
+  });
 }
 
 export function consolidateTranslations(

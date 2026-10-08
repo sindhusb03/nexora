@@ -578,8 +578,11 @@ async function statements(
   return presentStatement(statement);
 }
 
-/** Internal kernel path. Callers authorize the operation before passing their tenant scope. */
-export async function computeStatementsForPeriod(
+/**
+ * Posted activity through the period end, classified the same way as the statements.
+ * Earlier periods are opening. The selected period is movement. Callers authorize first.
+ */
+export async function loadClassifiedActivity(
   store: LedgerStore,
   tenantId: string,
   entityId: string,
@@ -616,11 +619,21 @@ export async function computeStatementsForPeriod(
       left.creditMinor.localeCompare(right.creditMinor)
     );
   });
-  const inputs = {
+  return {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
     lines,
   };
+}
+
+/** Internal kernel path. Callers authorize the operation before passing their tenant scope. */
+export async function computeStatementsForPeriod(
+  store: LedgerStore,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+) {
+  const inputs = await loadClassifiedActivity(store, tenantId, entityId, periodId);
   return { statement: buildStatements(inputs), inputs };
 }
 

@@ -360,7 +360,7 @@ describe("program gates", () => {
         name: "Equity",
         report: "equity",
         cashFlow: "non_cash",
-        retainedEarnings: false,
+        retainedEarnings: true,
       },
     });
     expect(bookCash.status).toBe(201);

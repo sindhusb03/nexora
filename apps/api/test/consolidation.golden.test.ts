@@ -5,16 +5,18 @@ import { call, sessions, TEST_ACTORS, testApp, type TestApp } from "./harness.js
 /**
  * Golden fixture `two_entity_fx`.
  * Formula: current-rate-by-report-class-v1. Engine: fe-kernel-0.2.1.
- * Amounts are integer minor units derived from posted journals.
+ * Amounts are integer minor units. Balance-sheet accounts are cumulative through
+ * the period end. Income is current-period movement. Prior income rolls into retained earnings.
  *
- * US (USD), 2024 activity only:
- *   Dr Cash 90.00 (9000), Dr Intercompany receivable 10.00 (1000), Cr Equity 100.00 (10000)
- *   Closing 0.90, historical 0.80 → Cash 8100, AR 900, Equity -8000, CTA -1000
- * UK (GBP):
- *   Dr Cash 50.00 (5000), Cr Intercompany payable 7.50 (750), Cr Equity 42.50 (4250)
- *   Closing 1.20, historical 1.10 → Cash 6000, AP -900, Equity -4675, CTA -425
- * Group EUR: CTA -1425. Elimination clears AR 900 against AP 900.
- * A 2023 US journal is posted and must stay outside the 2024 scope.
+ * US 2023 opening (USD minor):
+ *   Dr Cash 100,000,000, Cr Equity 100,000,000
+ *   Dr Expense 2,000, Cr Cash 2,000 → expense opening rolls into retained earnings
+ * US 2024 movement: Dr Cash 9,000, Dr AR 1,000, Cr Equity 10,000
+ * US closing: Cash 100,007,000, AR 1,000, Equity -100,010,000, RE 2,000
+ *   Closing 0.90, historical 0.80 → Cash 90,006,300, AR 900, Equity -80,008,000, RE 1,600, CTA -10,000,800
+ * UK 2024 only (GBP minor): Cash 5,000, AP -750, Equity -4,250
+ *   Closing 1.20, historical 1.10 → Cash 6,000, AP -900, Equity -4,675, CTA -425
+ * Group EUR CTA -10,001,225. Elimination clears AR 900 against AP 900. The total is zero.
  */
 
 const ENGINE_VERSION = "fe-kernel-0.2.1";
@@ -31,6 +33,7 @@ describe("posted-ledger group consolidation", () => {
   let usCash = "";
   let usAr = "";
   let usEquity = "";
+  let usRe = "";
   let ukCash = "";
   let ukAp = "";
   let ukEquity = "";
@@ -74,12 +77,29 @@ describe("posted-ledger group consolidation", () => {
     ukPeriodId = await createPeriod(ukEntityId, "2024-01-01", "2024-12-31");
     const usPriorPeriod = await createPeriod(usEntityId, "2023-01-01", "2023-12-31");
 
-    usCash = await createAccount(usEntityId, "1000", "Cash", "asset", "cash");
-    usAr = await createAccount(usEntityId, "1200", "Intercompany receivable", "asset", "non_cash");
-    usEquity = await createAccount(usEntityId, "3000", "Equity", "equity", "non_cash");
-    ukCash = await createAccount(ukEntityId, "1000", "Cash", "asset", "cash");
-    ukAp = await createAccount(ukEntityId, "2100", "Intercompany payable", "liability", "non_cash");
-    ukEquity = await createAccount(ukEntityId, "3000", "Equity", "equity", "non_cash");
+    usCash = await createAccount(usEntityId, "1000", "Cash", "asset", "cash", false);
+    usAr = await createAccount(
+      usEntityId,
+      "1200",
+      "Intercompany receivable",
+      "asset",
+      "non_cash",
+      false,
+    );
+    usEquity = await createAccount(usEntityId, "3000", "Equity", "equity", "non_cash", false);
+    usRe = await createAccount(usEntityId, "3900", "Retained earnings", "equity", "non_cash", true);
+    const usExpense = await createAccount(usEntityId, "5000", "Expense", "expense", "cfo", false);
+    ukCash = await createAccount(ukEntityId, "1000", "Cash", "asset", "cash", false);
+    ukAp = await createAccount(
+      ukEntityId,
+      "2100",
+      "Intercompany payable",
+      "liability",
+      "non_cash",
+      false,
+    );
+    ukEquity = await createAccount(ukEntityId, "3000", "Equity", "equity", "non_cash", false);
+    await createAccount(ukEntityId, "3900", "Retained earnings", "equity", "non_cash", true);
 
     await post(usEntityId, usPeriodId, "USD", [
       { accountId: usCash, debit: "90", credit: "0" },
@@ -95,6 +115,10 @@ describe("posted-ledger group consolidation", () => {
       { accountId: usCash, debit: "1000000", credit: "0" },
       { accountId: usEquity, debit: "0", credit: "1000000" },
     ]);
+    await post(usEntityId, usPriorPeriod, "USD", [
+      { accountId: usExpense, debit: "20", credit: "0" },
+      { accountId: usCash, debit: "0", credit: "20" },
+    ]);
   });
 
   it("pins the consolidated translation and elimination from posted entries", async () => {
@@ -104,16 +128,17 @@ describe("posted-ledger group consolidation", () => {
     expect(fx.engineVersion).toBe(ENGINE_VERSION);
     expect(fx.formulaVersion).toBe(FORMULA_VERSION);
     expect(fx.groupCurrency).toBe("EUR");
-    expect(fx.ctaMinor).toBe("-1425");
+    expect(fx.ctaMinor).toBe("-10001225");
     expect(lineMap(fx.lines)).toEqual(
       new Map([
-        [usCash, "8100"],
+        [usCash, "90006300"],
         [usAr, "900"],
-        [usEquity, "-8000"],
+        [usEquity, "-80008000"],
+        [usRe, "1600"],
         [ukCash, "6000"],
         [ukAp, "-900"],
         [ukEquity, "-4675"],
-        ["cta", "-1425"],
+        ["cta", "-10001225"],
       ]),
     );
     expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
@@ -133,13 +158,14 @@ describe("posted-ledger group consolidation", () => {
     expect(elimination.groupCurrency).toBe("EUR");
     expect(lineMap(elimination.balances)).toEqual(
       new Map([
-        [usCash, "8100"],
+        [usCash, "90006300"],
         [usAr, "0"],
-        [usEquity, "-8000"],
+        [usEquity, "-80008000"],
+        [usRe, "1600"],
         [ukCash, "6000"],
         [ukAp, "0"],
         [ukEquity, "-4675"],
-        ["cta", "-1425"],
+        ["cta", "-10001225"],
       ]),
     );
     expect(
@@ -150,7 +176,7 @@ describe("posted-ledger group consolidation", () => {
   it("rejects a tampered caller-supplied balance without changing the posted result", async () => {
     const clean = await translate(ledgerBody());
     const pinned = await readJson<TranslationBody>(clean);
-    expect(pinned.ctaMinor).toBe("-1425");
+    expect(pinned.ctaMinor).toBe("-10001225");
 
     const tampered = await translate({
       ...ledgerBody(),
@@ -193,11 +219,32 @@ describe("posted-ledger group consolidation", () => {
       ],
     });
     const elimination = await readJson<EliminationBody>(eliminatedAgain);
-    expect(lineMap(elimination.balances).get(usCash)).toBe("8100");
+    expect(lineMap(elimination.balances).get(usCash)).toBe("90006300");
+    expect(lineMap(elimination.balances).get(usRe)).toBe("1600");
     expect(lineMap(elimination.balances).get(usAr)).toBe("0");
     expect(
       elimination.balances.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n),
     ).toBe(0n);
+  });
+
+  it("rejects an entity that has no retained earnings account", async () => {
+    const entityId = await createEntity("No retained earnings", "USD");
+    const periodId = await createPeriod(entityId, "2024-01-01", "2024-12-31");
+    const cash = await createAccount(entityId, "1000", "Cash", "asset", "cash", false);
+    const equity = await createAccount(entityId, "3000", "Equity", "equity", "non_cash", false);
+    await post(entityId, periodId, "USD", [
+      { accountId: cash, debit: "10", credit: "0" },
+      { accountId: equity, debit: "0", credit: "10" },
+    ]);
+    const response = await translate({
+      ctaAccountId: "cta",
+      entities: [{ entityId, periodId }],
+      rates: [rates[0]],
+    });
+    expect(response.status).toBe(422);
+    const body = await readJson<{ error: { code: string; message: string } }>(response);
+    expect(body.error.code).toBe("FIN_STATEMENT_IMBALANCE");
+    expect(body.error.message).toBe("Entity has no retained earnings account");
   });
 
   function ledgerBody() {
@@ -257,12 +304,13 @@ describe("posted-ledger group consolidation", () => {
     name: string,
     report: string,
     cashFlow: string,
+    retainedEarnings: boolean,
   ) {
     const response = await call(app, "POST", "/v1/accounts", {
       actor: "owner-1",
       tenant: tenantId,
       region: "us-east-1",
-      body: { entityId, code, name, report, cashFlow, retainedEarnings: false },
+      body: { entityId, code, name, report, cashFlow, retainedEarnings },
     });
     expect(response.status).toBe(201);
     return (await readJson<{ accountId: string }>(response)).accountId;
