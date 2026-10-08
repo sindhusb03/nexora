@@ -232,7 +232,7 @@ describe("actor company visibility", () => {
     expect(companies.map((company) => company.tenantId).sort()).toEqual([harbor, other].sort());
   });
 
-  it("replays a first-run open of the same name and records the replay", async () => {
+  it("replays a first-run open only in the same region and skips a suspended company", async () => {
     const client = new PGlite();
     await runMigrations(executor(client));
     const store = createLedgerStore(drizzle({ client, schema }));
@@ -256,7 +256,7 @@ describe("actor company visibility", () => {
       tenant: {
         tenantId: other,
         name: "  HARBOR   analytics ",
-        homeRegion: "eu-west-1",
+        homeRegion: "us-east-1",
         status: "active",
         createdAt: "2026-10-08T01:00:00.000Z",
       },
@@ -269,8 +269,38 @@ describe("actor company visibility", () => {
     expect(replay.tenant.homeRegion).toBe("us-east-1");
     const events = await store.listAudit(harbor);
     expect(events.map((event) => event.eventType)).toContain("TenantProvisionReplayed");
-    await expect(store.listActorCompanies("actor-a")).resolves.toEqual([
-      expect.objectContaining({ tenantId: harbor, name: "Harbor Analytics" }),
-    ]);
+
+    await expect(
+      store.openFirstCompany({
+        tenant: {
+          tenantId: paused,
+          name: "Harbor Analytics",
+          homeRegion: "eu-west-1",
+          status: "active",
+          createdAt: "2026-10-08T02:00:00.000Z",
+        },
+        ownerActorId: "actor-a",
+        membershipId: crypto.randomUUID(),
+        audit: audit(paused, "actor-a"),
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_REGION_CONFLICT" });
+    await expect(store.getTenant(paused)).resolves.toBeNull();
+
+    await client.query(`UPDATE tenant SET status = 'suspended' WHERE tenant_id = $1`, [harbor]);
+    const replacement = "55555555-5555-4555-8555-555555555555";
+    const again = await store.openFirstCompany({
+      tenant: {
+        tenantId: replacement,
+        name: "Harbor Analytics",
+        homeRegion: "us-east-1",
+        status: "active",
+        createdAt: "2026-10-08T03:00:00.000Z",
+      },
+      ownerActorId: "actor-a",
+      membershipId: crypto.randomUUID(),
+      audit: audit(replacement, "actor-a"),
+    });
+    expect(again.replayed).toBe(false);
+    expect(again.tenant.tenantId).toBe(replacement);
   });
 });

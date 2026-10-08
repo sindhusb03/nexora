@@ -96,6 +96,7 @@ export function statusFor(code: KernelErrorCode): 400 | 403 | 404 | 409 | 422 {
     case "FIN_PERIOD_CLOSED":
     case "FIN_IMMUTABLE_RECORD":
     case "PUBLISH_BLOCKED":
+    case "TENANT_REGION_CONFLICT":
       return 409;
     case "FIN_UNBALANCED_JOURNAL":
     case "FIN_INVALID_PERIOD":

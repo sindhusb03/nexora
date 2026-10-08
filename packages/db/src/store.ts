@@ -1041,95 +1041,94 @@ function normalizeCompanyName(name: string): string {
 
 /**
  * First-run open. The lock is the owner plus the normalized name. A supplied
- * tenant id is not used to choose an existing company. Callers that already
- * have an active membership use createTenant instead.
+ * tenant id is not used to choose an existing company. Replay requires the
+ * same home region and an active tenant. Callers that already have an active
+ * membership use createTenant instead, which always inserts the given id.
  */
 async function openFirstCompany(
   db: AppDatabase,
   input: Parameters<LedgerStore["openFirstCompany"]>[0],
 ): Promise<{ tenant: TenantRecord; replayed: boolean }> {
-  const session = currentRlsSession();
-  if (session && session.actorId !== input.ownerActorId) {
-    throw new KernelError("AUTH_SCOPE_DENIED", "The actor does not match the signed-in session");
-  }
   const normalized = normalizeCompanyName(input.tenant.name);
   const lockKey = `${input.ownerActorId.length}:${input.ownerActorId}:${normalized}`;
-  try {
-    return await db.transaction(async (tx) => {
-      const scoped = tx as unknown as AppDatabase;
-      await scoped.execute(sql.raw("SET LOCAL ROLE nexora_app"));
-      await scoped.execute(sql`SELECT set_config('app.actor_id', ${input.ownerActorId}, true)`);
-      await scoped.execute(sql`SELECT set_config('app.tenant_id', '', true)`);
-      await scoped.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
-      const owned = await scoped
-        .select({
-          tenantId: tenant.tenantId,
-          name: tenant.name,
-          homeRegion: tenant.homeRegion,
-          status: tenant.status,
-          createdAt: tenant.createdAt,
-          role: membership.role,
-        })
-        .from(membership)
-        .innerJoin(tenant, eq(membership.tenantId, tenant.tenantId))
-        .where(and(eq(membership.actorId, input.ownerActorId), eq(membership.status, "active")))
-        .orderBy(asc(tenant.createdAt), asc(tenant.tenantId));
-      const sameName = owned.filter(
-        (row) => row.role === "owner" && normalizeCompanyName(row.name) === normalized,
+  return actorTx(db, input.ownerActorId, async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+    const owned = await tx
+      .select({
+        tenantId: tenant.tenantId,
+        name: tenant.name,
+        homeRegion: tenant.homeRegion,
+        status: tenant.status,
+        createdAt: tenant.createdAt,
+        role: membership.role,
+      })
+      .from(membership)
+      .innerJoin(tenant, eq(membership.tenantId, tenant.tenantId))
+      .where(
+        and(
+          eq(membership.actorId, input.ownerActorId),
+          eq(membership.status, "active"),
+          eq(tenant.status, "active"),
+        ),
+      )
+      .orderBy(asc(tenant.createdAt), asc(tenant.tenantId));
+    const sameName = owned.filter(
+      (row) => row.role === "owner" && normalizeCompanyName(row.name) === normalized,
+    );
+    const other = owned.filter((row) => !sameName.some((match) => match.tenantId === row.tenantId));
+    const existing = sameName.find((row) => row.homeRegion === input.tenant.homeRegion);
+    if (existing && other.length === 0) {
+      await tx.execute(sql`SELECT set_config('app.tenant_id', ${existing.tenantId}, true)`);
+      await writeAudit(tx, existing.tenantId, {
+        ...input.audit,
+        eventId: crypto.randomUUID(),
+        eventType: "TenantProvisionReplayed",
+        aggregateType: "tenant",
+        aggregateId: existing.tenantId,
+      });
+      return {
+        tenant: {
+          tenantId: existing.tenantId,
+          name: existing.name,
+          homeRegion: existing.homeRegion,
+          status: "active",
+          createdAt: existing.createdAt,
+        },
+        replayed: true,
+      };
+    }
+    if (sameName.some((row) => row.homeRegion !== input.tenant.homeRegion) && other.length === 0) {
+      throw new KernelError(
+        "TENANT_REGION_CONFLICT",
+        "This company is already open in another region",
       );
-      const other = owned.filter(
-        (row) => !sameName.some((match) => match.tenantId === row.tenantId),
-      );
-      const existing = sameName[0];
-      if (existing && other.length === 0) {
-        await scoped.execute(sql`SELECT set_config('app.tenant_id', ${existing.tenantId}, true)`);
-        await writeAudit(scoped, existing.tenantId, {
-          ...input.audit,
-          eventId: crypto.randomUUID(),
-          eventType: "TenantProvisionReplayed",
-          aggregateType: "tenant",
-          aggregateId: existing.tenantId,
-        });
-        return {
-          tenant: {
-            tenantId: existing.tenantId,
-            name: existing.name,
-            homeRegion: existing.homeRegion,
-            status: existing.status === "suspended" ? "suspended" : "active",
-            createdAt: existing.createdAt,
-          },
-          replayed: true,
-        };
-      }
-      await scoped.execute(sql`SELECT set_config('app.tenant_id', ${input.tenant.tenantId}, true)`);
-      await scoped.insert(tenant).values({
-        tenantId: input.tenant.tenantId,
-        name: input.tenant.name,
-        homeRegion: input.tenant.homeRegion,
-        status: input.tenant.status,
-        createdAt: input.tenant.createdAt,
-      });
-      await scoped.insert(membership).values({
-        membershipId: input.membershipId,
-        tenantId: input.tenant.tenantId,
-        actorId: input.ownerActorId,
-        role: "owner",
-        createdAt: input.tenant.createdAt,
-      });
-      await writeAudit(scoped, input.tenant.tenantId, input.audit);
-      await writeRoleChangeAudit(scoped, {
-        actorId: input.ownerActorId,
-        tenantId: input.tenant.tenantId,
-        role: "owner",
-        grantedBy: input.audit.actorId,
-        requestId: input.audit.correlationId,
-        occurredAt: input.tenant.createdAt,
-      });
-      return { tenant: input.tenant, replayed: false };
+    }
+    await tx.execute(sql`SELECT set_config('app.tenant_id', ${input.tenant.tenantId}, true)`);
+    await tx.insert(tenant).values({
+      tenantId: input.tenant.tenantId,
+      name: input.tenant.name,
+      homeRegion: input.tenant.homeRegion,
+      status: input.tenant.status,
+      createdAt: input.tenant.createdAt,
     });
-  } catch (error) {
-    rethrowDomain(error);
-  }
+    await tx.insert(membership).values({
+      membershipId: input.membershipId,
+      tenantId: input.tenant.tenantId,
+      actorId: input.ownerActorId,
+      role: "owner",
+      createdAt: input.tenant.createdAt,
+    });
+    await writeAudit(tx, input.tenant.tenantId, input.audit);
+    await writeRoleChangeAudit(tx, {
+      actorId: input.ownerActorId,
+      tenantId: input.tenant.tenantId,
+      role: "owner",
+      grantedBy: input.audit.actorId,
+      requestId: input.audit.correlationId,
+      occurredAt: input.tenant.createdAt,
+    });
+    return { tenant: input.tenant, replayed: false };
+  });
 }
 
 export async function tenantTx<T>(

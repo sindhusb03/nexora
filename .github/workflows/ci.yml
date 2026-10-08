@@ -96,6 +96,12 @@ jobs:
           pnpm --filter @nexora/api migrate
           pnpm --filter @nexora/api migrate
 
+      - name: Concurrent first-run replay
+        env:
+          NEXORA_POSTGRES_RUNTIME: "1"
+          DATABASE_URL: postgres://nexora_api:ci-api-password@localhost:5432/nexora
+        run: pnpm --filter @nexora/api exec vitest run test/actor-companies.postgres.test.ts
+
       - name: Boot in production mode as the API login role
         env:
           NODE_ENV: production

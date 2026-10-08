@@ -60,53 +60,62 @@ describe("workspace companies", () => {
     expect(other.companies.map((company) => company.name)).toEqual(["Other Books"]);
   });
 
-  it("returns the existing company when a first-run open is replayed", async () => {
+  it("returns 200 when the first-run route replays the same region", async () => {
     const store = await createPgliteStore();
+    const listActorCompanies = store.listActorCompanies.bind(store);
+    // The race itself runs on Postgres. Here the list stays empty so a second
+    // request still takes the first-run route and the status mapping is visible.
+    store.listActorCompanies = async (actorId) => {
+      const companies = await listActorCompanies(actorId);
+      return companies.length === 0 ? companies : [];
+    };
     const app = await testApp({ store, directory: createDirectory(), demoMode: false });
-    await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
-    const [first, second] = await Promise.all([
-      call(app, "POST", "/v1/tenants", {
-        actor: "owner-a",
-        body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
-      }),
-      call(app, "POST", "/v1/tenants", {
-        actor: "owner-a",
-        body: { name: "harbor   analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
-      }),
-    ]);
-    const responses = [first, second].sort((left, right) => left.status - right.status);
-    expect(responses.map((response) => response.status)).toEqual([200, 201]);
-    const replay = (await responses[0]!.json()) as {
-      tenantId: string;
-      name: string;
-      replayed: boolean;
-    };
-    const created = (await responses[1]!.json()) as {
-      tenantId: string;
-      name: string;
-      replayed: boolean;
-    };
-    expect(replay.replayed).toBe(true);
-    expect(created.replayed).toBe(false);
-    expect(replay.tenantId).toBe(created.tenantId);
-    expect(replay.name).toBe(created.name);
-    const events = await store.listAudit(created.tenantId);
-    expect(events.map((event) => event.eventType)).toContain("TenantProvisionReplayed");
-
-    const listed = await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
-    const companies = (await listed.json()) as { companies: { tenantId: string; name: string }[] };
-    expect(companies.companies).toEqual([
-      expect.objectContaining({ tenantId: created.tenantId, name: created.name }),
-    ]);
-
-    const otherOwner = await call(app, "POST", "/v1/tenants", {
-      actor: "owner-b",
-      body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-b" },
+    const created = await call(app, "POST", "/v1/tenants", {
+      actor: "owner-a",
+      body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
     });
-    expect(otherOwner.status).toBe(201);
-    const separate = (await otherOwner.json()) as { tenantId: string; replayed: boolean };
-    expect(separate.replayed).toBe(false);
-    expect(separate.tenantId).not.toBe(created.tenantId);
+    expect(created.status).toBe(201);
+    const replay = await call(app, "POST", "/v1/tenants", {
+      actor: "owner-a",
+      body: { name: "harbor   analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
+    });
+    expect(replay.status).toBe(200);
+    const opened = (await created.json()) as { tenantId: string; replayed: boolean };
+    const again = (await replay.json()) as { tenantId: string; name: string; replayed: boolean };
+    expect(opened.replayed).toBe(false);
+    expect(again.replayed).toBe(true);
+    expect(again.tenantId).toBe(opened.tenantId);
+    expect(again.name).toBe("Harbor Analytics");
+    const events = await store.listAudit(opened.tenantId);
+    expect(events.map((event) => event.eventType)).toContain("TenantProvisionReplayed");
+    const companies = await listActorCompanies("owner-a");
+    expect(companies).toEqual([
+      expect.objectContaining({ tenantId: opened.tenantId, name: "Harbor Analytics" }),
+    ]);
+  });
+
+  it("returns 409 when a first-run replay is for another region", async () => {
+    const store = await createPgliteStore();
+    const listActorCompanies = store.listActorCompanies.bind(store);
+    store.listActorCompanies = async (actorId) => {
+      const companies = await listActorCompanies(actorId);
+      return companies.length === 0 ? companies : [];
+    };
+    const app = await testApp({ store, directory: createDirectory(), demoMode: false });
+    const created = await call(app, "POST", "/v1/tenants", {
+      actor: "owner-a",
+      body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
+    });
+    expect(created.status).toBe(201);
+    const conflict = await call(app, "POST", "/v1/tenants", {
+      actor: "owner-a",
+      region: "eu-west-1",
+      body: { name: "Harbor Analytics", homeRegion: "eu-west-1", ownerActorId: "owner-a" },
+    });
+    expect(conflict.status).toBe(409);
+    const body = (await conflict.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("TENANT_REGION_CONFLICT");
+    expect(await listActorCompanies("owner-a")).toHaveLength(1);
   });
 
   it("creates a new company when a platform admin provisions the same name", async () => {
