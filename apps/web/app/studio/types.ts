@@ -12,10 +12,12 @@ export interface Lineage {
 export interface Kpi {
   readonly id: string;
   readonly label: string;
-  readonly minor: string;
-  readonly display: string;
+  readonly minor: string | null;
+  readonly display: string | null;
   readonly currency: string;
-  readonly lineage: Lineage;
+  readonly lineage: Lineage | null;
+  readonly status?: "unavailable";
+  readonly reason?: string;
 }
 
 export interface StatementPeriod {
@@ -48,6 +50,13 @@ export interface JournalView {
   readonly sourceRef: string;
   readonly payloadHash: string;
   readonly lines: readonly JournalLine[];
+}
+
+export interface ForecastDrivers {
+  readonly revenueMinor: string | null;
+  readonly growthRate: string | null;
+  readonly grossMargin: string | null;
+  readonly opexMinor: string | null;
 }
 
 export interface ForecastMonth {
@@ -136,32 +145,35 @@ export interface Workspace {
   };
   readonly journals: readonly JournalView[];
   readonly forecast: {
-    readonly drivers: {
-      readonly revenueMinor: string;
-      readonly growthRate: string;
-      readonly grossMargin: string;
-      readonly opexMinor: string;
-    };
-    readonly scenarioGrowthRate: string;
-    readonly base: ForecastResult;
-    readonly scenario: ForecastResult;
+    readonly status?: "unavailable";
+    readonly reason?: string;
+    readonly drivers: ForecastDrivers;
+    readonly scenarioGrowthRate: string | null;
+    readonly base: ForecastResult | null;
+    readonly scenario: ForecastResult | null;
   };
   readonly cash: {
-    readonly minimumCashMinor: string;
-    readonly base: CashCase;
-    readonly downside: CashCase;
+    readonly status?: "unavailable";
+    readonly reason?: string;
+    readonly minimumCashMinor: string | null;
+    readonly base: CashCase | null;
+    readonly downside: CashCase | null;
   };
   readonly variance: {
-    readonly engineVersion: string;
-    readonly inputHash: string;
+    readonly status?: "unavailable";
+    readonly reason?: string;
+    readonly engineVersion: string | null;
+    readonly inputHash: string | null;
     readonly lines: readonly VarianceLine[];
   };
   readonly qoe: {
-    readonly engineVersion: string;
-    readonly inputHash: string;
-    readonly reported: string;
-    readonly adjustmentsTotal: string;
-    readonly normalized: string;
+    readonly status?: "unavailable";
+    readonly reason?: string;
+    readonly engineVersion: string | null;
+    readonly inputHash: string | null;
+    readonly reported: string | null;
+    readonly adjustmentsTotal: string | null;
+    readonly normalized: string | null;
     readonly steps: readonly {
       readonly adjustmentId: string;
       readonly amount: string;
@@ -191,10 +203,10 @@ export interface Workspace {
     }[];
     readonly certificate: {
       readonly bookCash: MoneyCell;
-      readonly bankCash: MoneyCell;
-      readonly difference: MoneyCell;
+      readonly bankCash: MoneyCell | null;
+      readonly difference: MoneyCell | null;
       readonly status: string;
-      readonly sourceDocument: string;
+      readonly sourceDocument: string | null;
       readonly engineVersion: string;
       readonly inputHash: string;
     };
@@ -266,6 +278,7 @@ export interface PlatformView {
   }[];
   readonly flags: readonly {
     readonly id: string;
+    readonly tenantId: string;
     readonly key: string;
     readonly label: string;
     readonly enabled: boolean;

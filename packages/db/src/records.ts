@@ -469,6 +469,15 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
   insertDeal(input: DealWrite): Promise<{ readonly id: string }>;
   insertReportingBasis(input: BasisWrite): Promise<{ readonly id: string }>;
   insertWorkspaceRecord(input: WorkspaceWrite): Promise<{ readonly id: string }>;
+  listWorkspaceEntityIds(tenantId: string): Promise<readonly string[]>;
+  grantSupportAccess(
+    input: WorkspaceWrite & {
+      readonly membershipId: string;
+      readonly actorId: string;
+      readonly expiresAt: string;
+      readonly membershipAudit: AuditWrite;
+    },
+  ): Promise<void>;
   listWorkspaceRecords(tenantId: string, kind: string): Promise<readonly WorkspaceRow[]>;
   updateWorkspaceRecord(input: WorkspaceUpdate): Promise<void>;
   setTenantStatus(input: {
@@ -735,6 +744,7 @@ export interface WorkspaceUpdate {
   readonly tenantId: string;
   readonly id: string;
   readonly status: string;
+  readonly expectedStatus?: string;
   readonly payload: Record<string, unknown>;
   readonly updatedAt: string;
   readonly audit: AuditWrite;

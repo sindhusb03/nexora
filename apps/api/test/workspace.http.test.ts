@@ -12,7 +12,7 @@ describe("workspace MVP", () => {
     await seedDemo(store, directory, ["platform-admin"], 1_024, TEST_PASSWORD);
     const company = directory.list()[0];
     expect(company?.name).toBe("Nazareno Services");
-    const app = await testApp({ store, directory });
+    const app = await testApp({ store, directory, demoMode: true });
     const tenant = company?.tenantId ?? "";
 
     const workspace = await call(app, "GET", "/v1/workspace", { actor: "sindhu", tenant });
@@ -47,7 +47,7 @@ describe("workspace MVP", () => {
     expect(body.qoe.inputHash).toHaveLength(64);
     expect(BigInt(body.qoe.normalized)).toBeGreaterThan(BigInt(body.qoe.reported));
     expect(body.approvals.some((item) => item.status === "suggested")).toBe(true);
-    expect(body.onboarding.certificate.status).toBe("reconciled");
+    expect(body.onboarding.certificate.status).toBe("unavailable");
 
     const viewer = await call(
       app,

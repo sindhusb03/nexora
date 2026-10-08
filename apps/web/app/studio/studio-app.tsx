@@ -693,6 +693,8 @@ export function StudioApp() {
                 void run(() => setTenantStatus(session.csrfToken, tenantId, status), setPlatform)
               }
               onFlag={(id, enabled) => {
+                const tenantId = platform?.flags.find((flag) => flag.id === id)?.tenantId;
+                if (!tenantId) return;
                 setPlatform(
                   (current) =>
                     current && {
@@ -702,7 +704,7 @@ export function StudioApp() {
                       ),
                     },
                 );
-                void run(() => setFlag(session.csrfToken, id, enabled), setPlatform);
+                void run(() => setFlag(session.csrfToken, id, tenantId, enabled), setPlatform);
               }}
               onSupport={(tenantId, hours, reason) =>
                 void run(

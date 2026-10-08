@@ -9,6 +9,7 @@ import {
   explainVariance,
   forecastScenario,
   formatMinor,
+  hashMaterial,
   isZeroMoney,
   KernelError,
   money,
@@ -22,7 +23,7 @@ import { z } from "zod";
 
 import { answerCopilot, isAgent } from "../copilot/answer.js";
 import { cashWeekInputs, PLAN_BUDGET, PLANNING_DRIVERS } from "../demo/books.js";
-import { readActor, type ActorContext, type AppEnv } from "../http.js";
+import { ApiError, readActor, type ActorContext, type AppEnv } from "../http.js";
 import { createLedgerService } from "../service.js";
 import type { CompanyDirectory } from "./directory.js";
 
@@ -34,7 +35,12 @@ const forecastSchema = z.object({
   opexMinor: decimal,
   scenarioGrowthRate: decimal.optional(),
 });
-const decisionSchema = z.object({ decision: z.enum(["accepted", "rejected"]) });
+const decisionSchema = z.object({
+  decision: z.enum(["accepted", "rejected"]),
+  expectedStatus: z.string().min(1).optional(),
+  reason: z.string().trim().max(2000).default(""),
+});
+const selectionSchema = z.object({ entityId: z.uuid().optional(), periodId: z.uuid().optional() });
 const copilotSchema = z.object({
   message: z.string().trim().min(1).max(4000),
   agent: z.string().trim().default("general"),
@@ -44,12 +50,14 @@ const memberSchema = z.object({
   role: z.enum(["owner", "controller", "viewer", "auditor"]),
 });
 const statusSchema = z.object({ status: z.enum(["active", "suspended"]) });
+const SUPPORT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const supportSchema = z.object({
   tenantId: z.uuid(),
-  hours: z.number().int().min(1).max(24),
+  hours: z.number().int().min(1).max(24).optional(),
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
   reason: z.string().trim().min(1).max(240),
 });
-const flagSchema = z.object({ enabled: z.boolean() });
+const flagSchema = z.object({ enabled: z.boolean(), tenantId: z.uuid() });
 
 export interface WorkspaceDeps {
   readonly store: LedgerStore;
@@ -59,6 +67,11 @@ export interface WorkspaceDeps {
 }
 
 export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps): void {
+  app.use("/v1/*", async (c, next) => {
+    if (!readActor(c).actorId.trim())
+      throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
+    await next();
+  });
   app.get("/v1/workspace/companies", async (c) => {
     const actor = readActor(c);
     const now = Date.now();
@@ -70,15 +83,23 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
       return member || support || deps.platformAdminActorIds.includes(actor.actorId);
     });
     return c.json({
-      companies: companies.map((card) => ({
-        ...card,
-        support: supportActive(card, actor.actorId, now),
-      })),
+      companies: await Promise.all(
+        companies.map(async (card) => ({
+          ...card,
+          support: supportActive(
+            await deps.store.listWorkspaceRecords(card.tenantId, "support"),
+            actor.actorId,
+            now,
+          ),
+        })),
+      ),
       demoPasswordHint: deps.demoMode === true ? "nexora-demo-2026" : null,
     });
   });
 
-  app.get("/v1/workspace", async (c) => c.json(await snapshot(deps, readActor(c))));
+  app.get("/v1/workspace", async (c) =>
+    c.json(await snapshot(deps, readActor(c), selectionSchema.parse(c.req.query()))),
+  );
 
   app.post("/v1/workspace/forecast", async (c) => {
     const actor = readActor(c);
@@ -112,17 +133,30 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     const proposals = await deps.store.listWorkspaceRecords(actor.tenantId ?? "", "proposal");
     const proposal = proposals.find((item) => item.id === c.req.param("id"));
     if (!proposal) throw new KernelError("FIN_NOT_FOUND", "Proposal not found");
+    if (!["suggested", "pending"].includes(proposal.status)) {
+      throw new KernelError("FIN_VERSION_CONFLICT", "Proposal is already decided");
+    }
+    const decidedAt = new Date().toISOString();
+    const decision = {
+      from: proposal.status,
+      to: body.decision,
+      action: body.decision,
+      reason: body.reason,
+      decidedBy: actor.actorId,
+      decidedAt,
+      contentHash: hashMaterial(proposal.payload),
+    };
     await deps.store.updateWorkspaceRecord({
       tenantId: actor.tenantId ?? "",
       id: proposal.id,
+      expectedStatus: body.expectedStatus ?? proposal.status,
       status: body.decision,
       payload: {
         ...proposal.payload,
-        decidedBy: actor.actorId,
-        decidedAt: new Date().toISOString(),
+        ...decision,
       },
-      updatedAt: new Date().toISOString(),
-      audit: audit(actor, proposal.id, "ProposalDecided"),
+      updatedAt: decidedAt,
+      audit: audit(actor, proposal.id, "ProposalDecided", decision),
     });
     return c.json(await snapshot(deps, actor));
   });
@@ -135,6 +169,8 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     const documents = await deps.store.listWorkspaceRecords(actor.tenantId ?? "", "document");
     const answer = await answerCopilot({
       message: body.message,
+      demoMode: deps.demoMode === true,
+      actorId: actor.actorId,
       agent,
       facts: {
         engineVersion: view.engineVersion,
@@ -154,7 +190,7 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         if (!Array.isArray(embedding) || title.length === 0) return [];
         return [
           {
-            id: text(document.payload.slug) || document.id,
+            id: document.id,
             title,
             text: bodyText,
             embedding: embedding.filter((value): value is number => typeof value === "number"),
@@ -176,11 +212,12 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         mode: answer.mode,
         rejected: [...answer.rejectedNumbers],
         prompt: body.message,
+        ...(answer.corpusRecord ?? {}),
       },
       createdAt: new Date().toISOString(),
       audit: audit(actor, runId, "CopilotAnswered"),
     });
-    if (answer.proposal && view.permissions.canWrite) {
+    if (answer.accepted && answer.proposal && view.permissions.canWrite) {
       const proposalId = crypto.randomUUID();
       await deps.store.insertWorkspaceRecord({
         tenantId: actor.tenantId ?? "",
@@ -235,25 +272,46 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
   app.post("/v1/admin/support", async (c) => {
     const actor = readActor(c);
     requirePlatform(deps, actor);
-    const body = supportSchema.parse(await c.req.json());
+    const parsed = supportSchema.safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "A valid future support expiry is required" }, 422);
+    const body = parsed.data;
+    const expiry = body.expiresAt
+      ? Date.parse(body.expiresAt)
+      : body.hours
+        ? Date.now() + body.hours * 60 * 60 * 1000
+        : NaN;
+    if (!Number.isFinite(expiry) || expiry <= Date.now())
+      return c.json({ error: "A future support expiry is required" }, 422);
+    if (expiry > Date.now() + SUPPORT_EXPIRY_MS)
+      return c.json({ error: "A valid future support expiry is required" }, 422);
+    if (!(await deps.store.getTenant(body.tenantId)))
+      throw new KernelError("FIN_NOT_FOUND", "Tenant not found");
     const membershipId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + body.hours * 60 * 60 * 1000).toISOString();
-    await deps.store.grantMembership({
+    const expiresAt = new Date(expiry).toISOString();
+    const id = crypto.randomUUID();
+    await deps.store.grantSupportAccess({
       tenantId: body.tenantId,
       membershipId,
       actorId: actor.actorId,
-      role: "auditor",
-      audit: audit({ ...actor, tenantId: body.tenantId }, membershipId, "SupportGranted"),
-    });
-    const id = crypto.randomUUID();
-    await deps.store.insertWorkspaceRecord({
-      tenantId: body.tenantId,
+      expiresAt,
+      membershipAudit: {
+        ...audit({ ...actor, tenantId: body.tenantId }, membershipId, "SupportGranted", {
+          expiresAt,
+          reason: body.reason,
+          role: "auditor",
+        }),
+        aggregateType: "membership",
+      },
       id,
       kind: "support",
       status: "active",
       payload: { actorId: actor.actorId, membershipId, expiresAt, reason: body.reason },
       createdAt: new Date().toISOString(),
-      audit: audit({ ...actor, tenantId: body.tenantId }, id, "SupportGranted"),
+      audit: audit({ ...actor, tenantId: body.tenantId }, id, "SupportGranted", {
+        membershipId,
+        expiresAt,
+        reason: body.reason,
+      }),
     });
     const card = deps.directory.list().find((item) => item.tenantId === body.tenantId);
     if (card && !card.members.some((item) => item.actorId === actor.actorId)) {
@@ -270,8 +328,9 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     requirePlatform(deps, actor);
     const body = flagSchema.parse(await c.req.json());
     const flagId = z.uuid().parse(c.req.param("id"));
-    const tenantId = deps.directory.list()[0]?.tenantId;
-    if (!tenantId) throw new KernelError("FIN_NOT_FOUND", "No tenant");
+    const tenantId = body.tenantId;
+    if (!(await deps.store.getTenant(tenantId)))
+      throw new KernelError("FIN_NOT_FOUND", "Tenant not found");
     const flags = await deps.store.listWorkspaceRecords(tenantId, "flag");
     const flag = flags.find((item) => item.id === flagId);
     if (!flag) throw new KernelError("FIN_NOT_FOUND", "Flag not found");
@@ -287,7 +346,11 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
   });
 }
 
-async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
+async function snapshot(
+  deps: WorkspaceDeps,
+  actor: ActorContext,
+  selection: z.infer<typeof selectionSchema> = {},
+) {
   const tenantId = actor.tenantId;
   if (!tenantId) throw new KernelError("AUTH_SCOPE_DENIED", "Choose a company first");
   const tenant = await deps.store.getTenant(tenantId);
@@ -296,8 +359,8 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
   assertTenantActive(tenant.status);
   const roles = await deps.store.listRoles(tenantId, actor.actorId);
   authorize(roles, "statement.read");
-  const entities = await deps.store.listEntities(tenantId);
-  const entity = entities[0];
+  const entityId = selection.entityId ?? (await deps.store.listWorkspaceEntityIds(tenantId))[0];
+  const entity = entityId ? await deps.store.getEntity(tenantId, entityId) : null;
   if (!entity?.retainedEarningsAccountId)
     throw new KernelError("FIN_NOT_FOUND", "Entity is not ready");
   const periods = [...(await deps.store.listPeriods(tenantId, entity.entityId))].sort(
@@ -308,88 +371,146 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
   const accountName = new Map(
     accounts.map((account) => [account.accountId, `${account.code} ${account.name}`]),
   );
-  const activityPeriods = periods.filter((period) => period.startDate >= "2025-01-01");
-  const series = activityPeriods.map((period) => {
-    const statement = buildStatements({
-      currency: entity.functionalCurrency,
-      retainedEarningsAccountId: entity.retainedEarningsAccountId ?? "",
-      lines: classify(activity, period.periodId, period.startDate),
-    });
-    return { period, statement };
+  const selectedPeriod = selection.periodId
+    ? periods.find((period) => period.periodId === selection.periodId)
+    : periods.filter((period) => period.startDate <= new Date().toISOString().slice(0, 10)).at(-1);
+  if (!selectedPeriod) throw new KernelError("FIN_NOT_FOUND", "Period not found");
+  const activityPeriods = periods.filter((period) => period.startDate <= selectedPeriod.startDate);
+  const unavailablePeriods: { periodId: string; reason: string }[] = [];
+  const series = activityPeriods.flatMap((period) => {
+    try {
+      const statement = buildStatements({
+        currency: entity.functionalCurrency,
+        retainedEarningsAccountId: entity.retainedEarningsAccountId ?? "",
+        lines: classify(activity, period.periodId, period.startDate),
+      });
+      return [{ period, statement }];
+    } catch (error) {
+      // An invalid historical statement must not mask a valid selected period.
+      // The selected period still fails closed; no statement is fabricated.
+      if (
+        !(error instanceof KernelError) ||
+        error.code !== "FIN_STATEMENT_IMBALANCE" ||
+        period.periodId === selectedPeriod.periodId
+      )
+        throw error;
+      unavailablePeriods.push({ periodId: period.periodId, reason: error.message });
+      return [];
+    }
   });
   const latest = series.at(-1);
   if (!latest) throw new KernelError("FIN_NOT_FOUND", "No statement periods");
   const currency = entity.functionalCurrency;
-  const driversRecord = (await deps.store.listWorkspaceRecords(tenantId, "drivers"))[0];
-  const drivers = {
-    revenueMinor: text(driversRecord?.payload.revenueMinor) || PLANNING_DRIVERS.revenueMinor,
-    growthRate: text(driversRecord?.payload.growthRate) || PLANNING_DRIVERS.growthRate,
-    grossMargin: text(driversRecord?.payload.grossMargin) || PLANNING_DRIVERS.grossMargin,
-    opexMinor: text(driversRecord?.payload.opexMinor) || PLANNING_DRIVERS.opexMinor,
-  };
-  const scenarioGrowth = text(driversRecord?.payload.scenarioGrowthRate) || "0";
-  const forecast = forecastScenario({ ...drivers, periods: 12 }, { growthRate: scenarioGrowth });
-  const cashBase = buildCashForecast({
-    currency,
-    openingCashMinor: latest.statement.cashFlow.endingCashMinor,
-    minimumCashMinor: "25000000",
-    weeks: cashWeekInputs("base"),
-  });
-  const cashDownside = buildCashForecast({
-    currency,
-    openingCashMinor: latest.statement.cashFlow.endingCashMinor,
-    minimumCashMinor: "25000000",
-    weeks: cashWeekInputs("downside"),
-  });
-  const variance = explainVariance({
-    lines: [
-      {
-        key: "revenue",
-        label: "Revenue",
-        kind: "revenue",
-        actualMinor: latest.statement.incomeStatement.revenueMinor,
-        planMinor: PLAN_BUDGET.revenueMinor,
-      },
-      {
-        key: "expenses",
-        label: "Expenses",
-        kind: "expense",
-        actualMinor: latest.statement.incomeStatement.expensesMinor,
-        planMinor: PLAN_BUDGET.expensesMinor,
-      },
-      {
-        key: "net",
-        label: "Net income",
-        kind: "profit",
-        actualMinor: latest.statement.incomeStatement.netIncomeMinor,
-        planMinor: PLAN_BUDGET.netIncomeMinor,
-      },
-    ],
-  });
   const proposals = await deps.store.listWorkspaceRecords(tenantId, "proposal");
-  const accepted = proposals.filter(
-    (item) => item.status === "accepted" && text(item.payload.amount).length > 0,
-  );
-  const qoeRaw = buildQoeBridge({
-    reported: latest.statement.incomeStatement.netIncomeMinor,
-    adjustments: accepted.map((item) => ({
-      adjustmentId: item.id,
-      sourceRowId: text(item.payload.sourceRowId) || item.id,
-      actorId: text(item.payload.decidedBy) || "sindhu",
-      amount: text(item.payload.amount),
-    })),
-  });
-  const qoe = {
-    ...qoeRaw,
-    reported: asMinor(qoeRaw.reported),
-    adjustmentsTotal: asMinor(qoeRaw.adjustmentsTotal),
-    normalized: asMinor(qoeRaw.normalized),
-    steps: qoeRaw.steps.map((step) => ({ ...step, amount: asMinor(step.amount) })),
-  };
-  const bankGap = subtractMoney(
-    money(currency, latest.statement.cashFlow.endingCashMinor),
-    money(currency, latest.statement.cashFlow.endingCashMinor),
-  );
+  const driversRecord =
+    deps.demoMode === true
+      ? (await deps.store.listWorkspaceRecords(tenantId, "drivers"))[0]
+      : undefined;
+  const demo =
+    deps.demoMode === true
+      ? (() => {
+          const drivers = {
+            revenueMinor:
+              text(driversRecord?.payload.revenueMinor) || PLANNING_DRIVERS.revenueMinor,
+            growthRate: text(driversRecord?.payload.growthRate) || PLANNING_DRIVERS.growthRate,
+            grossMargin: text(driversRecord?.payload.grossMargin) || PLANNING_DRIVERS.grossMargin,
+            opexMinor: text(driversRecord?.payload.opexMinor) || PLANNING_DRIVERS.opexMinor,
+          };
+          const scenarioGrowth = text(driversRecord?.payload.scenarioGrowthRate) || "0";
+          const forecast = forecastScenario(
+            { ...drivers, periods: 12 },
+            { growthRate: scenarioGrowth },
+          );
+          const cashBase = buildCashForecast({
+            currency,
+            openingCashMinor: latest.statement.cashFlow.endingCashMinor,
+            minimumCashMinor: "25000000",
+            weeks: cashWeekInputs("base"),
+          });
+          const cashDownside = buildCashForecast({
+            currency,
+            openingCashMinor: latest.statement.cashFlow.endingCashMinor,
+            minimumCashMinor: "25000000",
+            weeks: cashWeekInputs("downside"),
+          });
+          const variance = explainVariance({
+            lines: [
+              {
+                key: "revenue",
+                label: "Revenue",
+                kind: "revenue",
+                actualMinor: latest.statement.incomeStatement.revenueMinor,
+                planMinor: PLAN_BUDGET.revenueMinor,
+              },
+              {
+                key: "expenses",
+                label: "Expenses",
+                kind: "expense",
+                actualMinor: latest.statement.incomeStatement.expensesMinor,
+                planMinor: PLAN_BUDGET.expensesMinor,
+              },
+              {
+                key: "net",
+                label: "Net income",
+                kind: "profit",
+                actualMinor: latest.statement.incomeStatement.netIncomeMinor,
+                planMinor: PLAN_BUDGET.netIncomeMinor,
+              },
+            ],
+          });
+          const accepted = proposals.filter(
+            (item) => item.status === "accepted" && text(item.payload.amount).length > 0,
+          );
+          const qoeRaw = buildQoeBridge({
+            reported: latest.statement.incomeStatement.netIncomeMinor,
+            adjustments: accepted.map((item) => ({
+              adjustmentId: item.id,
+              sourceRowId: text(item.payload.sourceRowId) || item.id,
+              actorId: text(item.payload.decidedBy) || actor.actorId,
+              amount: text(item.payload.amount),
+            })),
+          });
+          const qoe = {
+            ...qoeRaw,
+            reported: asMinor(qoeRaw.reported),
+            adjustmentsTotal: asMinor(qoeRaw.adjustmentsTotal),
+            normalized: asMinor(qoeRaw.normalized),
+            steps: qoeRaw.steps.map((step) => ({ ...step, amount: asMinor(step.amount) })),
+          };
+          return {
+            drivers,
+            scenarioGrowth,
+            forecast,
+            cashBase,
+            cashDownside,
+            variance,
+            qoe,
+            accepted,
+          };
+        })()
+      : null;
+  const unavailable = { status: "unavailable" as const, reason: "no tenant plan data" };
+  const bank = (await deps.store.listWorkspaceRecords(tenantId, "bank_import"))
+    .filter(
+      (item) =>
+        item.status === "imported" &&
+        item.payload.entityId === entity.entityId &&
+        item.payload.periodId === latest.period.periodId &&
+        item.payload.currency === currency &&
+        /^-?\d+$/.test(text(item.payload.closingBalanceMinor)),
+    )
+    .sort(
+      (left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+    )[0];
+  const bankCashMinor = bank ? text(bank.payload.closingBalanceMinor) : null;
+  const bankGap =
+    bankCashMinor === null
+      ? null
+      : subtractMoney(
+          money(currency, latest.statement.cashFlow.endingCashMinor),
+          money(currency, bankCashMinor),
+        );
   const journals = await deps.store.listJournals(tenantId, entity.entityId, null);
   let auditEvents: {
     eventId: string;
@@ -463,16 +584,31 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
         latest.statement.inputHash,
         latest.statement.engineVersion,
       ),
-      kpi(
-        "normalized",
-        "Normalized earnings",
-        qoe.normalized,
-        currency,
-        qoe.inputHash,
-        qoe.engineVersion,
-      ),
+      ...(demo
+        ? [
+            kpi(
+              "normalized",
+              "Normalized earnings",
+              demo.qoe.normalized,
+              currency,
+              demo.qoe.inputHash,
+              demo.qoe.engineVersion,
+            ),
+          ]
+        : [
+            {
+              id: "normalized",
+              label: "Normalized earnings",
+              minor: null,
+              display: null,
+              currency,
+              lineage: null,
+              ...unavailable,
+            },
+          ]),
     ],
     statements: {
+      unavailablePeriods,
       periods: series.map((item) => ({
         periodId: item.period.periodId,
         label: item.period.endDate.slice(0, 7),
@@ -492,21 +628,41 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
         credit: present(line.creditMinor, currency),
       })),
     })),
-    forecast: {
-      drivers,
-      scenarioGrowthRate: scenarioGrowth,
-      base: forecast.base,
-      scenario: forecast.scenario,
-    },
-    cash: { minimumCashMinor: "25000000", base: cashBase, downside: cashDownside },
-    variance,
-    qoe: {
-      ...qoe,
-      steps: qoe.steps.map((step, index) => ({
-        ...step,
-        label: text(accepted[index]?.payload.title) || step.adjustmentId,
-      })),
-    },
+    forecast: demo
+      ? {
+          drivers: demo.drivers,
+          scenarioGrowthRate: demo.scenarioGrowth,
+          base: demo.forecast.base,
+          scenario: demo.forecast.scenario,
+        }
+      : {
+          ...unavailable,
+          drivers: { revenueMinor: null, growthRate: null, grossMargin: null, opexMinor: null },
+          scenarioGrowthRate: null,
+          base: null,
+          scenario: null,
+        },
+    cash: demo
+      ? { minimumCashMinor: "25000000", base: demo.cashBase, downside: demo.cashDownside }
+      : { ...unavailable, minimumCashMinor: null, base: null, downside: null },
+    variance: demo?.variance ?? { ...unavailable, engineVersion: null, inputHash: null, lines: [] },
+    qoe: demo
+      ? {
+          ...demo.qoe,
+          steps: demo.qoe.steps.map((step, index) => ({
+            ...step,
+            label: text(demo.accepted[index]?.payload.title) || step.adjustmentId,
+          })),
+        }
+      : {
+          ...unavailable,
+          engineVersion: null,
+          inputHash: null,
+          reported: null,
+          adjustmentsTotal: null,
+          normalized: null,
+          steps: [],
+        },
     board: {
       title: `${tenant.name} board pack`,
       cutoff: latest.period.endDate,
@@ -538,19 +694,27 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
               currency,
               latest.statement.inputHash,
             ),
-            figure(
-              "13-week ending",
-              cashBase.weeks.at(-1)?.endingMinor ?? "0",
-              currency,
-              cashBase.inputHash,
-            ),
+            ...(demo
+              ? [
+                  figure(
+                    "13-week ending",
+                    demo.cashBase.weeks.at(-1)?.endingMinor ?? "0",
+                    currency,
+                    demo.cashBase.inputHash,
+                  ),
+                ]
+              : []),
           ],
         },
         {
           heading: "Quality of earnings",
           figures: [
-            figure("Reported net income", qoe.reported, currency, qoe.inputHash),
-            figure("Normalized earnings", qoe.normalized, currency, qoe.inputHash),
+            ...(demo
+              ? [
+                  figure("Reported net income", demo.qoe.reported, currency, demo.qoe.inputHash),
+                  figure("Normalized earnings", demo.qoe.normalized, currency, demo.qoe.inputHash),
+                ]
+              : []),
           ],
         },
       ],
@@ -562,15 +726,18 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
         {
           id: "reconcile",
           label: "Reconciliation certificate",
-          state: isZeroMoney(bankGap) ? "complete" : "exception",
+          state: bankGap === null ? "unavailable" : isZeroMoney(bankGap) ? "complete" : "exception",
         },
       ],
       certificate: {
         bookCash: present(latest.statement.cashFlow.endingCashMinor, currency),
-        bankCash: present(latest.statement.cashFlow.endingCashMinor, currency),
-        difference: present(bankGap.minor, currency),
-        status: isZeroMoney(bankGap) ? "reconciled" : "exception",
-        sourceDocument: "bank-statements",
+        bankCash: bankCashMinor === null ? null : present(bankCashMinor, currency),
+        bankCashMinor,
+        difference: bankGap === null ? null : present(bankGap.minor, currency),
+        gapMinor: bankGap?.minor ?? null,
+        status:
+          bankGap === null ? "unavailable" : isZeroMoney(bankGap) ? "reconciled" : "unreconciled",
+        sourceDocument: bank?.id ?? null,
         engineVersion: latest.statement.engineVersion,
         inputHash: latest.statement.inputHash,
       },
@@ -632,7 +799,16 @@ async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
 async function platformView(deps: WorkspaceDeps, actor: ActorContext) {
   requirePlatform(deps, actor);
   const tenantId = deps.directory.list()[0]?.tenantId;
-  const flags = tenantId ? await deps.store.listWorkspaceRecords(tenantId, "flag") : [];
+  const flags = (
+    await Promise.all(
+      deps.directory.list().map(async (card) =>
+        (await deps.store.listWorkspaceRecords(card.tenantId, "flag")).map((flag) => ({
+          ...flag,
+          tenantId: card.tenantId,
+        })),
+      ),
+    )
+  ).flat();
   const connectors = tenantId ? await deps.store.listWorkspaceRecords(tenantId, "connector") : [];
   const runs = tenantId ? await deps.store.listWorkspaceRecords(tenantId, "ai_run") : [];
   const support = tenantId ? await deps.store.listWorkspaceRecords(tenantId, "support") : [];
@@ -640,6 +816,7 @@ async function platformView(deps: WorkspaceDeps, actor: ActorContext) {
     tenants: deps.directory.list(),
     flags: flags.map((item) => ({
       id: item.id,
+      tenantId: item.tenantId,
       key: text(item.payload.key),
       label: text(item.payload.label),
       enabled: item.payload.enabled === true,
@@ -836,14 +1013,24 @@ function requirePlatform(deps: WorkspaceDeps, actor: ActorContext): void {
 }
 
 function supportActive(
-  card: { members: readonly { actorId: string; role: string }[] },
+  grants: readonly { status: string; payload: Record<string, unknown> }[],
   actorId: string,
   now: number,
 ): boolean {
-  return card.members.some((item) => item.actorId === actorId) && now > 0;
+  return grants.some(
+    (item) =>
+      item.status === "active" &&
+      item.payload.actorId === actorId &&
+      Date.parse(text(item.payload.expiresAt)) > now,
+  );
 }
 
-function audit(actor: ActorContext, aggregateId: string, eventType: string) {
+function audit(
+  actor: ActorContext,
+  aggregateId: string,
+  eventType: string,
+  payload: Record<string, unknown> = {},
+) {
   return {
     eventId: crypto.randomUUID(),
     eventType,
@@ -852,6 +1039,6 @@ function audit(actor: ActorContext, aggregateId: string, eventType: string) {
     actorId: actor.actorId,
     correlationId: actor.correlationId,
     occurredAt: new Date().toISOString(),
-    payload: { eventType },
+    payload: { eventType, ...payload },
   };
 }

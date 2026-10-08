@@ -10,7 +10,10 @@ export interface CitedClaim {
  * A numeric claim without a calculation run, statement hash, or document id
  * is discarded before it can be shown as a figure.
  */
-export function acceptCitedClaims(claims: readonly CitedClaim[]): {
+export function acceptCitedClaims(
+  claims: readonly CitedClaim[],
+  sourceIds: readonly string[] = [],
+): {
   readonly engineVersion: string;
   readonly inputHash: string;
   readonly accepted: readonly CitedClaim[];
@@ -19,7 +22,10 @@ export function acceptCitedClaims(claims: readonly CitedClaim[]): {
   const accepted: CitedClaim[] = [];
   const discarded: CitedClaim[] = [];
   for (const claim of claims) {
-    if (/\d/.test(claim.text) && (claim.citationId === null || claim.citationId.length === 0)) {
+    if (
+      (claim.citationId !== null && !sourceIds.includes(claim.citationId)) ||
+      (/\d/.test(claim.text) && !claim.citationId)
+    ) {
       discarded.push(claim);
     } else {
       accepted.push(claim);
@@ -27,7 +33,7 @@ export function acceptCitedClaims(claims: readonly CitedClaim[]): {
   }
   return {
     engineVersion: ENGINE_VERSION,
-    inputHash: hashMaterial(claims),
+    inputHash: hashMaterial({ claims, sourceIds }),
     accepted,
     discarded,
   };
