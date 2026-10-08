@@ -25,10 +25,12 @@ export async function enforceSupportExpiry(
       typeof grant.payload.membershipId === "string" ? grant.payload.membershipId : "";
     // A corrupt membership reference must keep denying access until an operator repairs it.
     if (!membershipId) continue;
-    await store.deleteMembership({
+    await store.expireSupportGrant({
       tenantId,
+      grantId: grant.id,
       membershipId,
-      audit: {
+      updatedAt: occurredAt,
+      membershipAudit: {
         eventId: crypto.randomUUID(),
         eventType: "SupportExpired",
         aggregateType: "membership",
@@ -38,14 +40,7 @@ export async function enforceSupportExpiry(
         occurredAt,
         payload: { tenantId },
       },
-    });
-    await store.updateWorkspaceRecord({
-      tenantId,
-      id: grant.id,
-      status: "expired",
-      payload: grant.payload,
-      updatedAt: occurredAt,
-      audit: {
+      grantAudit: {
         eventId: crypto.randomUUID(),
         eventType: "SupportExpired",
         aggregateType: "workspace_record",

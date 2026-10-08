@@ -186,6 +186,38 @@ async function supportFixture() {
 }
 
 describe("support expiry", () => {
+  it("expires concurrent support requests with one grant audit", async () => {
+    const fixture = await supportFixture();
+    await store.updateWorkspaceRecord({
+      tenantId: fixture.tenantId,
+      id: fixture.grantId,
+      status: "active",
+      payload: { ...fixture.payload, expiresAt: new Date(fixture.at - 1_000).toISOString() },
+      updatedAt: new Date(fixture.at).toISOString(),
+      audit: audit(fixture.grantId),
+    });
+    const responses = await Promise.all([
+      fixture.app.request("/v1/entities", { headers: fixture.headers }),
+      fixture.app.request("/v1/entities", { headers: fixture.headers }),
+    ]);
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "AUTH_SUPPORT_EXPIRED" } });
+    }
+    expect((await store.listWorkspaceRecords(fixture.tenantId, "support"))[0]?.status).toBe(
+      "expired",
+    );
+    const audits = await store.listAudit(fixture.tenantId);
+    expect(
+      audits.filter(
+        (event) =>
+          event.eventType === "SupportExpired" &&
+          event.aggregateType === "workspace_record" &&
+          event.aggregateId === fixture.grantId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it.each(["/v1/entities", "/auth/session/rotate", "/auth/session"])(
     "rejects expired access on %s and audits membership removal",
     async (path) => {
@@ -239,6 +271,16 @@ describe("support expiry", () => {
 });
 
 describe("pre-auth body limits", () => {
+  it("rejects malformed credential JSON with a validation error", async () => {
+    const response = await build().request("/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"actorId":',
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "VALIDATION_FAILED" } });
+  });
+
   it.each([undefined, "1"])(
     "stops chunked reads at the cap, even with an understated length: %s",
     async (length) => {

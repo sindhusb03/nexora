@@ -287,53 +287,6 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
   });
 }
 
-export async function expireSupportGrants(
-  store: LedgerStore,
-  tenantId: string,
-  actorId: string,
-  correlationId: string,
-): Promise<void> {
-  const grants = await store.listWorkspaceRecords(tenantId, "support");
-  const now = Date.now();
-  for (const grant of grants) {
-    if (text(grant.payload.actorId) !== actorId || grant.status !== "active") continue;
-    const expires = Date.parse(text(grant.payload.expiresAt));
-    const membershipId = text(grant.payload.membershipId);
-    if (!Number.isFinite(expires) || expires > now || membershipId.length === 0) continue;
-    await store.deleteMembership({
-      tenantId,
-      membershipId,
-      audit: {
-        eventId: crypto.randomUUID(),
-        eventType: "SupportExpired",
-        aggregateType: "membership",
-        aggregateId: membershipId,
-        actorId,
-        correlationId,
-        occurredAt: new Date().toISOString(),
-        payload: { tenantId },
-      },
-    });
-    await store.updateWorkspaceRecord({
-      tenantId,
-      id: grant.id,
-      status: "expired",
-      payload: grant.payload,
-      updatedAt: new Date().toISOString(),
-      audit: {
-        eventId: crypto.randomUUID(),
-        eventType: "SupportExpired",
-        aggregateType: "workspace_record",
-        aggregateId: grant.id,
-        actorId,
-        correlationId,
-        occurredAt: new Date().toISOString(),
-        payload: {},
-      },
-    });
-  }
-}
-
 async function snapshot(deps: WorkspaceDeps, actor: ActorContext) {
   const tenantId = actor.tenantId;
   if (!tenantId) throw new KernelError("AUTH_SCOPE_DENIED", "Choose a company first");

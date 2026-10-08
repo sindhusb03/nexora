@@ -187,7 +187,15 @@ async function accountIdentifiers(c: AppContext): Promise<readonly string[]> {
   }
   // Preserve the bounded body for downstream bodyLimit (including smaller configured limits).
   c.req.raw = new Request(c.req.raw, { body: bytes });
-  const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new ApiError(400, "VALIDATION_FAILED", "Request body must be valid JSON");
+    }
+    throw error;
+  }
   // This Hono version caches text, but json() reparses it. Cache the parsed value too.
   c.req.json = async <T>() => body as T;
   if (typeof body !== "object" || body === null) return [];
