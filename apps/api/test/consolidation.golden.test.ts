@@ -336,6 +336,42 @@ describe("posted-ledger group consolidation", () => {
     );
   });
 
+  it("rejects a quarter and a full year that end on the same day", async () => {
+    const entityId = await createEntity("Q4 books", "USD");
+    const quarter = await createPeriod(entityId, "2024-10-01", "2024-12-31");
+    const cash = await createAccount(entityId, "1000", "Cash", "asset", "cash", false);
+    const equity = await createAccount(entityId, "3000", "Equity", "equity", "non_cash", false);
+    await createAccount(entityId, "3900", "Retained earnings", "equity", "non_cash", true);
+    await post(entityId, quarter, "USD", [
+      { accountId: cash, debit: "10", credit: "0" },
+      { accountId: equity, debit: "0", credit: "10" },
+    ]);
+    const scope = {
+      ...ledgerBody(),
+      entities: [
+        { entityId: usEntityId, periodId: usPeriodId },
+        { entityId, periodId: quarter },
+      ],
+    };
+    const translated = await translate(scope);
+    expect(translated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(translated)).error.code).toBe(
+      "FIN_INVALID_PERIOD",
+    );
+    const eliminated = await eliminate({
+      ...scope,
+      evidenceId: "ic-span",
+      eliminations: [
+        { accountId: usAr, debitMinor: "0", creditMinor: "1", evidenceId: "ic-span" },
+        { accountId: ukAp, debitMinor: "1", creditMinor: "0", evidenceId: "ic-span" },
+      ],
+    });
+    expect(eliminated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(eliminated)).error.code).toBe(
+      "FIN_INVALID_PERIOD",
+    );
+  });
+
   it("rejects a duplicate entity in the scope", async () => {
     const scope = {
       ...ledgerBody(),

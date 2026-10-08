@@ -631,7 +631,7 @@ async function deriveTranslatedGroup(
   for (const scope of entities) {
     loaded.push(await loadPostedTrialBalance(store, tenantId, scope.entityId, scope.periodId));
   }
-  assertSamePeriodEnd(loaded.map((entity) => entity.periodEnd));
+  assertSamePeriod(loaded.map((entity) => ({ start: entity.periodStart, end: entity.periodEnd })));
   const translated = loaded.map((entity) => ({
     ...entity,
     translated: translateTrialBalance({
@@ -702,12 +702,17 @@ function assertUniqueEntities(entities: readonly EntityPeriodScope[]): void {
   }
 }
 
-function assertSamePeriodEnd(periodEnds: readonly string[]): void {
-  const [first, ...rest] = periodEnds;
-  if (first !== undefined && rest.some((end) => end !== first)) {
+function assertSamePeriod(
+  periods: readonly { readonly start: string; readonly end: string }[],
+): void {
+  const [first, ...rest] = periods;
+  if (
+    first !== undefined &&
+    rest.some((period) => period.start !== first.start || period.end !== first.end)
+  ) {
     throw new KernelError(
       "FIN_INVALID_PERIOD",
-      "Consolidation periods must share the same end date",
+      "Consolidation periods must share the same start and end dates",
     );
   }
 }
@@ -764,6 +769,7 @@ async function loadPostedTrialBalance(
   return {
     entityId,
     periodId,
+    periodStart: activity.periodStart,
     periodEnd: activity.periodEnd,
     sourceCurrency: activity.currency,
     journalIds,

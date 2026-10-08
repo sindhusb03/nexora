@@ -622,6 +622,7 @@ export async function loadClassifiedActivity(
   return {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
+    periodStart: period.startDate,
     periodEnd: period.endDate,
     lines,
   };
