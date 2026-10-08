@@ -1,5 +1,8 @@
 import {
   KernelError,
+  assertNoPeriodOverlap,
+  assertPeriodOpen,
+  assertPeriodRange,
   ROLES,
   buildStatements,
   type CashFlowClass,
@@ -225,6 +228,17 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
 
     createPeriod(input) {
       return tenantTx(db, input.period.tenantId, async (tx) => {
+        await lockEntity(tx, input.period.tenantId, input.period.entityId);
+        const existing = await tx
+          .select()
+          .from(accountingPeriod)
+          .where(
+            and(
+              eq(accountingPeriod.tenantId, input.period.tenantId),
+              eq(accountingPeriod.legalEntityId, input.period.entityId),
+            ),
+          );
+        assertNoPeriodOverlap(input.period, existing);
         await tx.insert(accountingPeriod).values({
           periodId: input.period.periodId,
           tenantId: input.period.tenantId,
@@ -270,6 +284,19 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
 
     closePeriod(input) {
       return tenantTx(db, input.tenantId, async (tx) => {
+        // Read the immutable entity reference first; acquire locks entity then period everywhere.
+        const [target] = await tx
+          .select()
+          .from(accountingPeriod)
+          .where(
+            and(
+              eq(accountingPeriod.tenantId, input.tenantId),
+              eq(accountingPeriod.periodId, input.periodId),
+            ),
+          );
+        if (!target) throw new KernelError("FIN_INVALID_PERIOD", "Accounting period not found");
+        await lockEntity(tx, input.tenantId, target.legalEntityId);
+        await lockPeriod(tx, input.tenantId, input.periodId, target.legalEntityId);
         const updated = await tx
           .update(accountingPeriod)
           .set({ status: "closed" })
@@ -363,6 +390,22 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
 
     insertPostedJournal(input) {
       return tenantTx(db, input.journal.tenantId, async (tx) => {
+        await lockEntity(tx, input.journal.tenantId, input.journal.entityId);
+        const period = await lockPeriod(
+          tx,
+          input.journal.tenantId,
+          input.journal.periodId,
+          input.journal.entityId,
+        );
+        // postedAt is the audit timestamp, not the effective accounting date.
+        const journalDate = input.journal.journalDate ?? period.endDate;
+        assertPeriodRange(journalDate, journalDate);
+        if (journalDate < period.startDate || journalDate > period.endDate) {
+          throw new KernelError(
+            "FIN_INVALID_PERIOD",
+            "Journal date is outside the accounting period",
+          );
+        }
         await tx.insert(journalEntry).values({
           journalId: input.journal.journalId,
           tenantId: input.journal.tenantId,
@@ -432,6 +475,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
       return tenantTx(db, tenantId, async (tx) => {
         const rows = await tx
           .select({
+            journalId: journalEntry.journalId,
             accountId: journalLine.accountId,
             report: account.report,
             cashFlow: account.cashFlow,
@@ -439,6 +483,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
             debitMinor: journalLine.debitMinor,
             creditMinor: journalLine.creditMinor,
             periodId: journalEntry.periodId,
+            periodStart: accountingPeriod.startDate,
             periodEnd: accountingPeriod.endDate,
           })
           .from(journalLine)
@@ -454,6 +499,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
             ),
           );
         return rows.map((row) => ({
+          journalId: row.journalId,
           accountId: row.accountId,
           report: asReport(row.report),
           cashFlow: asCashFlow(row.cashFlow),
@@ -461,6 +507,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           debitMinor: minor(row.debitMinor),
           creditMinor: minor(row.creditMinor),
           periodId: row.periodId,
+          periodStart: row.periodStart,
           periodEnd: row.periodEnd,
         })) satisfies PostedActivityLine[];
       });
@@ -903,6 +950,28 @@ async function readLockedLedger(
     fiscalYearEndDay: entities[0]?.fiscalYearEndDay ?? null,
     retainedEarningsAccountId: entities[0]?.retainedEarningsAccountId ?? null,
   };
+}
+
+async function lockEntity(tx: AppDatabase, tenantId: string, entityId: string): Promise<void> {
+  const [entity] = await tx
+    .select({ id: legalEntity.legalEntityId })
+    .from(legalEntity)
+    .where(and(eq(legalEntity.tenantId, tenantId), eq(legalEntity.legalEntityId, entityId)))
+    .for("update");
+  if (!entity) throw new KernelError("FIN_NOT_FOUND", "Legal entity not found");
+}
+
+async function lockPeriod(tx: AppDatabase, tenantId: string, periodId: string, entityId: string) {
+  const [period] = await tx
+    .select()
+    .from(accountingPeriod)
+    .where(and(eq(accountingPeriod.tenantId, tenantId), eq(accountingPeriod.periodId, periodId)))
+    .for("update");
+  if (!period || period.legalEntityId !== entityId) {
+    throw new KernelError("FIN_INVALID_PERIOD", "Accounting period does not belong to the entity");
+  }
+  assertPeriodOpen(period.status === "open" ? "open" : "closed");
+  return period;
 }
 
 export async function tenantTx<T>(

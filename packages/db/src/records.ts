@@ -101,6 +101,7 @@ export interface CalculationRunRecord {
 }
 
 export interface PostedActivityLine {
+  readonly journalId: string;
   readonly accountId: string;
   readonly report: ReportClass;
   readonly cashFlow: CashFlowClass;
@@ -108,6 +109,7 @@ export interface PostedActivityLine {
   readonly debitMinor: string;
   readonly creditMinor: string;
   readonly periodId: string;
+  readonly periodStart: string;
   readonly periodEnd: string;
 }
 
@@ -392,7 +394,11 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
     periodId: string | null,
   ): Promise<readonly JournalRecord[]>;
   insertPostedJournal(input: {
-    journal: Omit<JournalRecord, "lines" | "postedAt"> & { postedAt: string };
+    journal: Omit<JournalRecord, "lines" | "postedAt"> & {
+      postedAt: string;
+      /** Accounting date; period-only callers use the selected period's end date. */
+      journalDate?: string;
+    };
     lines: readonly (StoredJournalLine & { lineId: string })[];
     audit: AuditWrite;
     domainEventId: string;
@@ -419,7 +425,18 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
   getFinancialState(
     tenantId: string,
     financialStateId: string,
-  ): Promise<PublishableVersionRow | null>;
+  ): Promise<
+    | (PublishableVersionRow & {
+        readonly calculationStatus: "succeeded" | "failed";
+        readonly calculationRunId: string | null;
+      })
+    | null
+  >;
+  transitionFinancialStateAtomic(input: {
+    successor: VersionWrite;
+    approval: ApprovalWrite;
+    lineage: LineageWrite & { audit: AuditWrite };
+  }): Promise<{ readonly id: string }>;
   insertApproval(input: ApprovalWrite): Promise<void>;
   insertLineage(input: LineageWrite): Promise<void>;
   listLineage(tenantId: string, fromType: string, fromId: string): Promise<readonly LineageRow[]>;
@@ -427,6 +444,7 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
   insertOwnershipEdge(input: OwnershipWrite): Promise<void>;
   listOwnershipEdges(tenantId: string): Promise<readonly OwnershipRow[]>;
   insertConsolidationGroup(input: NamedWrite): Promise<{ readonly id: string }>;
+  getConsolidationGroup(tenantId: string, id: string): Promise<{ readonly id: string } | null>;
   insertElimination(input: EliminationWrite): Promise<void>;
   insertModel(input: {
     tenantId: string;
@@ -435,6 +453,7 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
     createdAt: string;
   }): Promise<void>;
   insertModelVersion(input: ModelVersionWrite): Promise<void>;
+  getModel(tenantId: string, modelId: string): Promise<{ readonly id: string } | null>;
   getModelVersion(tenantId: string, modelVersionId: string): Promise<VersionRow | null>;
   insertScenario(input: ScenarioWrite): Promise<{ readonly id: string }>;
   insertValuation(input: VersionWrite): Promise<{ readonly id: string }>;

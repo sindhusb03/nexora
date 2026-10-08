@@ -87,8 +87,14 @@ export const financialStateSchema = z.object({
   entityId: uuid,
   periodId: uuid,
   basis: z.string().trim().min(1).max(64),
-  currency: z.string().regex(/^[A-Z]{3}$/),
-  netIncomeMinor: z.string().regex(/^-?\d+$/),
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/)
+    .optional(),
+  netIncomeMinor: z
+    .string()
+    .regex(/^-?\d+$/)
+    .optional(),
   label: z.string().trim().max(200).optional(),
 });
 

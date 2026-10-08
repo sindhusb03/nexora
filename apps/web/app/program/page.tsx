@@ -48,7 +48,7 @@ import {
   decodeLineage,
   decodeReportPack,
   decodeSensitivity,
-  decodeStateVersion,
+  decodeStateVersion as decodeStateMetadata,
   decodeValuationRun,
   decodeValuationVersion,
   field,
@@ -83,6 +83,25 @@ type Tab =
   | "deal"
   | "basis"
   | "assistant";
+
+type CalculatedStateVersion = StateVersion & {
+  readonly netIncomeMinor: string | null;
+  readonly currency: string | null;
+};
+
+function decodeStateVersion(
+  data: KernelRecord,
+  previous: CalculatedStateVersion | null,
+): CalculatedStateVersion | null {
+  const version = decodeStateMetadata(data, previous);
+  return version
+    ? {
+        ...version,
+        netIncomeMinor: field(data, "netIncomeMinor"),
+        currency: field(data, "currency"),
+      }
+    : null;
+}
 
 const TAB_LABELS: Readonly<Record<Tab, string>> = {
   publish: "Financial state",
@@ -185,7 +204,7 @@ function ProgramWorkspace({
   );
   const [checkerId, setCheckerId] = useState("controller-1");
   const [checkerGranted, setCheckerGranted] = useState(false);
-  const [stateVersion, setStateVersion] = useState<StateVersion | null>(null);
+  const [stateVersion, setStateVersion] = useState<CalculatedStateVersion | null>(null);
   const [publishedStateId, setPublishedStateId] = useState("");
   const [valuationRun, setValuationRun] = useState<ValuationRun | null>(null);
   const [valuationVersion, setValuationVersion] = useState<VersionRef | null>(null);
@@ -566,14 +585,11 @@ function ProgramWorkspace({
               grantActorId={checkerId}
               checkerGranted={checkerGranted}
               stateVersion={stateVersion}
-              onDraft={async (netIncomeMinor) => {
+              onDraft={async () => {
                 const data = await run(undefined, "/v1/financial-states", {
                   entityId,
                   periodId,
                   basis: "us-gaap",
-                  currency: entity?.functionalCurrency ?? "USD",
-                  netIncomeMinor,
-                  label: "Workspace",
                 });
                 const next = data ? decodeStateVersion(data, null) : null;
                 if (next) {
