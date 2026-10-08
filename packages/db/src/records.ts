@@ -372,6 +372,16 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
     membershipId: string;
     audit: AuditWrite;
   }): Promise<TenantRecord>;
+  /**
+   * Self-service first run, when the owner has no active membership yet.
+   * A concurrent replay of that open returns the company the lock winner inserted.
+   */
+  openFirstCompany(input: {
+    tenant: TenantRecord;
+    ownerActorId: string;
+    membershipId: string;
+    audit: AuditWrite;
+  }): Promise<{ readonly tenant: TenantRecord; readonly replayed: boolean }>;
   grantMembership(input: {
     tenantId: string;
     membershipId: string;

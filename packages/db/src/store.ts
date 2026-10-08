@@ -64,7 +64,36 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
     | keyof ReturnType<typeof createIngestionStore>
   > = {
     createTenant(input) {
-      return provisionOwnedTenant(db, input);
+      return tenantTx(db, input.tenant.tenantId, async (tx) => {
+        await tx.insert(tenant).values({
+          tenantId: input.tenant.tenantId,
+          name: input.tenant.name,
+          homeRegion: input.tenant.homeRegion,
+          status: input.tenant.status,
+          createdAt: input.tenant.createdAt,
+        });
+        await tx.insert(membership).values({
+          membershipId: input.membershipId,
+          tenantId: input.tenant.tenantId,
+          actorId: input.ownerActorId,
+          role: "owner",
+          createdAt: input.tenant.createdAt,
+        });
+        await writeAudit(tx, input.tenant.tenantId, input.audit);
+        await writeRoleChangeAudit(tx, {
+          actorId: input.ownerActorId,
+          tenantId: input.tenant.tenantId,
+          role: "owner",
+          grantedBy: input.audit.actorId,
+          requestId: input.audit.correlationId,
+          occurredAt: input.tenant.createdAt,
+        });
+        return input.tenant;
+      });
+    },
+
+    openFirstCompany(input) {
+      return openFirstCompany(db, input);
     },
 
     grantMembership(input) {
@@ -1011,13 +1040,18 @@ function normalizeCompanyName(name: string): string {
 }
 
 /**
- * Opens a company for an owner. The lock and the lookup use the owner and the
- * normalized name. A supplied tenant id is not a reason to return a different company.
+ * First-run open. The lock is the owner plus the normalized name. A supplied
+ * tenant id is not used to choose an existing company. Callers that already
+ * have an active membership use createTenant instead.
  */
-async function provisionOwnedTenant(
+async function openFirstCompany(
   db: AppDatabase,
-  input: Parameters<LedgerStore["createTenant"]>[0],
-): Promise<TenantRecord> {
+  input: Parameters<LedgerStore["openFirstCompany"]>[0],
+): Promise<{ tenant: TenantRecord; replayed: boolean }> {
+  const session = currentRlsSession();
+  if (session && session.actorId !== input.ownerActorId) {
+    throw new KernelError("AUTH_SCOPE_DENIED", "The actor does not match the signed-in session");
+  }
   const normalized = normalizeCompanyName(input.tenant.name);
   const lockKey = `${input.ownerActorId.length}:${input.ownerActorId}:${normalized}`;
   try {
@@ -1034,26 +1068,38 @@ async function provisionOwnedTenant(
           homeRegion: tenant.homeRegion,
           status: tenant.status,
           createdAt: tenant.createdAt,
+          role: membership.role,
         })
         .from(membership)
         .innerJoin(tenant, eq(membership.tenantId, tenant.tenantId))
-        .where(
-          and(
-            eq(membership.actorId, input.ownerActorId),
-            eq(membership.role, "owner"),
-            eq(membership.status, "active"),
-          ),
-        )
+        .where(and(eq(membership.actorId, input.ownerActorId), eq(membership.status, "active")))
         .orderBy(asc(tenant.createdAt), asc(tenant.tenantId));
-      const existing = owned.find((row) => normalizeCompanyName(row.name) === normalized);
-      if (existing) {
+      const sameName = owned.filter(
+        (row) => row.role === "owner" && normalizeCompanyName(row.name) === normalized,
+      );
+      const other = owned.filter(
+        (row) => !sameName.some((match) => match.tenantId === row.tenantId),
+      );
+      const existing = sameName[0];
+      if (existing && other.length === 0) {
+        await scoped.execute(sql`SELECT set_config('app.tenant_id', ${existing.tenantId}, true)`);
+        await writeAudit(scoped, existing.tenantId, {
+          ...input.audit,
+          eventId: crypto.randomUUID(),
+          eventType: "TenantProvisionReplayed",
+          aggregateType: "tenant",
+          aggregateId: existing.tenantId,
+        });
         return {
-          tenantId: existing.tenantId,
-          name: existing.name,
-          homeRegion: existing.homeRegion,
-          status: existing.status === "suspended" ? "suspended" : "active",
-          createdAt: existing.createdAt,
-        } satisfies TenantRecord;
+          tenant: {
+            tenantId: existing.tenantId,
+            name: existing.name,
+            homeRegion: existing.homeRegion,
+            status: existing.status === "suspended" ? "suspended" : "active",
+            createdAt: existing.createdAt,
+          },
+          replayed: true,
+        };
       }
       await scoped.execute(sql`SELECT set_config('app.tenant_id', ${input.tenant.tenantId}, true)`);
       await scoped.insert(tenant).values({
@@ -1079,7 +1125,7 @@ async function provisionOwnedTenant(
         requestId: input.audit.correlationId,
         occurredAt: input.tenant.createdAt,
       });
-      return input.tenant;
+      return { tenant: input.tenant, replayed: false };
     });
   } catch (error) {
     rethrowDomain(error);

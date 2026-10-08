@@ -60,32 +60,43 @@ describe("workspace companies", () => {
     expect(other.companies.map((company) => company.name)).toEqual(["Other Books"]);
   });
 
-  it("creates one company when two first-run retries use the same name", async () => {
+  it("returns the existing company when a first-run open is replayed", async () => {
     const store = await createPgliteStore();
     const app = await testApp({ store, directory: createDirectory(), demoMode: false });
     await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
-    const body = { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" };
     const [first, second] = await Promise.all([
-      call(app, "POST", "/v1/tenants", { actor: "owner-a", body }),
-      call(app, "POST", "/v1/tenants", { actor: "owner-a", body }),
+      call(app, "POST", "/v1/tenants", {
+        actor: "owner-a",
+        body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
+      }),
+      call(app, "POST", "/v1/tenants", {
+        actor: "owner-a",
+        body: { name: "harbor   analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" },
+      }),
     ]);
-    expect(first.status).toBe(201);
-    expect(second.status).toBe(201);
-    const opened = (await first.json()) as { tenantId: string };
-    const replayed = (await second.json()) as { tenantId: string };
-    expect(replayed.tenantId).toBe(opened.tenantId);
-
-    const spaced = await call(app, "POST", "/v1/tenants", {
-      actor: "owner-a",
-      body: { ...body, name: "harbor   analytics" },
-    });
-    expect(spaced.status).toBe(201);
-    expect(((await spaced.json()) as { tenantId: string }).tenantId).toBe(opened.tenantId);
+    const responses = [first, second].sort((left, right) => left.status - right.status);
+    expect(responses.map((response) => response.status)).toEqual([200, 201]);
+    const replay = (await responses[0]!.json()) as {
+      tenantId: string;
+      name: string;
+      replayed: boolean;
+    };
+    const created = (await responses[1]!.json()) as {
+      tenantId: string;
+      name: string;
+      replayed: boolean;
+    };
+    expect(replay.replayed).toBe(true);
+    expect(created.replayed).toBe(false);
+    expect(replay.tenantId).toBe(created.tenantId);
+    expect(replay.name).toBe(created.name);
+    const events = await store.listAudit(created.tenantId);
+    expect(events.map((event) => event.eventType)).toContain("TenantProvisionReplayed");
 
     const listed = await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
     const companies = (await listed.json()) as { companies: { tenantId: string; name: string }[] };
     expect(companies.companies).toEqual([
-      expect.objectContaining({ tenantId: opened.tenantId, name: "Harbor Analytics" }),
+      expect.objectContaining({ tenantId: created.tenantId, name: created.name }),
     ]);
 
     const otherOwner = await call(app, "POST", "/v1/tenants", {
@@ -93,8 +104,52 @@ describe("workspace companies", () => {
       body: { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-b" },
     });
     expect(otherOwner.status).toBe(201);
-    const separate = (await otherOwner.json()) as { tenantId: string };
-    expect(separate.tenantId).not.toBe(opened.tenantId);
+    const separate = (await otherOwner.json()) as { tenantId: string; replayed: boolean };
+    expect(separate.replayed).toBe(false);
+    expect(separate.tenantId).not.toBe(created.tenantId);
+  });
+
+  it("creates a new company when a platform admin provisions the same name", async () => {
+    const app = await testApp({
+      store: await createPgliteStore(),
+      directory: createDirectory(),
+      demoMode: false,
+    });
+    await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
+    const body = { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" };
+    const first = await call(app, "POST", "/v1/tenants", { actor: "platform-admin", body });
+    const second = await call(app, "POST", "/v1/tenants", { actor: "platform-admin", body });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    const opened = (await first.json()) as { tenantId: string; replayed: boolean };
+    const again = (await second.json()) as { tenantId: string; replayed: boolean };
+    expect(opened.replayed).toBe(false);
+    expect(again.replayed).toBe(false);
+    expect(again.tenantId).not.toBe(opened.tenantId);
+  });
+
+  it("lets an owner who already has a company open a second one with the same name", async () => {
+    const app = await testApp({
+      store: await createPgliteStore(),
+      directory: createDirectory(),
+      demoMode: false,
+    });
+    const body = { name: "Harbor Analytics", homeRegion: "us-east-1", ownerActorId: "owner-a" };
+    const first = await call(app, "POST", "/v1/tenants", { actor: "owner-a", body });
+    expect(first.status).toBe(201);
+    const second = await call(app, "POST", "/v1/tenants", { actor: "owner-a", body });
+    expect(second.status).toBe(201);
+    const opened = (await first.json()) as { tenantId: string; replayed: boolean };
+    const again = (await second.json()) as { tenantId: string; replayed: boolean };
+    expect(opened.replayed).toBe(false);
+    expect(again.replayed).toBe(false);
+    expect(again.tenantId).not.toBe(opened.tenantId);
+
+    const listed = await call(app, "GET", "/v1/workspace/companies", { actor: "owner-a" });
+    const companies = (await listed.json()) as { companies: { tenantId: string }[] };
+    expect(companies.companies.map((company) => company.tenantId).sort()).toEqual(
+      [opened.tenantId, again.tenantId].sort(),
+    );
   });
 
   it("refuses a suspended seat when selecting a company", async () => {

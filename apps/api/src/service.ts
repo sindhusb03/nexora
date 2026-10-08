@@ -132,12 +132,12 @@ async function provisionTenant(
   await requireRegistered(store, actor, input.ownerActorId);
   const now = new Date().toISOString();
   const tenantId = crypto.randomUUID();
-  const tenant = await store.createTenant({
+  const draft = {
     tenant: {
       tenantId,
       name: input.name,
       homeRegion: input.homeRegion,
-      status: "active",
+      status: "active" as const,
       createdAt: now,
     },
     ownerActorId: input.ownerActorId,
@@ -145,8 +145,26 @@ async function provisionTenant(
     audit: audit(actor, "TenantProvisioned", "tenant", tenantId, now, {
       homeRegion: input.homeRegion,
     }),
-  });
-  return { tenantId: tenant.tenantId, homeRegion: tenant.homeRegion, name: tenant.name };
+  };
+  // Replay is only the owner's own first open. A platform admin, and an owner
+  // who already has an active seat, always insert a new company.
+  const selfService = !platformAdmin && input.ownerActorId === actor.actorId;
+  if (selfService && (await store.listActorCompanies(actor.actorId)).length === 0) {
+    const opened = await store.openFirstCompany(draft);
+    return {
+      tenantId: opened.tenant.tenantId,
+      homeRegion: opened.tenant.homeRegion,
+      name: opened.tenant.name,
+      replayed: opened.replayed,
+    };
+  }
+  const tenant = await store.createTenant(draft);
+  return {
+    tenantId: tenant.tenantId,
+    homeRegion: tenant.homeRegion,
+    name: tenant.name,
+    replayed: false,
+  };
 }
 
 async function grantMembership(

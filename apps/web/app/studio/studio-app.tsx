@@ -77,9 +77,13 @@ import { SignInScreen, TwoFactorPanel } from "./sign-in";
 import type { AuthConfigView } from "./api";
 import type { CompanyCard, CopilotReply, PlatformView, SessionView, Workspace } from "./types";
 
+function normalizeCompanyName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function ownsCompany(company: CompanyCard, name: string, actorId: string): boolean {
   return (
-    company.name === name &&
+    normalizeCompanyName(company.name) === normalizeCompanyName(name) &&
     (company.members ?? []).some((member) => member.actorId === actorId && member.role === "owner")
   );
 }

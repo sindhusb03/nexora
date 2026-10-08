@@ -198,7 +198,7 @@ describe("actor company visibility", () => {
     expect(unchanged.rows[0]?.role).toBe("owner");
   });
 
-  it("returns the company that actor owns for the name and ignores a different tenant id", async () => {
+  it("inserts a second company when createTenant is called again with the same name", async () => {
     const client = new PGlite();
     await runMigrations(executor(client));
     const store = createLedgerStore(drizzle({ client, schema }));
@@ -227,8 +227,48 @@ describe("actor company visibility", () => {
       audit: audit(other, "actor-a"),
     });
     expect(first.tenantId).toBe(harbor);
-    expect(second.tenantId).toBe(harbor);
-    expect(second.homeRegion).toBe("us-east-1");
+    expect(second.tenantId).toBe(other);
+    const companies = await store.listActorCompanies("actor-a");
+    expect(companies.map((company) => company.tenantId).sort()).toEqual([harbor, other].sort());
+  });
+
+  it("replays a first-run open of the same name and records the replay", async () => {
+    const client = new PGlite();
+    await runMigrations(executor(client));
+    const store = createLedgerStore(drizzle({ client, schema }));
+    const opened = await store.openFirstCompany({
+      tenant: {
+        tenantId: harbor,
+        name: "Harbor Analytics",
+        homeRegion: "us-east-1",
+        status: "active",
+        createdAt: "2026-10-08T00:00:00.000Z",
+      },
+      ownerActorId: "actor-a",
+      membershipId: crypto.randomUUID(),
+      audit: audit(harbor, "actor-a"),
+    });
+    expect(opened).toEqual({
+      tenant: expect.objectContaining({ tenantId: harbor, name: "Harbor Analytics" }),
+      replayed: false,
+    });
+    const replay = await store.openFirstCompany({
+      tenant: {
+        tenantId: other,
+        name: "  HARBOR   analytics ",
+        homeRegion: "eu-west-1",
+        status: "active",
+        createdAt: "2026-10-08T01:00:00.000Z",
+      },
+      ownerActorId: "actor-a",
+      membershipId: crypto.randomUUID(),
+      audit: audit(other, "actor-a"),
+    });
+    expect(replay.replayed).toBe(true);
+    expect(replay.tenant.tenantId).toBe(harbor);
+    expect(replay.tenant.homeRegion).toBe("us-east-1");
+    const events = await store.listAudit(harbor);
+    expect(events.map((event) => event.eventType)).toContain("TenantProvisionReplayed");
     await expect(store.listActorCompanies("actor-a")).resolves.toEqual([
       expect.objectContaining({ tenantId: harbor, name: "Harbor Analytics" }),
     ]);

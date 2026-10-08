@@ -280,7 +280,8 @@ export function createApp(options: AppOptions) {
 
   app.post("/v1/tenants", async (c) => {
     const body = provisionSchema.parse(await c.req.json());
-    return c.json(await service.provisionTenant(readActor(c), body), 201);
+    const result = await service.provisionTenant(readActor(c), body);
+    return c.json(result, result.replayed ? 200 : 201);
   });
 
   app.post("/v1/memberships", async (c) => {
