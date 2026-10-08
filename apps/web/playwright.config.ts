@@ -30,6 +30,10 @@ export default defineConfig({
       reuseExistingServer: reuse,
       timeout: 180_000,
       cwd: "../..",
+      env: {
+        ...process.env,
+        NEXT_PUBLIC_API_URL: "http://127.0.0.1:8787",
+      },
     },
   ],
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

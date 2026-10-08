@@ -377,7 +377,7 @@ describe("posted-ledger group consolidation", () => {
       ...ledgerBody(),
       entities: [
         { entityId: usEntityId, periodId: usPeriodId },
-        { entityId: usEntityId, periodId: usPriorPeriodId },
+        { entityId: usEntityId, periodId: usPeriodId },
       ],
     };
     const translated = await translate(scope);
@@ -396,6 +396,147 @@ describe("posted-ledger group consolidation", () => {
     expect(eliminated.status).toBe(422);
     expect((await readJson<{ error: { code: string } }>(eliminated)).error.code).toBe(
       "FIN_INVALID_JOURNAL_LINE",
+    );
+  });
+
+  it("rejects an elimination account outside the consolidated lines", async () => {
+    const unknown = await eliminate({
+      ...ledgerBody(),
+      evidenceId: "ic-account",
+      eliminations: [
+        {
+          accountId: "not-a-consolidated-account",
+          debitMinor: "1",
+          creditMinor: "0",
+          evidenceId: "ic-account",
+        },
+        { accountId: ukAp, debitMinor: "0", creditMinor: "1", evidenceId: "ic-account" },
+      ],
+    });
+    expect(unknown.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(unknown)).error.code).toBe(
+      "FIN_INVALID_JOURNAL_LINE",
+    );
+    const cta = await eliminate({
+      ...ledgerBody(),
+      evidenceId: "ic-cta",
+      eliminations: [
+        { accountId: "cta", debitMinor: "1", creditMinor: "0", evidenceId: "ic-cta" },
+        { accountId: ukAp, debitMinor: "0", creditMinor: "1", evidenceId: "ic-cta" },
+      ],
+    });
+    expect(cta.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(cta)).error.code).toBe(
+      "FIN_INVALID_JOURNAL_LINE",
+    );
+  });
+
+  it("rejects an elimination evidence id that differs from the request", async () => {
+    const response = await eliminate({
+      ...ledgerBody(),
+      evidenceId: "ic-match",
+      eliminations: [
+        { accountId: usAr, debitMinor: "0", creditMinor: "1", evidenceId: "ic-other" },
+        { accountId: ukAp, debitMinor: "1", creditMinor: "0", evidenceId: "ic-match" },
+      ],
+    });
+    expect(response.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(response)).error.code).toBe(
+      "FIN_INVALID_JOURNAL_LINE",
+    );
+  });
+
+  it("rejects a CTA account that matches any entity account in the scope", async () => {
+    const response = await translate({ ...ledgerBody(), ctaAccountId: usCash });
+    expect(response.status).toBe(400);
+    expect((await readJson<{ error: { code: string } }>(response)).error.code).toBe(
+      "FX_INVALID_RATE",
+    );
+  });
+
+  it("rejects an identity rate other than 1 and defaults a missing identity triple to 1", async () => {
+    const entityId = await createEntity("EUR books", "EUR");
+    const periodId = await createPeriod(entityId, "2024-01-01", "2024-12-31");
+    const cash = await createAccount(entityId, "1000", "Cash", "asset", "cash", false);
+    const equity = await createAccount(entityId, "3000", "Equity", "equity", "non_cash", false);
+    await createAccount(entityId, "3900", "Retained earnings", "equity", "non_cash", true);
+    await post(entityId, periodId, "EUR", [
+      { accountId: cash, debit: "10", credit: "0" },
+      { accountId: equity, debit: "0", credit: "10" },
+    ]);
+    const identity = (value: string) => ({
+      rateSetId: "eur-identity",
+      base: "EUR",
+      quote: "EUR",
+      rate: value,
+      rounding: "half_even" as const,
+    });
+    const rejected = await translate({
+      ctaAccountId: "cta",
+      entities: [{ entityId, periodId }],
+      rates: [
+        {
+          sourceCurrency: "EUR",
+          closing: identity("1.10"),
+          historical: identity("1.10"),
+          average: identity("1.10"),
+        },
+      ],
+    });
+    expect(rejected.status).toBe(400);
+    expect((await readJson<{ error: { code: string } }>(rejected)).error.code).toBe(
+      "FX_INVALID_RATE",
+    );
+    const translated = await translate({
+      ctaAccountId: "cta",
+      entities: [{ entityId, periodId }],
+      rates: [rates[0]],
+    });
+    expect(translated.status).toBe(200);
+    const fx = await readJson<TranslationBody>(translated);
+    expect(lineMap(fx.lines)).toEqual(
+      new Map([
+        [cash, "1000"],
+        [equity, "-1000"],
+        ["cta", "0"],
+      ]),
+    );
+  });
+
+  it("rounds a half-even tie and pins the CTA", async () => {
+    const entityId = await createEntity("Tie books", "USD");
+    const periodId = await createPeriod(entityId, "2024-01-01", "2024-12-31");
+    const cash = await createAccount(entityId, "1000", "Cash", "asset", "cash", false);
+    const equity = await createAccount(entityId, "3000", "Equity", "equity", "non_cash", false);
+    await createAccount(entityId, "3900", "Retained earnings", "equity", "non_cash", true);
+    await post(entityId, periodId, "USD", [
+      { accountId: cash, debit: "0.15", credit: "0" },
+      { accountId: equity, debit: "0", credit: "0.15" },
+    ]);
+    const translated = await translate({
+      ctaAccountId: "cta",
+      entities: [{ entityId, periodId }],
+      rates: [rates[0]],
+    });
+    expect(translated.status).toBe(200);
+    const fx = await readJson<TranslationBody>(translated);
+    // 15 USD minor × 0.90 = 0.135 EUR, half-even to 14 minor. Equity × 0.80 is 12 minor. CTA is -2.
+    expect(lineMap(fx.lines)).toEqual(
+      new Map([
+        [cash, "14"],
+        [equity, "-12"],
+        ["cta", "-2"],
+      ]),
+    );
+    expect(fx.ctaMinor).toBe("-2");
+    expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
+  });
+
+  it("rejects an unknown translate field without treating it as a trial balance", async () => {
+    const response = await translate({ ...ledgerBody(), note: "extra" });
+    expect(response.status).toBe(400);
+    expect((await readJson<{ error: { code: string } }>(response)).error.code).toBe(
+      "VALIDATION_FAILED",
     );
   });
 

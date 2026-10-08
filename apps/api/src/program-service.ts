@@ -1,5 +1,6 @@
 import type { LedgerStore } from "@nexora/db";
 import {
+  AnalyticalDecimal,
   KernelError,
   acceptCitedClaims,
   applyDealScenario,
@@ -576,6 +577,7 @@ async function eliminateGroup(
     input.entities,
     input.rates,
   );
+  assertEliminationLines(input, derived.consolidated.lines);
   const result = eliminateIntercompany({
     balances: derived.consolidated.lines,
     eliminations: input.eliminations,
@@ -632,6 +634,7 @@ async function deriveTranslatedGroup(
     loaded.push(await loadPostedTrialBalance(store, tenantId, scope.entityId, scope.periodId));
   }
   assertSamePeriod(loaded.map((entity) => ({ start: entity.periodStart, end: entity.periodEnd })));
+  assertCtaNotInScope(loaded, ctaAccountId);
   const translated = loaded.map((entity) => ({
     ...entity,
     translated: translateTrialBalance({
@@ -651,17 +654,15 @@ async function deriveTranslatedGroup(
   }
   const ordered = [...translated].sort((left, right) =>
     left.entityId === right.entityId
-      ? left.periodId.localeCompare(right.periodId)
-      : left.entityId.localeCompare(right.entityId),
+      ? compareCode(left.periodId, right.periodId)
+      : compareCode(left.entityId, right.entityId),
   );
   const inputHash = hashMaterial({
     formulaVersion: CONSOLIDATION_RATE_POLICY,
     reportingCurrency,
     ctaAccountId,
     entities: ordered.map(entitySnapshot),
-    rates: [...rates].sort((left, right) =>
-      left.sourceCurrency.localeCompare(right.sourceCurrency),
-    ),
+    rates: [...rates].sort((left, right) => compareCode(left.sourceCurrency, right.sourceCurrency)),
   });
   const outputHash = hashMaterial({
     formulaVersion: CONSOLIDATION_RATE_POLICY,
@@ -687,6 +688,44 @@ function entitySnapshot(entity: {
     journalIds: entity.journalIds,
     lines: entity.lines,
   };
+}
+
+function compareCode(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function assertCtaNotInScope(
+  entities: readonly { readonly lines: readonly { readonly accountId: string }[] }[],
+  ctaAccountId: string,
+): void {
+  for (const entity of entities) {
+    if (entity.lines.some((line) => line.accountId === ctaAccountId)) {
+      throw new KernelError("FX_INVALID_RATE", "CTA account is reserved for the translation plug");
+    }
+  }
+}
+
+function assertEliminationLines(
+  input: EliminateInput,
+  consolidatedLines: readonly { readonly accountId: string }[],
+): void {
+  const accounts = new Set(consolidatedLines.map((line) => line.accountId));
+  for (const line of input.eliminations) {
+    if (line.evidenceId !== input.evidenceId) {
+      throw new KernelError(
+        "FIN_INVALID_JOURNAL_LINE",
+        "Elimination evidence must match the request evidence",
+      );
+    }
+    if (line.accountId === input.ctaAccountId || !accounts.has(line.accountId)) {
+      throw new KernelError(
+        "FIN_INVALID_JOURNAL_LINE",
+        "Elimination account must be a consolidated line other than CTA",
+      );
+    }
+  }
 }
 
 function assertUniqueEntities(entities: readonly EntityPeriodScope[]): void {
@@ -725,10 +764,13 @@ function rateTripleFor(
   const matches = rates.filter((rate) => rate.sourceCurrency === sourceCurrency);
   const selected = matches.length === 1 ? matches[0] : undefined;
   if (!selected) {
-    if (matches.length === 0) {
-      throw new KernelError("FX_RATE_MISSING", `No FX rates for ${sourceCurrency}`);
+    if (matches.length > 1) {
+      throw new KernelError("FX_INVALID_RATE", `More than one FX rate set for ${sourceCurrency}`);
     }
-    throw new KernelError("FX_INVALID_RATE", `More than one FX rate set for ${sourceCurrency}`);
+    if (sourceCurrency === reportingCurrency) {
+      return identityRates(sourceCurrency);
+    }
+    throw new KernelError("FX_RATE_MISSING", `No FX rates for ${sourceCurrency}`);
   }
   for (const rate of [selected.closing, selected.historical, selected.average]) {
     if (rate.base !== sourceCurrency || rate.quote !== reportingCurrency) {
@@ -738,7 +780,33 @@ function rateTripleFor(
       );
     }
   }
+  if (
+    sourceCurrency === reportingCurrency &&
+    [selected.closing, selected.historical, selected.average].some(
+      (rate) => !new AnalyticalDecimal(rate.rate).eq(1),
+    )
+  ) {
+    throw new KernelError(
+      "FX_INVALID_RATE",
+      "An identity translation requires a rate of exactly 1",
+    );
+  }
   return { closing: selected.closing, historical: selected.historical, average: selected.average };
+}
+
+function identityRates(currency: string): {
+  readonly closing: FxRate;
+  readonly historical: FxRate;
+  readonly average: FxRate;
+} {
+  const rate: FxRate = {
+    rateSetId: "identity",
+    base: currency,
+    quote: currency,
+    rate: "1",
+    rounding: "half_even",
+  };
+  return { closing: rate, historical: rate, average: rate };
 }
 
 /** Posted activity for one entity period. Journal posting rejects a foreign currency before storage, so the HTTP routes cannot reach the currency check. */

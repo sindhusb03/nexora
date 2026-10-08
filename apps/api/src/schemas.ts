@@ -243,40 +243,50 @@ export const ownershipSchema = z.object({
   subsidiaryEquityMinor: z.string().regex(/^-?\d+$/),
 });
 
-const entityPeriodSchema = z.object({
-  entityId: uuid,
-  periodId: uuid,
-});
+const entityPeriodSchema = z
+  .object({
+    entityId: uuid,
+    periodId: uuid,
+  })
+  .strict();
 
-const fxTripleSchema = z.object({
-  sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
-  closing: fxRateSchema(),
-  historical: fxRateSchema(),
-  average: fxRateSchema(),
-});
+const fxTripleSchema = z
+  .object({
+    sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
+    closing: fxRateSchema(),
+    historical: fxRateSchema(),
+    average: fxRateSchema(),
+  })
+  .strict();
 
-export const translateSchema = z.object({
-  ctaAccountId: z.string().min(1).max(200),
-  entities: z.array(entityPeriodSchema).min(1).max(100),
-  rates: z.array(fxTripleSchema).min(1).max(50),
-});
+export const translateSchema = z
+  .object({
+    ctaAccountId: z.string().min(1).max(200),
+    entities: z.array(entityPeriodSchema).min(1).max(100),
+    rates: z.array(fxTripleSchema).min(1).max(50),
+  })
+  .strict();
 
-export const eliminationSchema = z.object({
-  evidenceId: z.string().min(1),
-  ctaAccountId: z.string().min(1).max(200),
-  entities: z.array(entityPeriodSchema).min(1).max(100),
-  rates: z.array(fxTripleSchema).min(1).max(50),
-  eliminations: z
-    .array(
-      z.object({
-        accountId: z.string().min(1),
-        debitMinor: z.string().regex(/^\d+$/),
-        creditMinor: z.string().regex(/^\d+$/),
-        evidenceId: z.string().min(1),
-      }),
-    )
-    .min(1),
-});
+export const eliminationSchema = z
+  .object({
+    evidenceId: z.string().min(1),
+    ctaAccountId: z.string().min(1).max(200),
+    entities: z.array(entityPeriodSchema).min(1).max(100),
+    rates: z.array(fxTripleSchema).min(1).max(50),
+    eliminations: z
+      .array(
+        z
+          .object({
+            accountId: z.string().min(1),
+            debitMinor: z.string().regex(/^\d+$/),
+            creditMinor: z.string().regex(/^\d+$/),
+            evidenceId: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
 
 export const fxSetSchema = z.object({
   label: z.string().min(1),
@@ -293,13 +303,15 @@ export const fxSetSchema = z.object({
 });
 
 function fxRateSchema() {
-  return z.object({
-    rateSetId: z.string().min(1),
-    base: z.string().regex(/^[A-Z]{3}$/),
-    quote: z.string().regex(/^[A-Z]{3}$/),
-    rate: amount,
-    rounding: z.literal("half_even"),
-  });
+  return z
+    .object({
+      rateSetId: z.string().min(1),
+      base: z.string().regex(/^[A-Z]{3}$/),
+      quote: z.string().regex(/^[A-Z]{3}$/),
+      rate: amount,
+      rounding: z.literal("half_even"),
+    })
+    .strict();
 }
 
 export const openApiSchemas = {

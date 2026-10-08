@@ -434,8 +434,8 @@ describe("program gates", () => {
         entities: [{ entityId: booksId, periodId: booksPeriodId }],
         rates,
         eliminations: [
-          { accountId: "ar", debitMinor: "0", creditMinor: "40", evidenceId: "ic-1" },
-          { accountId: "ap", debitMinor: "40", creditMinor: "0", evidenceId: "ic-1" },
+          { accountId: bookCashId, debitMinor: "0", creditMinor: "1000", evidenceId: "ic-1" },
+          { accountId: bookEquityId, debitMinor: "1000", creditMinor: "0", evidenceId: "ic-1" },
         ],
       },
     });
