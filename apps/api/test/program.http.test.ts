@@ -321,6 +321,68 @@ describe("program gates", () => {
       body: { name: "Group", reportingCurrency: "EUR" },
     });
     const groupId = (await readJson<{ consolidationGroupId: string }>(group)).consolidationGroupId;
+    const books = await call(app, "POST", "/v1/entities", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: { legalName: "FX Books", functionalCurrency: "USD" },
+    });
+    expect(books.status).toBe(201);
+    const booksId = (await readJson<{ entityId: string }>(books)).entityId;
+    const booksPeriod = await call(app, "POST", "/v1/periods", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: { entityId: booksId, startDate: "2024-01-01", endDate: "2024-12-31" },
+    });
+    expect(booksPeriod.status).toBe(201);
+    const booksPeriodId = (await readJson<{ periodId: string }>(booksPeriod)).periodId;
+    const bookCash = await call(app, "POST", "/v1/accounts", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: {
+        entityId: booksId,
+        code: "1000",
+        name: "Cash",
+        report: "asset",
+        cashFlow: "cash",
+        retainedEarnings: false,
+      },
+    });
+    const bookEquity = await call(app, "POST", "/v1/accounts", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: {
+        entityId: booksId,
+        code: "3100",
+        name: "Equity",
+        report: "equity",
+        cashFlow: "non_cash",
+        retainedEarnings: false,
+      },
+    });
+    expect(bookCash.status).toBe(201);
+    expect(bookEquity.status).toBe(201);
+    const bookCashId = (await readJson<{ accountId: string }>(bookCash)).accountId;
+    const bookEquityId = (await readJson<{ accountId: string }>(bookEquity)).accountId;
+    const posted = await call(app, "POST", "/v1/journals", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      idempotency: crypto.randomUUID(),
+      body: {
+        entityId: booksId,
+        periodId: booksPeriodId,
+        currency: "USD",
+        lines: [
+          { accountId: bookCashId, debit: "100", credit: "0" },
+          { accountId: bookEquityId, debit: "0", credit: "100" },
+        ],
+      },
+    });
+    expect(posted.status).toBe(201);
     const rate = (value: string) => ({
       rateSetId: "rates-2024",
       base: "USD",
@@ -328,18 +390,22 @@ describe("program gates", () => {
       rate: value,
       rounding: "half_even" as const,
     });
+    const rates = [
+      {
+        sourceCurrency: "USD",
+        closing: rate("0.90"),
+        historical: rate("0.80"),
+        average: rate("0.85"),
+      },
+    ];
     const translated = await call(app, "POST", `/v1/consolidation-groups/${groupId}/translate`, {
       actor: "owner-1",
       tenant: tenantId,
       region: "us-east-1",
       body: {
-        sourceCurrency: "USD",
         ctaAccountId: "cta",
-        lines: [
-          { accountId: "cash", rateType: "closing", debitPositiveMinor: "10000" },
-          { accountId: "equity", rateType: "historical", debitPositiveMinor: "-10000" },
-        ],
-        rates: { closing: rate("0.90"), historical: rate("0.80"), average: rate("0.85") },
+        entities: [{ entityId: booksId, periodId: booksPeriodId }],
+        rates,
       },
     });
     expect(translated.status).toBe(200);
@@ -350,6 +416,12 @@ describe("program gates", () => {
     }>(translated);
     expect(fx.ctaMinor).toBe("-1000");
     expect(fx.engineVersion).toBe("fe-kernel-0.2.1");
+    const translatedLines = new Map(
+      fx.lines.map((line) => [line.accountId, line.debitPositiveMinor]),
+    );
+    expect(translatedLines.get(bookCashId)).toBe("9000");
+    expect(translatedLines.get(bookEquityId)).toBe("-8000");
+    expect(translatedLines.get("cta")).toBe("-1000");
     expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
 
     const eliminated = await call(app, "POST", `/v1/consolidation-groups/${groupId}/eliminate`, {
@@ -358,10 +430,9 @@ describe("program gates", () => {
       region: "us-east-1",
       body: {
         evidenceId: "ic-1",
-        balances: [
-          { accountId: "cash", debitPositiveMinor: "100" },
-          { accountId: "equity", debitPositiveMinor: "-100" },
-        ],
+        ctaAccountId: "cta",
+        entities: [{ entityId: booksId, periodId: booksPeriodId }],
+        rates,
         eliminations: [
           { accountId: "ar", debitMinor: "0", creditMinor: "40", evidenceId: "ic-1" },
           { accountId: "ap", debitMinor: "40", creditMinor: "0", evidenceId: "ic-1" },

@@ -26,6 +26,7 @@ import {
   stateHash,
   translateTrialBalance,
   validateJournal,
+  type TrialBalanceLine,
   valueDcf,
   valueDcfSensitivity,
   type Action,
@@ -35,6 +36,11 @@ import {
   type PublicationStatus,
 } from "@nexora/kernel";
 
+import {
+  CONSOLIDATION_RATE_POLICY,
+  consolidateTranslations,
+  netDebitPositiveBalances,
+} from "./consolidation-ledger.js";
 import { ApiError, type ActorContext } from "./http.js";
 import { computeStatementsForPeriod } from "./service.js";
 
@@ -445,19 +451,35 @@ async function createFxRateSet(store: LedgerStore, actor: ActorContext, input: F
   return { fxRateSetId: id };
 }
 
-interface TranslateInput {
+interface EntityPeriodScope {
+  readonly entityId: string;
+  readonly periodId: string;
+}
+
+interface RateTriple {
   readonly sourceCurrency: string;
+  readonly closing: FxRate;
+  readonly historical: FxRate;
+  readonly average: FxRate;
+}
+
+interface TranslateInput {
   readonly ctaAccountId: string;
-  readonly lines: readonly {
+  readonly entities: readonly EntityPeriodScope[];
+  readonly rates: readonly RateTriple[];
+}
+
+interface EliminateInput {
+  readonly evidenceId: string;
+  readonly ctaAccountId: string;
+  readonly entities: readonly EntityPeriodScope[];
+  readonly rates: readonly RateTriple[];
+  readonly eliminations: readonly {
     readonly accountId: string;
-    readonly rateType: "closing" | "historical" | "average";
-    readonly debitPositiveMinor: string;
+    readonly debitMinor: string;
+    readonly creditMinor: string;
+    readonly evidenceId: string;
   }[];
-  readonly rates: {
-    readonly closing: FxRate;
-    readonly historical: FxRate;
-    readonly average: FxRate;
-  };
 }
 
 async function translateGroup(
@@ -467,41 +489,75 @@ async function translateGroup(
   input: TranslateInput,
 ) {
   const tenant = await scope(store, actor, "consolidation.run");
-  if (!(await store.getConsolidationGroup(tenant.tenantId, groupId)))
-    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
-  const result = translateTrialBalance(input);
+  const reportingCurrency = await requireGroupCurrency(store, tenant.tenantId, groupId);
+  const derived = await deriveTranslatedGroup(
+    store,
+    tenant.tenantId,
+    reportingCurrency,
+    input.ctaAccountId,
+    input.entities,
+    input.rates,
+  );
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
+  const engineVersion = derived.entities[0]?.translated.engineVersion ?? ENGINE_VERSION;
   await store.insertCalculationRun({
     run: {
       calculationRunId,
       tenantId: tenant.tenantId,
       kind: "fx-translation",
       status: "succeeded",
-      engineVersion: result.engineVersion,
-      inputHash: result.inputHash,
-      inputs: { groupId, ...input },
-      outputs: { ctaMinor: result.ctaMinor, lines: result.lines },
+      engineVersion,
+      inputHash: derived.inputHash,
+      inputs: {
+        groupId,
+        formulaVersion: CONSOLIDATION_RATE_POLICY,
+        reportingCurrency,
+        ctaAccountId: input.ctaAccountId,
+        rates: input.rates,
+        entities: derived.entities.map(entitySnapshot),
+      },
+      outputs: {
+        ctaMinor: derived.consolidated.ctaMinor,
+        lines: derived.consolidated.lines,
+        outputHash: derived.outputHash,
+        entities: derived.entities.map((entity) => ({
+          entityId: entity.entityId,
+          periodId: entity.periodId,
+          rateSetId: entity.translated.rateSetId,
+          ctaMinor: entity.translated.ctaMinor,
+          inputHash: entity.translated.inputHash,
+          lines: entity.translated.lines,
+        })),
+      },
       actorId: actor.actorId,
       correlationId: actor.correlationId,
       createdAt: now,
     },
     audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
-      inputHash: result.inputHash,
+      inputHash: derived.inputHash,
     }),
   });
-  return { ...result, calculationRunId, consolidationGroupId: groupId };
-}
-
-interface EliminateInput {
-  readonly evidenceId: string;
-  readonly balances: readonly { readonly accountId: string; readonly debitPositiveMinor: string }[];
-  readonly eliminations: readonly {
-    readonly accountId: string;
-    readonly debitMinor: string;
-    readonly creditMinor: string;
-    readonly evidenceId: string;
-  }[];
+  return {
+    engineVersion,
+    formulaVersion: CONSOLIDATION_RATE_POLICY,
+    inputHash: derived.inputHash,
+    outputHash: derived.outputHash,
+    groupCurrency: reportingCurrency,
+    ctaAccountId: input.ctaAccountId,
+    ctaMinor: derived.consolidated.ctaMinor,
+    lines: derived.consolidated.lines,
+    entities: derived.entities.map((entity) => ({
+      entityId: entity.entityId,
+      periodId: entity.periodId,
+      sourceCurrency: entity.sourceCurrency,
+      rateSetId: entity.translated.rateSetId,
+      ctaMinor: entity.translated.ctaMinor,
+      lines: entity.translated.lines,
+    })),
+    calculationRunId,
+    consolidationGroupId: groupId,
+  };
 }
 
 async function eliminateGroup(
@@ -511,12 +567,20 @@ async function eliminateGroup(
   input: EliminateInput,
 ) {
   const tenant = await scope(store, actor, "consolidation.run");
-  if (!(await store.getConsolidationGroup(tenant.tenantId, groupId)))
-    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
+  const reportingCurrency = await requireGroupCurrency(store, tenant.tenantId, groupId);
+  const derived = await deriveTranslatedGroup(
+    store,
+    tenant.tenantId,
+    reportingCurrency,
+    input.ctaAccountId,
+    input.entities,
+    input.rates,
+  );
   const result = eliminateIntercompany({
-    balances: input.balances,
+    balances: derived.consolidated.lines,
     eliminations: input.eliminations,
   });
+  const outputHash = hashMaterial(result.balances);
   const now = new Date().toISOString();
   await store.insertElimination({
     tenantId: tenant.tenantId,
@@ -524,13 +588,191 @@ async function eliminateGroup(
     consolidationGroupId: groupId,
     evidenceId: input.evidenceId,
     inputHash: result.inputHash,
-    payload: { balances: result.balances },
+    payload: {
+      formulaVersion: CONSOLIDATION_RATE_POLICY,
+      reportingCurrency,
+      balances: result.balances,
+      outputHash,
+      entities: derived.entities.map(entitySnapshot),
+      eliminations: input.eliminations,
+    },
     createdAt: now,
     audit: audit(actor, "EliminationRecorded", "elimination_entry", groupId, now, {
       inputHash: result.inputHash,
     }),
   });
-  return result;
+  return {
+    ...result,
+    formulaVersion: CONSOLIDATION_RATE_POLICY,
+    outputHash,
+    groupCurrency: reportingCurrency,
+    consolidationGroupId: groupId,
+  };
+}
+
+async function requireGroupCurrency(store: LedgerStore, tenantId: string, groupId: string) {
+  const group = await store.getConsolidationGroup(tenantId, groupId);
+  if (!group) {
+    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
+  }
+  return group.reportingCurrency;
+}
+
+async function deriveTranslatedGroup(
+  store: LedgerStore,
+  tenantId: string,
+  reportingCurrency: string,
+  ctaAccountId: string,
+  entities: readonly EntityPeriodScope[],
+  rates: readonly RateTriple[],
+) {
+  assertUniqueScopes(entities);
+  const loaded = [];
+  for (const scope of entities) {
+    loaded.push(await loadPostedTrialBalance(store, tenantId, scope.entityId, scope.periodId));
+  }
+  const translated = loaded.map((entity) => ({
+    ...entity,
+    translated: translateTrialBalance({
+      sourceCurrency: entity.sourceCurrency,
+      lines: entity.lines,
+      rates: rateTripleFor(rates, entity.sourceCurrency, reportingCurrency),
+      ctaAccountId,
+    }),
+  }));
+  const consolidated = consolidateTranslations(translated.map((entity) => entity.translated));
+  let total = 0n;
+  for (const line of consolidated.lines) {
+    total += BigInt(line.debitPositiveMinor);
+  }
+  if (total !== 0n) {
+    throw new KernelError("FIN_STATEMENT_IMBALANCE", "Consolidated trial balance does not balance");
+  }
+  const ordered = [...translated].sort((left, right) =>
+    left.entityId === right.entityId
+      ? left.periodId.localeCompare(right.periodId)
+      : left.entityId.localeCompare(right.entityId),
+  );
+  const inputHash = hashMaterial({
+    formulaVersion: CONSOLIDATION_RATE_POLICY,
+    reportingCurrency,
+    ctaAccountId,
+    entities: ordered.map(entitySnapshot),
+    rates: [...rates].sort((left, right) =>
+      left.sourceCurrency.localeCompare(right.sourceCurrency),
+    ),
+  });
+  const outputHash = hashMaterial({
+    formulaVersion: CONSOLIDATION_RATE_POLICY,
+    reportingCurrency,
+    ctaAccountId,
+    ctaMinor: consolidated.ctaMinor,
+    lines: consolidated.lines,
+  });
+  return { entities: ordered, consolidated, inputHash, outputHash };
+}
+
+function entitySnapshot(entity: {
+  readonly entityId: string;
+  readonly periodId: string;
+  readonly sourceCurrency: string;
+  readonly journalIds: readonly string[];
+  readonly lines: readonly TrialBalanceLine[];
+}) {
+  return {
+    entityId: entity.entityId,
+    periodId: entity.periodId,
+    sourceCurrency: entity.sourceCurrency,
+    journalIds: entity.journalIds,
+    lines: entity.lines,
+  };
+}
+
+function assertUniqueScopes(entities: readonly EntityPeriodScope[]): void {
+  const seen = new Set<string>();
+  for (const scope of entities) {
+    const key = `${scope.entityId}:${scope.periodId}`;
+    if (seen.has(key)) {
+      throw new KernelError(
+        "FIN_INVALID_JOURNAL_LINE",
+        "Duplicate entity and period in the consolidation scope",
+      );
+    }
+    seen.add(key);
+  }
+}
+
+function rateTripleFor(
+  rates: readonly RateTriple[],
+  sourceCurrency: string,
+  reportingCurrency: string,
+): { readonly closing: FxRate; readonly historical: FxRate; readonly average: FxRate } {
+  const matches = rates.filter((rate) => rate.sourceCurrency === sourceCurrency);
+  const selected = matches.length === 1 ? matches[0] : undefined;
+  if (!selected) {
+    if (matches.length === 0) {
+      throw new KernelError("FX_RATE_MISSING", `No FX rates for ${sourceCurrency}`);
+    }
+    throw new KernelError("FX_INVALID_RATE", `More than one FX rate set for ${sourceCurrency}`);
+  }
+  for (const rate of [selected.closing, selected.historical, selected.average]) {
+    if (rate.base !== sourceCurrency || rate.quote !== reportingCurrency) {
+      throw new KernelError(
+        "FX_INVALID_RATE",
+        "FX rates must convert the entity currency into the group reporting currency",
+      );
+    }
+  }
+  return { closing: selected.closing, historical: selected.historical, average: selected.average };
+}
+
+async function loadPostedTrialBalance(
+  store: LedgerStore,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+) {
+  const entity = await store.getEntity(tenantId, entityId);
+  if (!entity) {
+    throw new KernelError("FIN_NOT_FOUND", "Entity not found");
+  }
+  const period = await store.getPeriod(tenantId, periodId);
+  if (!period || period.entityId !== entity.entityId) {
+    throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
+  }
+  const journals = await store.listJournals(tenantId, entity.entityId, period.periodId);
+  if (journals.length === 0) {
+    throw new KernelError(
+      "FIN_STATEMENT_IMBALANCE",
+      "No posted ledger entries for this entity and period",
+    );
+  }
+  for (const journal of journals) {
+    if (journal.currency !== entity.functionalCurrency) {
+      throw new KernelError(
+        "FIN_CURRENCY_MISMATCH",
+        "Posted journal currency does not match the entity functional currency",
+      );
+    }
+  }
+  const accounts = await store.listAccounts(tenantId, entity.entityId);
+  const lines = netDebitPositiveBalances(
+    journals,
+    new Map(accounts.map((account) => [account.accountId, account.report])),
+  );
+  if (lines.length === 0) {
+    throw new KernelError(
+      "FIN_STATEMENT_IMBALANCE",
+      "Posted ledger entries net to an empty trial balance",
+    );
+  }
+  return {
+    entityId: entity.entityId,
+    periodId: period.periodId,
+    sourceCurrency: entity.functionalCurrency,
+    journalIds: journals.map((journal) => journal.journalId).sort(),
+    lines,
+  };
 }
 
 async function createGroup(

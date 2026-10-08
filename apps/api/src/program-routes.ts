@@ -29,7 +29,8 @@ import {
   translateSchema,
 } from "./schemas.js";
 import { dcfSchema } from "./schemas.js";
-import { readActor, type AppEnv } from "./http.js";
+import { requestSuppliesTrialBalance } from "./consolidation-ledger.js";
+import { ApiError, readActor, type AppEnv } from "./http.js";
 
 type ProgramService = ReturnType<typeof createProgramService>;
 
@@ -72,13 +73,17 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
     return c.json(await program.createGroup(readActor(c), body), 201);
   });
   app.post("/v1/consolidation-groups/:id/translate", async (c) => {
-    const body = translateSchema.parse(await c.req.json());
+    const raw = await c.req.json();
+    rejectCallerTrialBalance(raw);
+    const body = translateSchema.parse(raw);
     return c.json(
       await program.translateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body),
     );
   });
   app.post("/v1/consolidation-groups/:id/eliminate", async (c) => {
-    const body = eliminationSchema.parse(await c.req.json());
+    const raw = await c.req.json();
+    rejectCallerTrialBalance(raw);
+    const body = eliminationSchema.parse(raw);
     return c.json(
       await program.eliminateGroup(readActor(c), z.uuid().parse(c.req.param("id")), body),
     );
@@ -182,4 +187,15 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
     const body = ownershipSchema.parse(await c.req.json());
     return c.json(await program.recordOwnership(readActor(c), body), 201);
   });
+}
+
+function rejectCallerTrialBalance(body: unknown): void {
+  if (!requestSuppliesTrialBalance(body)) {
+    return;
+  }
+  throw new ApiError(
+    422,
+    "CALLER_TRIAL_BALANCE_REJECTED",
+    "Trial balances must come from posted ledger entries. Caller-supplied balances are rejected.",
+  );
 }

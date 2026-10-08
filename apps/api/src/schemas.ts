@@ -243,38 +243,39 @@ export const ownershipSchema = z.object({
   subsidiaryEquityMinor: z.string().regex(/^-?\d+$/),
 });
 
-export const translateSchema = z.object({
+const entityPeriodSchema = z.object({
+  entityId: uuid,
+  periodId: uuid,
+});
+
+const fxTripleSchema = z.object({
   sourceCurrency: z.string().regex(/^[A-Z]{3}$/),
-  ctaAccountId: z.string().min(1),
-  lines: z
-    .array(
-      z.object({
-        accountId: z.string().min(1),
-        rateType: z.enum(["closing", "historical", "average"]),
-        debitPositiveMinor: z.string().regex(/^-?\d+$/),
-      }),
-    )
-    .min(1),
-  rates: z.object({
-    closing: fxRateSchema(),
-    historical: fxRateSchema(),
-    average: fxRateSchema(),
-  }),
+  closing: fxRateSchema(),
+  historical: fxRateSchema(),
+  average: fxRateSchema(),
+});
+
+export const translateSchema = z.object({
+  ctaAccountId: z.string().min(1).max(200),
+  entities: z.array(entityPeriodSchema).min(1).max(100),
+  rates: z.array(fxTripleSchema).min(1).max(50),
 });
 
 export const eliminationSchema = z.object({
   evidenceId: z.string().min(1),
-  balances: z.array(
-    z.object({ accountId: z.string().min(1), debitPositiveMinor: z.string().regex(/^-?\d+$/) }),
-  ),
-  eliminations: z.array(
-    z.object({
-      accountId: z.string().min(1),
-      debitMinor: z.string().regex(/^\d+$/),
-      creditMinor: z.string().regex(/^\d+$/),
-      evidenceId: z.string().min(1),
-    }),
-  ),
+  ctaAccountId: z.string().min(1).max(200),
+  entities: z.array(entityPeriodSchema).min(1).max(100),
+  rates: z.array(fxTripleSchema).min(1).max(50),
+  eliminations: z
+    .array(
+      z.object({
+        accountId: z.string().min(1),
+        debitMinor: z.string().regex(/^\d+$/),
+        creditMinor: z.string().regex(/^\d+$/),
+        evidenceId: z.string().min(1),
+      }),
+    )
+    .min(1),
 });
 
 export const fxSetSchema = z.object({
