@@ -1,10 +1,15 @@
 "use client";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -14,6 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { CopyIcon } from "lucide-react";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -29,10 +36,10 @@ import {
 } from "../books/api";
 import { useAction, useResource, type Resource } from "../books/hooks";
 import { ErrorNotice } from "../books/ui";
+import { shortHash } from "../studio/format";
 import { kernelCall } from "./api";
 import {
   buildTranslateRequest,
-  controlTotal,
   decodeTranslation,
   displayRows,
   explainConsolidationError,
@@ -42,23 +49,16 @@ import {
   type RateType,
   type TranslationView,
 } from "./group-translate";
-import { WorkbenchHead, type RunCommand } from "./workbench";
-
-const SELECT_CLASS =
-  "border-input bg-background h-8 w-full rounded-lg border px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+import { WorkbenchHead } from "./workbench";
 
 export function GroupScreen({
   session,
   entities,
-  entityId,
   disabled,
-  run,
 }: {
   session: Session;
   entities: Resource<readonly Entity[]>;
-  entityId: string;
   disabled: boolean;
-  run: RunCommand;
 }) {
   const { resource: groupResource } = useResource(
     `groups:${session.tenantId}:${session.actorId}`,
@@ -99,6 +99,15 @@ export function GroupScreen({
   const currencies = [
     ...new Set(selectedEntities.map((entity) => entity.functionalCurrency)),
   ].sort();
+  const periodsReady = selectedEntities.every(
+    (entity) => (periodByEntity[entity.entityId] ?? "").length > 0,
+  );
+  const ratesReady = currencies.every((currency) => {
+    const rate = rates[currency];
+    return filled(rate?.closing) && filled(rate?.historical) && filled(rate?.average);
+  });
+  const translateReady =
+    group !== null && selectedEntities.length > 0 && periodsReady && ratesReady;
 
   useEffect(() => {
     if (groupId.length > 0 || groupRows.length === 0) return;
@@ -182,7 +191,6 @@ export function GroupScreen({
       rateFor: (currency, rateType) => submittedRates[currency]?.[rateType] ?? null,
     });
   }, [result, entityRows, accountsByEntity, submittedRates]);
-  const total = result ? controlTotal(result.lines) : null;
 
   async function createGroup() {
     const name = groupName.trim();
@@ -206,6 +214,7 @@ export function GroupScreen({
       { consolidationGroupId: id, name, reportingCurrency: currency },
     ]);
     setGroupId(id);
+    setResult(null);
   }
 
   async function translate() {
@@ -270,9 +279,9 @@ export function GroupScreen({
       />
 
       {groupResource.status === "loading" || groupResource.status === "idle" ? (
-        <div className="card" aria-busy="true" aria-label="Loading consolidation groups">
-          <span className="skeleton" style={{ width: "36%" }} />
-          <span className="skeleton" style={{ width: "68%", marginTop: "0.7rem" }} />
+        <div className="grid gap-2" aria-busy="true" aria-label="Loading consolidation groups">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-4 w-2/3" />
         </div>
       ) : null}
       {groupResource.status === "error" ? (
@@ -289,14 +298,23 @@ export function GroupScreen({
               <div className="grid gap-3 sm:grid-cols-[1fr_7rem_auto] sm:items-end">
                 <Label className="grid gap-1.5">
                   Group name
-                  <Input value={groupName} onChange={(event) => setGroupName(event.target.value)} />
+                  <Input
+                    value={groupName}
+                    onChange={(event) => {
+                      setGroupName(event.target.value);
+                      setResult(null);
+                    }}
+                  />
                 </Label>
                 <Label className="grid gap-1.5">
                   Reporting currency
                   <Input
                     value={reportingCurrency}
                     maxLength={3}
-                    onChange={(event) => setReportingCurrency(event.target.value.toUpperCase())}
+                    onChange={(event) => {
+                      setReportingCurrency(event.target.value.toUpperCase());
+                      setResult(null);
+                    }}
                   />
                 </Label>
                 <Button
@@ -314,25 +332,34 @@ export function GroupScreen({
                 />
               ) : null}
               {groupRows.length === 0 ? (
-                <p className="empty">No consolidation groups yet. Create one to translate.</p>
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyDescription>
+                      No consolidation groups yet. Create one to translate.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
                 <Label className="grid gap-1.5">
                   Consolidation group
-                  <select
-                    className={SELECT_CLASS}
+                  <NativeSelect
+                    className="w-full"
                     value={groupId}
                     onChange={(event) => {
                       setGroupId(event.target.value);
                       setResult(null);
                     }}
                   >
-                    <option value="">Select a group</option>
+                    <NativeSelectOption value="">Select a group</NativeSelectOption>
                     {groupRows.map((row) => (
-                      <option key={row.consolidationGroupId} value={row.consolidationGroupId}>
+                      <NativeSelectOption
+                        key={row.consolidationGroupId}
+                        value={row.consolidationGroupId}
+                      >
                         {row.name} · {row.reportingCurrency}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </Label>
               )}
               {group ? (
@@ -345,42 +372,52 @@ export function GroupScreen({
                 <legend className="text-sm font-medium">Entities in this translation</legend>
                 {entities.status === "loading" || entities.status === "idle" ? (
                   <div aria-busy="true">
-                    <span className="skeleton" style={{ width: "55%" }} />
+                    <Skeleton className="h-4 w-1/2" />
                   </div>
                 ) : null}
                 {entities.status === "error" ? (
                   <ErrorNotice error={entities.error} httpStatus={entities.httpStatus} />
                 ) : null}
                 {entities.status === "ready" && entityRows.length === 0 ? (
-                  <p className="empty">This company has no entities.</p>
+                  <Empty>
+                    <EmptyHeader>
+                      <EmptyDescription>This company has no entities.</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : null}
                 {entities.status === "ready"
-                  ? entityRows.map((entity) => (
-                      <Label key={entity.entityId} className="font-normal">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.includes(entity.entityId)}
-                          onChange={(event) => {
-                            const checked = event.target.checked;
-                            setSelectedIds((current) =>
-                              checked
-                                ? [...current, entity.entityId]
-                                : current.filter((id) => id !== entity.entityId),
-                            );
-                            setResult(null);
-                          }}
-                        />
-                        Include {entity.legalName} ({entity.functionalCurrency})
-                      </Label>
-                    ))
+                  ? entityRows.map((entity) => {
+                      const inputId = `entity-${entity.entityId}`;
+                      const labelId = `include-${entity.entityId}`;
+                      return (
+                        <div key={entity.entityId} className="flex items-center gap-2">
+                          <Checkbox
+                            id={inputId}
+                            aria-labelledby={labelId}
+                            checked={selectedIds.includes(entity.entityId)}
+                            onCheckedChange={(checked) => {
+                              setSelectedIds((current) =>
+                                checked
+                                  ? [...current, entity.entityId]
+                                  : current.filter((id) => id !== entity.entityId),
+                              );
+                              setResult(null);
+                            }}
+                          />
+                          <Label id={labelId} htmlFor={inputId} className="font-normal">
+                            Include {entity.legalName} ({entity.functionalCurrency})
+                          </Label>
+                        </div>
+                      );
+                    })
                   : null}
               </fieldset>
 
               {selectedEntities.map((entity) => (
                 <Label key={entity.entityId} className="grid gap-1.5">
                   Period for {entity.legalName}
-                  <select
-                    className={SELECT_CLASS}
+                  <NativeSelect
+                    className="w-full"
                     value={periodByEntity[entity.entityId] ?? ""}
                     disabled={scopeStatus !== "ready"}
                     onChange={(event) => {
@@ -391,15 +428,15 @@ export function GroupScreen({
                       setResult(null);
                     }}
                   >
-                    <option value="">
+                    <NativeSelectOption value="">
                       {scopeStatus === "loading" ? "Loading periods…" : "Select a period"}
-                    </option>
+                    </NativeSelectOption>
                     {(periodsByEntity[entity.entityId] ?? []).map((period) => (
-                      <option key={period.periodId} value={period.periodId}>
+                      <NativeSelectOption key={period.periodId} value={period.periodId}>
                         {period.startDate} → {period.endDate}
-                      </option>
+                      </NativeSelectOption>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </Label>
               ))}
               {scopeError ? (
@@ -417,7 +454,10 @@ export function GroupScreen({
                 CTA equity account
                 <Input
                   value={ctaAccountId}
-                  onChange={(event) => setCtaAccountId(event.target.value)}
+                  onChange={(event) => {
+                    setCtaAccountId(event.target.value);
+                    setResult(null);
+                  }}
                 />
               </Label>
               <p className="text-muted-foreground text-sm">
@@ -425,71 +465,72 @@ export function GroupScreen({
                 entity books. Amounts are read from posted journals.
               </p>
               {currencies.length === 0 ? (
-                <p className="empty">Choose an entity to enter its rates.</p>
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyDescription>Choose an entity to enter its rates.</EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               ) : (
-                currencies.map((currency) => (
-                  <fieldset key={currency} className="grid gap-3">
-                    <legend className="text-sm font-medium">
-                      {currency} to {group?.reportingCurrency ?? "group currency"}
-                    </legend>
-                    {group && currency === group.reportingCurrency ? (
-                      <p className="text-sm">
-                        This entity already uses the group currency. Closing, historical, and
-                        average must each be exactly 1.
-                      </p>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {(["closing", "historical", "average"] as const).map((rateType) => (
-                        <Label key={rateType} className="grid gap-1.5 font-normal">
-                          {rateFieldLabel(rateType, currency, group?.reportingCurrency ?? "")}
-                          <Input
-                            inputMode="decimal"
-                            value={rates[currency]?.[rateType] ?? ""}
-                            onChange={(event) => {
-                              const value = event.target.value;
-                              setRates((current) => ({
-                                ...current,
-                                [currency]: {
-                                  closing: current[currency]?.closing ?? "",
-                                  historical: current[currency]?.historical ?? "",
-                                  average: current[currency]?.average ?? "",
-                                  [rateType]: value,
-                                },
-                              }));
-                            }}
-                          />
-                        </Label>
-                      ))}
+                <div className="grid gap-2" data-testid="rate-grid">
+                  <div className="text-muted-foreground grid grid-cols-[5.5rem_1fr_1fr_1fr] gap-2 text-xs font-medium">
+                    <span>Currency</span>
+                    <span>Closing</span>
+                    <span>Historical</span>
+                    <span>Average</span>
+                  </div>
+                  {currencies.map((currency) => (
+                    <div key={currency} className="grid gap-2">
+                      {group && currency === group.reportingCurrency ? (
+                        <p className="text-sm">
+                          This entity already uses the group currency. Closing, historical, and
+                          average must each be exactly 1.
+                        </p>
+                      ) : null}
+                      <div className="grid grid-cols-[5.5rem_1fr_1fr_1fr] items-center gap-2">
+                        <span className="text-sm font-medium">{currency}</span>
+                        {(["closing", "historical", "average"] as const).map((rateType) => {
+                          const value = rates[currency]?.[rateType] ?? "";
+                          const inputId = `rate-${currency}-${rateType}`;
+                          return (
+                            <div key={rateType}>
+                              <Label className="sr-only" htmlFor={inputId}>
+                                {rateFieldLabel(rateType, currency, group?.reportingCurrency ?? "")}
+                              </Label>
+                              <Input
+                                id={inputId}
+                                inputMode="decimal"
+                                value={value}
+                                aria-invalid={!filled(value)}
+                                onChange={(event) => {
+                                  const next = event.target.value;
+                                  setRates((current) => ({
+                                    ...current,
+                                    [currency]: {
+                                      closing: current[currency]?.closing ?? "",
+                                      historical: current[currency]?.historical ?? "",
+                                      average: current[currency]?.average ?? "",
+                                      [rateType]: next,
+                                    },
+                                  }));
+                                  setResult(null);
+                                }}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </fieldset>
-                ))
+                  ))}
+                </div>
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   data-testid="translate-group"
-                  disabled={disabled || translateAction.state.pending || group === null}
+                  disabled={disabled || translateAction.state.pending || !translateReady}
                   onClick={() => void translate()}
                 >
                   {translateAction.state.pending ? "Translating…" : "Translate"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={disabled || entityId.length === 0}
-                  onClick={() =>
-                    void run(undefined, "/v1/ownership", {
-                      asOf: "2024-12-31",
-                      parentEntityId: entityId,
-                      childEntityId: entityId,
-                      effectiveFrom: "2024-01-01",
-                      effectiveTo: null,
-                      percent: "0.60",
-                      subsidiaryEquityMinor: "-100000",
-                    })
-                  }
-                >
-                  Attribute NCI
                 </Button>
               </div>
               {formNote ? (
@@ -498,11 +539,13 @@ export function GroupScreen({
                 </p>
               ) : null}
               {explained ? (
-                <div className="notice notice-error" role="alert" data-testid="translate-error">
-                  <strong>{explained.title}</strong>
-                  <p>{explained.detail}</p>
-                  <p className="muted small">{translateError?.code}</p>
-                </div>
+                <Alert variant="destructive" data-testid="translate-error">
+                  <AlertTitle>{explained.title}</AlertTitle>
+                  <AlertDescription>
+                    <p>{explained.detail}</p>
+                    <p>{translateError?.code}</p>
+                  </AlertDescription>
+                </Alert>
               ) : null}
             </CardContent>
           </Card>
@@ -510,19 +553,14 @@ export function GroupScreen({
       ) : null}
 
       {translateAction.state.pending ? (
-        <div
-          className="card"
-          aria-busy="true"
-          aria-label="Translating posted balances"
-          style={{ marginTop: "1rem" }}
-        >
-          <span className="skeleton" style={{ width: "48%" }} />
-          <span className="skeleton" style={{ width: "100%", marginTop: "0.7rem" }} />
-          <span className="skeleton" style={{ width: "100%", marginTop: "0.45rem" }} />
+        <div className="mt-4 grid gap-2" aria-busy="true" aria-label="Translating posted balances">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
         </div>
       ) : null}
 
-      {result && total ? (
+      {result ? (
         <Card className="mt-4">
           <CardHeader>
             <CardTitle>Translated group trial balance</CardTitle>
@@ -572,42 +610,27 @@ export function GroupScreen({
                 <TableRow>
                   <TableCell colSpan={4}>Control total</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatMinorAccounting(total.minor, result.groupCurrency)}
+                    {formatMinorAccounting(result.controlTotalMinor, result.groupCurrency)}
                   </TableCell>
                 </TableRow>
               </TableFooter>
             </Table>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={total.balances ? "secondary" : "destructive"} data-testid="zero-sum">
-                {total.balances ? "Balances to zero" : "Does not balance"}
+              <Badge variant="secondary" data-testid="zero-sum">
+                Balances to zero
               </Badge>
               <span className="text-muted-foreground text-sm">
                 CTA {formatMinorAccounting(result.ctaMinor, result.groupCurrency)}
               </span>
             </div>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-muted-foreground">Input hash</dt>
-                <dd>
-                  <code className="break-all" data-testid="input-hash">
-                    {result.inputHash}
-                  </code>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Output hash</dt>
-                <dd>
-                  <code className="break-all" data-testid="output-hash">
-                    {result.outputHash}
-                  </code>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Calculation run</dt>
-                <dd>
-                  <code className="break-all">{result.calculationRunId}</code>
-                </dd>
-              </div>
+              <HashFact label="Input hash" value={result.inputHash} testId="input-hash" />
+              <HashFact label="Output hash" value={result.outputHash} testId="output-hash" />
+              <HashFact
+                label="Calculation run"
+                value={result.calculationRunId}
+                testId="calculation-run"
+              />
               <div>
                 <dt className="text-muted-foreground">Formula</dt>
                 <dd>
@@ -624,6 +647,10 @@ export function GroupScreen({
 }
 
 const EMPTY_GROUPS: readonly ConsolidationGroup[] = [];
+
+function filled(value: string | undefined): boolean {
+  return (value ?? "").trim().length > 0;
+}
 
 function accountLabel(
   accountsByEntity: Record<string, readonly Account[]>,
@@ -651,4 +678,45 @@ function rateFieldLabel(rateType: RateType, source: string, quote: string): stri
 function rateTitle(rate: string | null, source: string | null, quote: string): string | undefined {
   if (!rate || !source) return undefined;
   return `${rate} ${quote} per 1 ${source}`;
+}
+
+function HashFact({ label, value, testId }: { label: string; value: string; testId: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="font-mono text-xs"
+                data-testid={testId}
+                data-hash={value}
+              >
+                {shortHash(value)}
+              </button>
+            }
+          />
+          <TooltipContent className="max-w-sm font-mono break-all">{value}</TooltipContent>
+        </Tooltip>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Copy ${label}`}
+          onClick={() => {
+            void navigator.clipboard.writeText(value).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+        >
+          <CopyIcon />
+          <span className="sr-only">{copied ? "Copied" : "Copy"}</span>
+        </Button>
+      </dd>
+    </div>
+  );
 }

@@ -451,6 +451,7 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
       readonly reportingCurrency: string;
     }[]
   >;
+  deleteConsolidationGroup(tenantId: string, id: string, audit: AuditWrite): Promise<boolean>;
   getConsolidationGroup(
     tenantId: string,
     id: string,

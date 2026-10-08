@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTranslateRequest,
-  controlTotal,
   decodeTranslation,
   displayRows,
   explainConsolidationError,
@@ -15,20 +14,6 @@ describe("group translation presentation", () => {
     expect(formatMinorAccounting("-10001225", "EUR")).toBe("(€100,012.25)");
     expect(formatMinorAccounting("0", "USD")).toBe("$0.00");
     expect(formatMinorAccounting(null, "USD")).toBe("—");
-  });
-
-  it("checks the server total with integers", () => {
-    expect(
-      controlTotal([
-        { accountId: "cash", debitPositiveMinor: "900" },
-        { accountId: "equity", debitPositiveMinor: "-800" },
-        { accountId: "cta", debitPositiveMinor: "-100" },
-      ]),
-    ).toEqual({ minor: "0", balances: true });
-    expect(controlTotal([{ accountId: "cash", debitPositiveMinor: "1" }])).toEqual({
-      minor: "1",
-      balances: false,
-    });
   });
 
   it("sends entities, periods, and rates without trial-balance lines or amounts", () => {
@@ -61,6 +46,7 @@ describe("group translation presentation", () => {
       calculationRunId: "run-1",
       engineVersion: "fe-kernel-0.2.1",
       formulaVersion: "current-rate-by-report-class-v1",
+      controlTotalMinor: "0",
       lines: [
         { accountId: "cash", debitPositiveMinor: "900" },
         { accountId: "equity", debitPositiveMinor: "-800" },
@@ -102,6 +88,38 @@ describe("group translation presentation", () => {
       entityLabel: "US Holdco",
     });
     expect(rows[2]).toMatchObject({ cta: true, translatedMinor: "-100", sourceMinor: null });
+    expect(view?.controlTotalMinor).toBe("0");
+  });
+
+  it("leaves a translated amount empty when the kernel omits that account", () => {
+    const view = decodeTranslation({
+      groupCurrency: "EUR",
+      ctaAccountId: "cta",
+      ctaMinor: "0",
+      inputHash: "a".repeat(64),
+      outputHash: "b".repeat(64),
+      calculationRunId: "run-1",
+      controlTotalMinor: "0",
+      lines: [{ accountId: "cta", debitPositiveMinor: "0" }],
+      entities: [
+        {
+          entityId: "us",
+          periodId: "fy24",
+          sourceCurrency: "USD",
+          ctaMinor: "0",
+          sourceLines: [{ accountId: "cash", rateType: "closing", debitPositiveMinor: "0" }],
+          lines: [{ accountId: "cta", debitPositiveMinor: "0" }],
+        },
+      ],
+    });
+    expect(view).not.toBeNull();
+    const rows = displayRows(view!, {
+      entityName: () => "US Holdco",
+      accountName: () => "1000 Cash",
+      rateFor: () => null,
+    });
+    expect(rows[0]?.translatedMinor).toBeNull();
+    expect(formatMinorAccounting(rows[0]?.translatedMinor ?? null, "EUR")).toBe("—");
   });
 
   it("explains missing rates, mismatched periods, and an identity rate other than 1", () => {

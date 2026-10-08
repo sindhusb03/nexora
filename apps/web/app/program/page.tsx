@@ -668,13 +668,7 @@ function ProgramWorkspace({
           ) : null}
 
           {tab === "group" ? (
-            <GroupScreen
-              disabled={busy}
-              session={session}
-              entities={entities.resource}
-              entityId={entityId}
-              run={run}
-            />
+            <GroupScreen disabled={busy} session={session} entities={entities.resource} />
           ) : null}
           {tab === "model" ? <ModelPanel disabled={busy} run={run} /> : null}
           {tab === "capital" ? (

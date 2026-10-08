@@ -42,6 +42,22 @@ describe("consolidation group list", () => {
     expect(JSON.stringify(hidden)).not.toContain(groupA);
   });
 
+  it("rejects a viewer who cannot run consolidation", async () => {
+    const grant = await call(app, "POST", "/v1/memberships", {
+      actor: "owner-1",
+      tenant: tenantA,
+      region: "us-east-1",
+      body: { actorId: "viewer-1", role: "viewer" },
+    });
+    expect(grant.status).toBe(201);
+    const denied = await call(app, "GET", "/v1/consolidation-groups", {
+      actor: "viewer-1",
+      tenant: tenantA,
+      region: "us-east-1",
+    });
+    expect(denied.status).toBe(403);
+  });
+
   it("returns posted source lines and rate types with the translation", async () => {
     const entityId = await createEntity(tenantA, "owner-1");
     const periodId = await createPeriod(tenantA, "owner-1", entityId);
@@ -93,6 +109,10 @@ describe("consolidation group list", () => {
     expect(translated.status).toBe(200);
     const fxBody = (await translated.json()) as {
       ctaMinor: string;
+      controlTotalMinor: string;
+      inputHash: string;
+      outputHash: string;
+      calculationRunId: string;
       entities: {
         sourceLines: { accountId: string; rateType: string; debitPositiveMinor: string }[];
         lines: { accountId: string; debitPositiveMinor: string }[];
@@ -100,6 +120,7 @@ describe("consolidation group list", () => {
       lines: { accountId: string; debitPositiveMinor: string }[];
     };
     expect(fxBody.ctaMinor).toBe("-100");
+    expect(fxBody.controlTotalMinor).toBe("0");
     expect(sourceMap(fxBody.entities[0]?.sourceLines ?? [])).toEqual(
       new Map([
         [cash, { accountId: cash, rateType: "closing", debitPositiveMinor: "1000" }],
@@ -107,6 +128,54 @@ describe("consolidation group list", () => {
       ]),
     );
     expect(fxBody.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
+
+    const again = await call(app, "POST", `/v1/consolidation-groups/${groupA}/translate`, {
+      actor: "owner-1",
+      tenant: tenantA,
+      region: "us-east-1",
+      body: {
+        ctaAccountId: "cta",
+        entities: [{ entityId, periodId }],
+        rates: [
+          {
+            sourceCurrency: "USD",
+            closing: fx("0.90"),
+            historical: fx("0.80"),
+            average: fx("0.85"),
+          },
+        ],
+      },
+    });
+    expect(again.status).toBe(200);
+    const repeat = (await again.json()) as {
+      inputHash: string;
+      outputHash: string;
+      calculationRunId: string;
+      controlTotalMinor: string;
+    };
+    expect(repeat.inputHash).toBe(fxBody.inputHash);
+    expect(repeat.outputHash).toBe(fxBody.outputHash);
+    expect(repeat.inputHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(repeat.outputHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(repeat.controlTotalMinor).toBe("0");
+    expect(repeat.calculationRunId).not.toBe(fxBody.calculationRunId);
+  });
+
+  it("deletes a group that has no eliminations", async () => {
+    const created = await createGroup(tenantA, "owner-1", "Disposable", "EUR");
+    const removed = await call(app, "DELETE", `/v1/consolidation-groups/${created}`, {
+      actor: "owner-1",
+      tenant: tenantA,
+      region: "us-east-1",
+    });
+    expect(removed.status).toBe(200);
+    const listed = await call(app, "GET", "/v1/consolidation-groups", {
+      actor: "owner-1",
+      tenant: tenantA,
+      region: "us-east-1",
+    });
+    const body = (await listed.json()) as { groups: { consolidationGroupId: string }[] };
+    expect(body.groups.map((group) => group.consolidationGroupId)).not.toContain(created);
   });
 
   async function provision(name: string, owner: string) {

@@ -37,6 +37,7 @@ export interface TranslationView {
   readonly formulaVersion: string | null;
   readonly lines: readonly TranslatedLine[];
   readonly entities: readonly EntityTranslation[];
+  readonly controlTotalMinor: string;
 }
 
 export interface RateTripleInput {
@@ -73,7 +74,7 @@ export interface DisplayRow {
   readonly sourceCurrency: string | null;
   readonly rateType: RateType | "cta";
   readonly rate: string | null;
-  readonly translatedMinor: string;
+  readonly translatedMinor: string | null;
   readonly cta: boolean;
 }
 
@@ -83,21 +84,6 @@ export function formatMinorAccounting(minor: string | null, currency: string): s
   const display = minorToDisplay(negative ? minor.slice(1) : minor, currency);
   const formatted = withCurrency(display, currency);
   return negative ? `(${formatted})` : formatted;
-}
-
-/** Sums server lines with integer minor units. This checks the kernel total; it does not translate. */
-export function controlTotal(lines: readonly TranslatedLine[]): {
-  readonly minor: string;
-  readonly balances: boolean;
-} {
-  let total = 0n;
-  for (const line of lines) {
-    if (!MINOR.test(line.debitPositiveMinor)) {
-      return { minor: "0", balances: false };
-    }
-    total += BigInt(line.debitPositiveMinor);
-  }
-  return { minor: total.toString(), balances: total === 0n };
 }
 
 export function buildTranslateRequest(input: {
@@ -153,7 +139,7 @@ export function displayRows(
         sourceCurrency: entity.sourceCurrency,
         rateType: source.rateType,
         rate: names.rateFor(entity.sourceCurrency, source.rateType),
-        translatedMinor: translated.get(source.accountId) ?? "0",
+        translatedMinor: translated.get(source.accountId) ?? null,
         cta: false,
       });
     }
@@ -256,6 +242,7 @@ export function decodeTranslation(value: unknown): TranslationView | null {
   const calculationRunId = str(value, "calculationRunId");
   const lines = decodeTranslatedLines(value.lines);
   const entities = decodeEntities(value.entities);
+  const controlTotalMinor = str(value, "controlTotalMinor");
   if (
     groupCurrency === null ||
     ctaAccountId === null ||
@@ -264,7 +251,8 @@ export function decodeTranslation(value: unknown): TranslationView | null {
     outputHash === null ||
     calculationRunId === null ||
     lines === null ||
-    entities === null
+    entities === null ||
+    controlTotalMinor === null
   ) {
     return null;
   }
@@ -279,6 +267,7 @@ export function decodeTranslation(value: unknown): TranslationView | null {
     formulaVersion: str(value, "formulaVersion"),
     lines,
     entities,
+    controlTotalMinor,
   };
 }
 
