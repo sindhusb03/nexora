@@ -1,6 +1,7 @@
 import {
   apiExceptionSchema,
   apiExtractedValueSchema,
+  currencyScale,
   ingestionJobSchema,
   ingestionPaths,
   readApiError,
@@ -274,6 +275,8 @@ export function createHttpIngestionClient(baseUrl: string): IngestionClient {
       const blocked = requireCsrf(csrfToken);
       if (blocked) return blocked;
       const original = exceptions.get(exceptionId);
+      const note = request.note?.trim();
+      if (!note) return invalid("Add a reviewer note before confirming.");
       const linked =
         original &&
         values.get(original.jobId)?.find((v) => original.provenance.valueIds.includes(v.valueId));
@@ -281,11 +284,7 @@ export function createHttpIngestionClient(baseUrl: string): IngestionClient {
       if (request.action === "correct") {
         if (!linked?.currency || !/^-?\d+$/.test(request.correctedMinor ?? ""))
           return invalid("Load the extracted value before correcting its minor units.");
-        const digits =
-          new Intl.NumberFormat("en", {
-            style: "currency",
-            currency: linked.currency,
-          }).resolvedOptions().maximumFractionDigits ?? 2;
+        const digits = currencyScale(linked.currency);
         const scaleDigits: Record<string, number> = {
           units: 0,
           thousands: 3,
@@ -303,7 +302,7 @@ export function createHttpIngestionClient(baseUrl: string): IngestionClient {
       }
       const parsed = resolveExceptionSchema.safeParse({
         action: request.action,
-        note: request.note?.trim() || `Reviewed: ${request.action}`,
+        note,
         ...(amount !== undefined ? { amount } : {}),
         ...(request.action === "remap" ? { accountCode: request.accountCode } : {}),
       });

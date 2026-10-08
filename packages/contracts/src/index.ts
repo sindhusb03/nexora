@@ -1,3 +1,4 @@
+export { currencyScale } from "@nexora/kernel";
 export {
   BULK_ACCEPT_MIN_CONFIDENCE,
   EXCEPTION_STATUSES,

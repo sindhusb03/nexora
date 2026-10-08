@@ -182,6 +182,11 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
           setNotice(HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE);
           return;
         }
+        if (!mockMode) {
+          setArmed(null);
+          router.push(`${detailPath(jobId, selected.id)}?action=${action}`);
+          return;
+        }
         if (armed === action) {
           setArmed(null);
           void resolveQuick(selected, action);
@@ -192,7 +197,7 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [armed, bulkOpen, canResolve, helpOpen, jobId, rows.length, router, selected]);
+  }, [armed, bulkOpen, canResolve, helpOpen, jobId, mockMode, rows.length, router, selected]);
 
   async function resolveQuick(item: Exception, action: "accept" | "not_applicable") {
     const result = await getIngestionClient().resolve(

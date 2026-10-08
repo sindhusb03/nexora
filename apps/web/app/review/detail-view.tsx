@@ -116,11 +116,13 @@ export function DetailView({
     ? accountCode.length > 0
     : apiAccountCode.test(accountCode) && accounts.some((item) => item.code === accountCode);
   const provenance = exception?.provenance[0];
+  const noteReady = mockMode || note.trim().length > 0;
 
   async function submit() {
     if (!canResolve || !exception || !action || exception.status !== "open") return;
     if (action === "accept" && headerValueNotAcceptable(exception)) return;
     if (action === "remap" && !remapReady) return;
+    if (!noteReady) return;
     setBusy(true);
     setError(null);
     const result = await getIngestionClient().resolve(
@@ -336,10 +338,21 @@ export function DetailView({
                   data-testid="resolution-note"
                   maxLength={500}
                   value={note}
+                  aria-required={!mockMode}
+                  aria-describedby={!noteReady ? "resolution-note-help" : undefined}
                   onChange={(event) => setNote(event.target.value)}
                 />
+                {!noteReady ? (
+                  <span id="resolution-note-help" className="small muted">
+                    Add a reviewer note before confirming.
+                  </span>
+                ) : null}
               </label>
-              <Button type="submit" data-testid="confirm-resolution" disabled={!canSubmit || busy}>
+              <Button
+                type="submit"
+                data-testid="confirm-resolution"
+                disabled={!canSubmit || !noteReady || busy}
+              >
                 {mockMode
                   ? busy
                     ? "Saving proposal"

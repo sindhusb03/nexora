@@ -3,8 +3,13 @@ import {
   EXCEPTION_TYPES,
   HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
   exceptionSchema,
+  currencyScale,
   isBulkCandidate,
 } from "@nexora/contracts";
+import {
+  currencyScale as kernelCurrencyScale,
+  moneyFromDecimal,
+} from "../../../packages/kernel/src/index";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getIngestionClient, resetIngestionClient } from "../app/review/client";
@@ -81,7 +86,7 @@ describe("header adapter rejection", () => {
       const before = structuredClone(store.read());
       const request = {
         action: "accept" as const,
-        note: null,
+        note: "Checked source",
         correctedMinor: null,
         accountCode: null,
         idempotencyKey: "header-accept",
@@ -102,7 +107,7 @@ describe("header adapter rejection", () => {
           expect(init.method).toBe("POST");
           expect(JSON.parse(String(init.body))).toEqual({
             action: "accept",
-            note: "Reviewed: accept",
+            note: "Checked source",
           });
           const result = await client.resolve(header.id, request, "sindhu", roles, csrf);
           if (result.ok) throw new Error("Expected rejection");
@@ -670,7 +675,7 @@ describe("http ingestion client", () => {
         "accounts_receivable",
         { action: "remap", note: "Fix value", accountCode: "accounts_receivable" },
       ],
-      ["accept", null, null, { action: "accept", note: "Reviewed: accept" }],
+      ["accept", null, null, { action: "accept", note: "Fix value" }],
     ] as const) {
       const result = await http.resolve(
         exceptionId,
@@ -678,7 +683,7 @@ describe("http ingestion client", () => {
           action,
           correctedMinor,
           accountCode,
-          note: action === "accept" ? null : "Fix value",
+          note: "Fix value",
           idempotencyKey: "resolve-http",
         },
         "actor",
@@ -699,6 +704,76 @@ describe("http ingestion client", () => {
       expect(new Headers(call[1]?.headers).get("x-csrf-token")).toBe(csrf);
     }
     expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("/exceptions");
+  });
+  it("converts corrected minor units with the kernel currency scale", async () => {
+    for (const currency of ["CLP", "JPY", "KWD", "BHD", "USD"]) {
+      expect(currencyScale(currency)).toBe(kernelCurrencyScale(currency));
+    }
+    for (const [currency, amount] of [
+      ["CLP", "-123.45"],
+      ["JPY", "-12345"],
+      ["KWD", "-12.345"],
+    ]) {
+      const fetchMock = stub();
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.endsWith("/values")) return Response.json({ values: [{ ...wireValue, currency }] });
+        if (url.endsWith("/exceptions")) return Response.json({ exceptions: [wireException] });
+        if (url.endsWith("/resolve"))
+          return Response.json({ exceptionId, status: "corrected", job: wireJob });
+        return Response.json(wireJob);
+      });
+      const http = createHttpIngestionClient("https://ingestion.test");
+      expect((await http.getExceptions(jobId)).ok).toBe(true);
+      expect(
+        (
+          await http.resolve(
+            exceptionId,
+            {
+              action: "correct",
+              correctedMinor: "-12345",
+              accountCode: null,
+              note: "Correct source amount",
+              idempotencyKey: `scale-${currency}`,
+            },
+            "actor",
+            roles,
+            csrf,
+          )
+        ).ok,
+      ).toBe(true);
+      const call = fetchMock.mock.calls.find(([url]) => url.endsWith("/resolve"))!;
+      const body = JSON.parse(String(call[1]?.body));
+      expect(body).toEqual({ action: "correct", note: "Correct source amount", amount });
+      expect(moneyFromDecimal(currency!, body.amount).minor).toBe("-12345");
+    }
+  });
+  it("does not send a resolve without a note", async () => {
+    const fetchMock = stub();
+    const http = createHttpIngestionClient("https://ingestion.test");
+    for (const note of [null, "", " \n "]) {
+      expect(
+        await http.resolve(
+          exceptionId,
+          {
+            action: "accept",
+            correctedMinor: null,
+            accountCode: null,
+            note,
+            idempotencyKey: "missing-note",
+          },
+          "actor",
+          roles,
+          csrf,
+        ),
+      ).toMatchObject({
+        ok: false,
+        error: {
+          code: "INGESTION_VALIDATION_FAILED",
+          message: "Add a reviewer note before confirming.",
+        },
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("sends jobId and minConfidence for bulk acceptance and refetches exceptions", async () => {
     const fetchMock = stub();

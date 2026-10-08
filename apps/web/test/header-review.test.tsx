@@ -158,7 +158,7 @@ describe("header review probe", () => {
           expect(url).toBe(`https://ingestion.test/ingestion/exceptions/${empty.id}/resolve`);
           expect(init.method).toBe("POST");
           const request = JSON.parse(String(init.body));
-          expect(request).toEqual({ action: "accept", note: "Reviewed: accept" });
+          expect(request).toEqual({ action: "accept", note: "Checked source" });
           const result = await client.resolve(
             empty.id,
             { ...request, correctedMinor: null, accountCode: null, idempotencyKey: "http-422" },
@@ -175,6 +175,7 @@ describe("header review probe", () => {
           return response;
         }),
       );
+      vi.mocked(isMockIngestion).mockReturnValue(false);
       vi.mocked(getIngestionClient).mockReturnValue({ ...client, resolve: http.resolve });
       render(
         view === "detail" ? (
@@ -184,6 +185,19 @@ describe("header review probe", () => {
         ),
       );
       await screen.findByText(empty.message, { exact: true });
+      if (view === "queue") {
+        navigation.push.mockClear();
+        fireEvent.click(screen.getByRole("link", { name: empty.message }).closest("tr")!);
+        fireEvent.keyDown(window, { key: "a" });
+        expect(navigation.push).toHaveBeenCalledWith(
+          `/review/jobs/${jobId}/exceptions/${empty.id}?action=accept`,
+        );
+        expect(responses).toHaveLength(0);
+        cleanup();
+        navigation.search = new URLSearchParams("action=accept");
+        render(<DetailView jobId={jobId} exceptionId={empty.id} />);
+        await screen.findByText(empty.message, { exact: true });
+      }
       store.write(
         store.read().map((job) => ({
           ...job,
@@ -192,22 +206,16 @@ describe("header review probe", () => {
           ),
         })),
       );
-      if (view === "detail") {
-        fireEvent.click(screen.getByRole("button", { name: "Accept", exact: true }));
-        fireEvent.click(screen.getByTestId("confirm-resolution"));
-      } else {
-        fireEvent.click(screen.getByRole("link", { name: empty.message }).closest("tr")!);
-        fireEvent.keyDown(window, { key: "a" });
-        fireEvent.keyDown(window, { key: "a" });
-      }
+      fireEvent.click(screen.getByRole("button", { name: "Accept", exact: true }));
+      fireEvent.change(screen.getByTestId("resolution-note"), {
+        target: { value: "Checked source" },
+      });
+      fireEvent.click(screen.getByTestId("confirm-resolution"));
       expect(await screen.findByRole("alert")).toHaveTextContent(
         `HEADER_VALUE_NOT_ACCEPTABLE: ${HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE}`,
       );
       expect(responses[0]?.status).toBe(422);
-      const scope =
-        view === "detail"
-          ? screen.getByTestId("screen-detail")
-          : screen.getByRole("link", { name: empty.message }).closest("tr")!;
+      const scope = screen.getByTestId("screen-detail");
       expect(within(scope).getByText("Open", { exact: true })).toBeInTheDocument();
       const after = await client.getExceptions(jobId);
       expect(after.ok).toBe(true);
@@ -369,6 +377,41 @@ function httpReviewClient() {
 }
 
 describe("HTTP review controls", () => {
+  it("requires a reviewer note before confirming in HTTP mode", async () => {
+    const { jobId, exceptionId, fetchMock } = httpReviewClient();
+    render(<DetailView jobId={jobId} exceptionId={exceptionId} />);
+    fireEvent.click(await screen.findByTestId("action-accept"));
+    const confirm = screen.getByTestId("confirm-resolution");
+    expect(confirm).toBeDisabled();
+    expect(screen.getByText("Add a reviewer note before confirming.")).toBeInTheDocument();
+    const note = screen.getByTestId("resolution-note");
+    fireEvent.change(note, { target: { value: "   " } });
+    expect(confirm).toBeDisabled();
+    fireEvent.submit(confirm.closest("form")!);
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/resolve"))).toBe(false);
+    fireEvent.change(note, { target: { value: "Checked the source" } });
+    expect(confirm).toBeEnabled();
+    expect(screen.queryByText("Add a reviewer note before confirming.")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a", "accept"],
+    ["n", "not_applicable"],
+  ])("routes HTTP %s to detail for a reviewer note", async (key, action) => {
+    const { jobId, exceptionId, fetchMock } = httpReviewClient();
+    navigation.push.mockClear();
+    render(<QueueView jobId={jobId} />);
+    fireEvent.click(
+      (await screen.findByRole("link", { name: "Eligible boundary mapping" })).closest("tr")!,
+    );
+    fireEvent.keyDown(window, { key });
+    expect(navigation.push).toHaveBeenCalledWith(
+      `/review/jobs/${jobId}/exceptions/${exceptionId}?action=${action}`,
+    );
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/resolve"))).toBe(false);
+    expect(screen.queryByTestId("confirm-key")).not.toBeInTheDocument();
+  });
+
   it("lists only open mapping exceptions at or above the bulk threshold, including errors", async () => {
     const { jobId } = httpReviewClient();
     render(<QueueView jobId={jobId} />);

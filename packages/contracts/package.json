@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@nexora/kernel": "workspace:*",
     "zod": "^4.1.5"
   },
   "devDependencies": {
