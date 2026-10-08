@@ -68,6 +68,7 @@ export async function seedDemo(
         periodId: period.periodId,
         currency: "USD",
         sourceRef: journal.label,
+        ...(journal.kind === undefined ? {} : { journalKind: journal.kind }),
         lines: journal.lines.map((line) => ({
           accountId: requiredAccount(accounts, line.code),
           debit: centsToMajor(line.debitCents),

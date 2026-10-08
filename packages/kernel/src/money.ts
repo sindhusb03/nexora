@@ -1,19 +1,9 @@
+import { lookupCurrencyScale } from "@nexora/currency";
 import Decimal from "decimal.js";
 
 import { KernelError } from "./errors.js";
 
 const PLAIN_DECIMAL = /^-?\d+(\.\d+)?$/;
-const CURRENCY_CODE = /^[A-Z]{3}$/;
-
-const SCALE_BY_CURRENCY: Record<string, number> = {
-  BHD: 3,
-  JOD: 3,
-  KWD: 3,
-  OMR: 3,
-  JPY: 0,
-  KRW: 0,
-  VND: 0,
-};
 
 /** Process-local analytical decimal. Ledger math does not use this type. */
 export const AnalyticalDecimal = Decimal.clone({
@@ -29,15 +19,22 @@ export interface Money {
 }
 
 export function currencyScale(currency: string): number {
-  const code = assertCurrency(currency);
-  return SCALE_BY_CURRENCY[code] ?? 2;
+  return requireCurrency(currency).scale;
 }
 
 export function assertCurrency(currency: string): string {
-  if (!CURRENCY_CODE.test(currency)) {
+  return requireCurrency(currency).code;
+}
+
+function requireCurrency(currency: string): { code: string; scale: number } {
+  const found = lookupCurrencyScale(currency);
+  if (!found.ok) {
+    if (found.reason === "unsupported") {
+      throw new KernelError("FIN_CURRENCY_UNSUPPORTED", `Currency ${currency} has no minor unit`);
+    }
     throw new KernelError("FIN_CURRENCY_MISMATCH", `Invalid currency code ${currency}`);
   }
-  return currency;
+  return found;
 }
 
 export function money(currency: string, minor: bigint | string): Money {

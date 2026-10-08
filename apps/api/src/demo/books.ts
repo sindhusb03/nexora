@@ -11,6 +11,7 @@ export interface BookJournal {
   readonly startDate: string;
   readonly endDate: string;
   readonly lines: readonly BookLine[];
+  readonly kind?: "opening";
 }
 
 export const DEMO_ACCOUNTS = [
@@ -186,6 +187,7 @@ export function cashWeekInputs(kind: "base" | "downside"): readonly {
 function openingJournal(): BookJournal {
   return {
     label: "Opening trial balance",
+    kind: "opening",
     startDate: "2024-12-01",
     endDate: "2024-12-31",
     lines: [

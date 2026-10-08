@@ -16,7 +16,7 @@ describe("financial kernel API", () => {
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       service: "financial-kernel",
-      engineVersion: "fe-kernel-0.2.1",
+      engineVersion: "fe-kernel-0.3.0",
     });
   });
 
@@ -148,7 +148,7 @@ describe("financial kernel API", () => {
     });
     expect(body.retainedEarnings.ending.minor).toBe("145000");
     expect(body.retainedEarnings.close).toBe("derived");
-    expect(body.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(body.engineVersion).toBe("fe-kernel-0.3.0");
 
     await call(app, "POST", "/v1/memberships", {
       actor: "owner-1",
@@ -291,7 +291,7 @@ describe("financial kernel API", () => {
     }>(dcf);
     expect(dcfBody.enterpriseValue).toBe("1340.909090909091");
     expect(dcfBody.equityValue).toBe("1180.909090909091");
-    expect(dcfBody.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(dcfBody.engineVersion).toBe("fe-kernel-0.3.0");
 
     const rejected = await call(app, "POST", "/v1/valuations/dcf", {
       actor: "owner-1",

@@ -14,13 +14,13 @@ import {
   KernelError,
   money,
   subtractMoney,
-  type ClassifiedLine,
   type Role,
 } from "@nexora/kernel";
-import type { LedgerStore, PostedActivityLine } from "@nexora/db";
+import type { LedgerStore } from "@nexora/db";
 import type { Hono } from "hono";
 import { z } from "zod";
 
+import { classifyPostedActivity, displaySourceRef } from "../classify-activity.js";
 import { answerCopilot, isAgent } from "../copilot/answer.js";
 import { cashWeekInputs, PLAN_BUDGET, PLANNING_DRIVERS } from "../demo/books.js";
 import { ApiError, readActor, type ActorContext, type AppEnv } from "../http.js";
@@ -382,7 +382,10 @@ async function snapshot(
       const statement = buildStatements({
         currency: entity.functionalCurrency,
         retainedEarningsAccountId: entity.retainedEarningsAccountId ?? "",
-        lines: classify(activity, period.periodId, period.startDate),
+        lines: classifyPostedActivity(
+          activity.filter((line) => line.periodStart <= period.endDate),
+          period,
+        ),
       });
       return [{ period, statement }];
     } catch (error) {
@@ -620,7 +623,7 @@ async function snapshot(
     journals: journals.map((journal) => ({
       journalId: journal.journalId,
       periodId: journal.periodId,
-      sourceRef: journal.sourceRef,
+      sourceRef: displaySourceRef(journal.sourceRef),
       payloadHash: journal.payloadHash,
       lines: journal.lines.map((line) => ({
         account: accountName.get(line.accountId) ?? line.accountId,
@@ -929,24 +932,6 @@ function statementRows(
       ...present(read(item.statement), currency),
     })),
   }));
-}
-
-function classify(
-  activity: readonly PostedActivityLine[],
-  periodId: string,
-  periodStart: string,
-): ClassifiedLine[] {
-  return activity
-    .filter((line) => line.periodId === periodId || line.periodEnd < periodStart)
-    .map((line) => ({
-      accountId: line.accountId,
-      report: line.report,
-      cashFlow: line.cashFlow,
-      debitMinor: line.debitMinor,
-      creditMinor: line.creditMinor,
-      currency: line.currency,
-      period: line.periodId === periodId ? "movement" : "opening",
-    }));
 }
 
 function asMinor(value: string): string {

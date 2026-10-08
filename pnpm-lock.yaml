@@ -133,6 +133,9 @@ importers:
       '@nexora/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@nexora/currency':
+        specifier: workspace:*
+        version: link:../../packages/currency
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -215,9 +218,21 @@ importers:
 
   packages/contracts:
     dependencies:
+      '@nexora/currency':
+        specifier: workspace:*
+        version: link:../currency
       zod:
         specifier: ^4.1.5
         version: 4.6.5
+    devDependencies:
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.19.0)(jiti@2.7.0)(jsdom@30.1.1(@noble/hashes@2.4.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1)
+
+  packages/currency:
     devDependencies:
       typescript:
         specifier: ^5.9.2
@@ -256,6 +271,9 @@ importers:
 
   packages/kernel:
     dependencies:
+      '@nexora/currency':
+        specifier: workspace:*
+        version: link:../currency
       decimal.js:
         specifier: ^10.6.0
         version: 10.6.0

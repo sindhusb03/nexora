@@ -11,6 +11,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@nexora/currency": "workspace:*",
     "decimal.js": "^10.6.0"
   },
   "devDependencies": {

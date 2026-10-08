@@ -30,9 +30,9 @@ const opening = [
 const statements = (lines: readonly ClassifiedLine[]) =>
   buildStatements({ currency: "USD", retainedEarningsAccountId: "re", lines });
 
-describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.1)", () => {
+describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.3.0)", () => {
   it("records the formula version", () => {
-    expect(statements(opening).engineVersion).toBe("fe-kernel-0.2.1");
+    expect(statements(opening).engineVersion).toBe("fe-kernel-0.3.0");
   });
 
   it("rejects journal cash movement without a matching counterpart with a kernel error", () => {
@@ -64,7 +64,7 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
     });
   });
 
-  it("attributes only the 30 cash paid for equipment financed with 70 debt", () => {
+  it("classifies each counter of a part-cash equipment purchase", () => {
     const result = statements([
       ...opening,
       line("equipment", "asset", "cfi", 100, 0, "purchase"),
@@ -74,8 +74,8 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
     expect(result.cashFlow).toEqual({
       beginningCashMinor: "100",
       cfoMinor: "0",
-      cfiMinor: "-30",
-      cffMinor: "0",
+      cfiMinor: "-100",
+      cffMinor: "70",
       endingCashMinor: "70",
     });
   });
@@ -92,7 +92,7 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
     expect(result.incomeStatement.netIncomeMinor).toBe("120");
   });
 
-  it("allocates bigint remainders to the largest line, then account ID, independent of input order", () => {
+  it("classifies one cash leg and three counters exactly, independent of input order", () => {
     const lines = [
       ...opening,
       line("cash", "asset", "cash", 0, 5, "mixed"),
@@ -102,9 +102,9 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
     ];
     expect(statements(lines).cashFlow).toEqual({
       beginningCashMinor: "100",
-      cfoMinor: "-3",
-      cfiMinor: "-2",
-      cffMinor: "0",
+      cfoMinor: "-4",
+      cfiMinor: "-4",
+      cffMinor: "3",
       endingCashMinor: "95",
     });
     expect(statements([...lines].reverse()).cashFlow).toEqual(statements(lines).cashFlow);
@@ -146,9 +146,9 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
     ]);
     expect(result.cashFlow).toEqual({
       beginningCashMinor: "0",
-      cfoMinor: "4503599627370497",
+      cfoMinor: "0",
       cfiMinor: "0",
-      cffMinor: "4503599627370496",
+      cffMinor: "9007199254740993",
       endingCashMinor: "9007199254740993",
     });
   });
@@ -165,6 +165,7 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
       openingMinor: "80",
       netIncomeMinor: "0",
       distributionsMinor: "5",
+      directEntriesMinor: "0",
       endingMinor: "75",
       close: "derived",
     });
@@ -178,6 +179,6 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.
         line("cash", "asset", "cash", 10, 0, "unclassified"),
         line("capital", "equity", "non_cash", 0, 10, "unclassified"),
       ]),
-    ).toThrow("Cash flow does not roll forward");
+    ).toThrow("Cash classification needed");
   });
 });

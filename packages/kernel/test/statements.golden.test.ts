@@ -65,6 +65,7 @@ describe("single entity statements", () => {
       openingMinor: "100000",
       netIncomeMinor: "50000",
       distributionsMinor: "5000",
+      directEntriesMinor: "0",
       endingMinor: "145000",
       close: "derived",
     });

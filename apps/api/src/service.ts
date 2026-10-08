@@ -1,13 +1,8 @@
-import type {
-  AccountRecord,
-  AuditWrite,
-  JournalRecord,
-  LedgerStore,
-  PostedActivityLine,
-} from "@nexora/db";
+import type { AccountRecord, AuditWrite, JournalRecord, LedgerStore } from "@nexora/db";
 import { isUniqueViolation } from "@nexora/db";
 import {
   KernelError,
+  assertCanonicalClassification,
   assertExpectedVersion,
   assertNoPeriodOverlap,
   assertPeriodOpen,
@@ -25,11 +20,11 @@ import {
   validateJournal,
   valueDcf,
   type Action,
-  type ClassifiedLine,
   type Role,
   type StatementSet,
 } from "@nexora/kernel";
 
+import { classifyPostedActivity, openingSourceRef } from "./classify-activity.js";
 import type { ActorContext } from "./http.js";
 
 export function createLedgerService(store: LedgerStore, platformAdminActorIds: readonly string[]) {
@@ -77,6 +72,7 @@ export function createLedgerService(store: LedgerStore, platformAdminActorIds: r
         periodId: string;
         currency: string;
         sourceRef?: string | null;
+        journalKind?: "opening" | "standard" | undefined;
         lines: readonly { accountId: string; debit: string; credit: string }[];
       },
     ) => postJournal(store, actor, input),
@@ -254,6 +250,11 @@ async function createAccount(
       "Retained earnings must be an equity account",
     );
   }
+  assertCanonicalClassification({
+    code: input.code,
+    report: input.report,
+    cashFlow: input.cashFlow,
+  });
   const now = new Date().toISOString();
   const accountId = crypto.randomUUID();
   const created = await store.createAccount({
@@ -350,6 +351,7 @@ async function postJournal(
     periodId: string;
     currency: string;
     sourceRef?: string | null;
+    journalKind?: "opening" | "standard" | undefined;
     lines: readonly { accountId: string; debit: string; credit: string }[];
   },
 ) {
@@ -417,7 +419,10 @@ async function postJournal(
         idempotencyKey: actor.idempotencyKey,
         payloadHash: balanced.payloadHash,
         reversesJournalId: null,
-        sourceRef: input.sourceRef ?? null,
+        sourceRef:
+          input.journalKind === "opening"
+            ? openingSourceRef(input.sourceRef)
+            : (input.sourceRef ?? null),
         actorId: actor.actorId,
         correlationId: actor.correlationId,
         version: 1,
@@ -597,28 +602,10 @@ export async function loadClassifiedActivity(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   const activity = await store.listPostedActivity(tenantId, entity.entityId);
-  const lines: ClassifiedLine[] = activity
-    .filter((line) => line.periodStart <= period.endDate)
-    .map((line) => ({
-      journalId: line.journalId,
-      accountId: line.accountId,
-      report: line.report,
-      cashFlow: line.cashFlow,
-      debitMinor: line.debitMinor,
-      creditMinor: line.creditMinor,
-      currency: line.currency,
-      period: classifyPeriod(line, period.startDate, period.periodId),
-    }));
-  lines.sort((left, right) => {
-    const periodOrder = left.period.localeCompare(right.period);
-    return (
-      periodOrder ||
-      left.accountId.localeCompare(right.accountId) ||
-      (left.journalId ?? "").localeCompare(right.journalId ?? "") ||
-      left.debitMinor.localeCompare(right.debitMinor) ||
-      left.creditMinor.localeCompare(right.creditMinor)
-    );
-  });
+  const lines = classifyPostedActivity(
+    activity.filter((line) => line.periodStart <= period.endDate),
+    period,
+  );
   return {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
@@ -731,23 +718,6 @@ async function listAudit(store: LedgerStore, actor: ActorContext) {
       aggregateId: event.aggregateId,
     })),
   };
-}
-
-function classifyPeriod(
-  line: PostedActivityLine,
-  periodStart: string,
-  periodId: string,
-): ClassifiedLine["period"] {
-  if (line.periodId === periodId) {
-    return "movement";
-  }
-  if (line.periodEnd < periodStart) {
-    return "opening";
-  }
-  throw new KernelError(
-    "FIN_OVERLAPPING_PERIOD",
-    "Posted activity falls outside the statement period",
-  );
 }
 
 async function scope(store: LedgerStore, actor: ActorContext, action: Action) {
@@ -887,6 +857,7 @@ function presentStatement(statement: StatementSet) {
       opening: amount(statement.retainedEarnings.openingMinor),
       netIncome: amount(statement.retainedEarnings.netIncomeMinor),
       distributions: amount(statement.retainedEarnings.distributionsMinor),
+      directEntries: amount(statement.retainedEarnings.directEntriesMinor),
       ending: amount(statement.retainedEarnings.endingMinor),
       close: statement.retainedEarnings.close,
     },

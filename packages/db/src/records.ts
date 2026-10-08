@@ -103,6 +103,8 @@ export interface CalculationRunRecord {
 export interface PostedActivityLine {
   readonly journalId: string;
   readonly accountId: string;
+  readonly accountCode: string;
+  readonly sourceRef: string | null;
   readonly report: ReportClass;
   readonly cashFlow: CashFlowClass;
   readonly currency: string;

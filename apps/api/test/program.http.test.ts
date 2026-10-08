@@ -212,7 +212,7 @@ describe("program gates", () => {
     }>(created);
     expect(valuation.enterpriseValue).toBe("1340.909090909091");
     expect(valuation.equityValue).toBe("1180.909090909091");
-    expect(valuation.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(valuation.engineVersion).toBe("fe-kernel-0.3.0");
     expect(valuation.calculationStatus).toBe("succeeded");
 
     const draftPack = await call(app, "POST", "/v1/report-packs", {
@@ -268,7 +268,7 @@ describe("program gates", () => {
       runs: { id: string; enterpriseValue: string; calculationRunId: string }[];
       engineVersion: string;
     }>(sensitivity);
-    expect(shocked.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(shocked.engineVersion).toBe("fe-kernel-0.3.0");
     expect(shocked.runs[0]?.id).toBe("wacc-up");
     expect(shocked.runs[0]?.enterpriseValue).not.toBe("1340.909090909091");
     expect(shocked.runs[0]?.calculationRunId).toBeTruthy();
@@ -415,7 +415,7 @@ describe("program gates", () => {
       engineVersion: string;
     }>(translated);
     expect(fx.ctaMinor).toBe("-1000");
-    expect(fx.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(fx.engineVersion).toBe("fe-kernel-0.3.0");
     const translatedLines = new Map(
       fx.lines.map((line) => [line.accountId, line.debitPositiveMinor]),
     );
@@ -501,7 +501,7 @@ describe("program gates", () => {
       engineVersion: string;
     }>(calculated);
     expect(calc.outputs.out).toBe("22.000000000000");
-    expect(calc.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(calc.engineVersion).toBe("fe-kernel-0.3.0");
 
     const scenario = await call(app, "POST", "/v1/scenarios", {
       actor: "owner-1",
@@ -587,7 +587,7 @@ describe("program gates", () => {
       body: { entryEquity: "100", exitEquity: "200", holdYears: "5" },
     });
     expect(lbo.status).toBe(200);
-    expect((await readJson<{ engineVersion: string }>(lbo)).engineVersion).toBe("fe-kernel-0.2.1");
+    expect((await readJson<{ engineVersion: string }>(lbo)).engineVersion).toBe("fe-kernel-0.3.0");
 
     const rows = [{ rowNo: 1, account: "1000", amount: "500.00" }];
     const imported = await call(app, "POST", "/v1/imports", {
