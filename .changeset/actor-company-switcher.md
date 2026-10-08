@@ -4,4 +4,4 @@
 "@nexora/web": patch
 ---
 
-List the signed-in actor's active companies from membership, and reuse that company on a first-run retry. The studio switcher and organization member list read those rows.
+List the signed-in actor's active companies from membership. A first-run retry reuses a company only when that actor already owns the same name, and opening that name again returns the existing company.

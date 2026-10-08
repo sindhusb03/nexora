@@ -36,7 +36,13 @@ export const membership = pgTable(
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
   },
-  (table) => [uniqueIndex("membership_actor_role").on(table.tenantId, table.actorId, table.role)],
+  (table) => [
+    uniqueIndex("membership_actor_role").on(table.tenantId, table.actorId, table.role),
+    index("membership_actor_active")
+      .on(table.actorId)
+      .where(sql`${table.status} = 'active'`),
+    check("membership_status_check", sql`${table.status} IN ('active', 'suspended', 'left')`),
+  ],
 );
 
 export const legalEntity = pgTable("legal_entity", {

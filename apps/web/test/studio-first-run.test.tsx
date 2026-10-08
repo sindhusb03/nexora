@@ -129,6 +129,7 @@ describe("studio first sign-in", () => {
           name: "Harbor Analytics",
           region: "us-east-1",
           status: "active",
+          members: [{ actorId: "ada", role: "owner" }],
         },
       ];
     });
@@ -145,5 +146,69 @@ describe("studio first sign-in", () => {
     expect(await screen.findByTestId("company-home")).toHaveTextContent("Harbor Analytics");
     expect(provisionTenant).not.toHaveBeenCalled();
     expect(selectTenant).toHaveBeenCalledWith("csrf-1", existing);
+  });
+
+  it("opens a new company when the listed company has a different name", async () => {
+    const existing = "44444444-4444-4444-8444-444444444444";
+    let lookups = 0;
+    vi.mocked(listCompanies).mockImplementation(async () => {
+      lookups += 1;
+      if (lookups === 1) return [];
+      return [
+        {
+          tenantId: existing,
+          name: "Other Books",
+          region: "us-east-1",
+          status: "active",
+          members: [{ actorId: "ada", role: "owner" }],
+        },
+      ];
+    });
+
+    render(<StudioApp />);
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("company-name"), { target: { value: "Harbor Analytics" } });
+    fireEvent.click(screen.getByTestId("first-run-next"));
+    fireEvent.change(screen.getByTestId("base-currency"), { target: { value: "INR" } });
+    fireEvent.click(screen.getByTestId("first-run-next"));
+    fireEvent.click(screen.getByTestId("first-run-submit"));
+
+    expect(await screen.findByTestId("company-home")).toHaveTextContent("Harbor Analytics");
+    expect(provisionTenant).toHaveBeenCalledWith("csrf-1", {
+      name: "Harbor Analytics",
+      homeRegion: "us-east-1",
+      ownerActorId: "ada",
+    });
+    expect(selectTenant).toHaveBeenCalledWith("csrf-1", selected.tenantId);
+  });
+
+  it("opens a new company when the actor does not own the matching name", async () => {
+    const existing = "44444444-4444-4444-8444-444444444444";
+    let lookups = 0;
+    vi.mocked(listCompanies).mockImplementation(async () => {
+      lookups += 1;
+      if (lookups === 1) return [];
+      return [
+        {
+          tenantId: existing,
+          name: "Harbor Analytics",
+          region: "us-east-1",
+          status: "active",
+          members: [{ actorId: "ada", role: "viewer" }],
+        },
+      ];
+    });
+
+    render(<StudioApp />);
+    expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("company-name"), { target: { value: "Harbor Analytics" } });
+    fireEvent.click(screen.getByTestId("first-run-next"));
+    fireEvent.change(screen.getByTestId("base-currency"), { target: { value: "INR" } });
+    fireEvent.click(screen.getByTestId("first-run-next"));
+    fireEvent.click(screen.getByTestId("first-run-submit"));
+
+    expect(await screen.findByTestId("company-home")).toHaveTextContent("Harbor Analytics");
+    expect(provisionTenant).toHaveBeenCalledTimes(1);
+    expect(selectTenant).toHaveBeenCalledWith("csrf-1", selected.tenantId);
   });
 });

@@ -40,3 +40,6 @@ CREATE POLICY actor_read ON tenant
         AND membership.status = 'active'
     )
   );
+
+CREATE INDEX membership_actor_active ON membership (actor_id)
+  WHERE status = 'active';

@@ -267,6 +267,7 @@ export interface CompanyCard {
   readonly name: string;
   readonly region: string;
   readonly status: string;
+  readonly members?: readonly { readonly actorId: string; readonly role: string }[];
 }
 
 export interface PlatformView {

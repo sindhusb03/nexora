@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { runMigrations, type SqlExecutor } from "../src/migrate.js";
 import type { AuditWrite } from "../src/records.js";
 import { schema } from "../src/schema.js";
+import { runWithRlsSession } from "../src/session-context.js";
 import { createLedgerStore } from "../src/store.js";
 
 /**
@@ -135,6 +136,12 @@ describe("actor company visibility", () => {
     await expect(store.listActorCompanies("actor-c")).resolves.toEqual([]);
     await expect(store.listRoles(harbor, "actor-a")).resolves.toEqual(["owner"]);
     await expect(store.listRoles(harbor, "actor-c")).resolves.toEqual([]);
+    await expect(store.listRoles(paused, "actor-a")).resolves.toEqual([]);
+    await expect(
+      runWithRlsSession({ actorId: "actor-b", tenantId: null }, () =>
+        store.listActorCompanies("actor-a"),
+      ),
+    ).rejects.toThrow(/signed-in session/);
     await expect(store.getTenant(harbor)).resolves.toMatchObject({
       tenantId: harbor,
       name: "Harbor",
@@ -177,5 +184,53 @@ describe("actor company visibility", () => {
         ),
       ),
     ).rejects.toThrow(/row-level security|permission denied|new row violates/i);
+
+    const updated = await asApp(client, "actor-a", null, (query) =>
+      query<{ role: string }>(
+        `UPDATE membership SET role = 'viewer' WHERE actor_id = 'actor-a' RETURNING role`,
+      ),
+    );
+    expect(updated.rows).toEqual([]);
+    const unchanged = await client.query<{ role: string }>(
+      `SELECT role FROM membership WHERE membership_id = $1`,
+      [seats[0].membershipId],
+    );
+    expect(unchanged.rows[0]?.role).toBe("owner");
+  });
+
+  it("returns the company that actor owns for the name and ignores a different tenant id", async () => {
+    const client = new PGlite();
+    await runMigrations(executor(client));
+    const store = createLedgerStore(drizzle({ client, schema }));
+    const first = await store.createTenant({
+      tenant: {
+        tenantId: harbor,
+        name: "Harbor Analytics",
+        homeRegion: "us-east-1",
+        status: "active",
+        createdAt: "2026-10-08T00:00:00.000Z",
+      },
+      ownerActorId: "actor-a",
+      membershipId: crypto.randomUUID(),
+      audit: audit(harbor, "actor-a"),
+    });
+    const second = await store.createTenant({
+      tenant: {
+        tenantId: other,
+        name: "  HARBOR   analytics ",
+        homeRegion: "eu-west-1",
+        status: "active",
+        createdAt: "2026-10-08T01:00:00.000Z",
+      },
+      ownerActorId: "actor-a",
+      membershipId: crypto.randomUUID(),
+      audit: audit(other, "actor-a"),
+    });
+    expect(first.tenantId).toBe(harbor);
+    expect(second.tenantId).toBe(harbor);
+    expect(second.homeRegion).toBe("us-east-1");
+    await expect(store.listActorCompanies("actor-a")).resolves.toEqual([
+      expect.objectContaining({ tenantId: harbor, name: "Harbor Analytics" }),
+    ]);
   });
 });

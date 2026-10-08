@@ -64,32 +64,7 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
     | keyof ReturnType<typeof createIngestionStore>
   > = {
     createTenant(input) {
-      return tenantTx(db, input.tenant.tenantId, async (tx) => {
-        await tx.insert(tenant).values({
-          tenantId: input.tenant.tenantId,
-          name: input.tenant.name,
-          homeRegion: input.tenant.homeRegion,
-          status: input.tenant.status,
-          createdAt: input.tenant.createdAt,
-        });
-        await tx.insert(membership).values({
-          membershipId: input.membershipId,
-          tenantId: input.tenant.tenantId,
-          actorId: input.ownerActorId,
-          role: "owner",
-          createdAt: input.tenant.createdAt,
-        });
-        await writeAudit(tx, input.tenant.tenantId, input.audit);
-        await writeRoleChangeAudit(tx, {
-          actorId: input.ownerActorId,
-          tenantId: input.tenant.tenantId,
-          role: "owner",
-          grantedBy: input.audit.actorId,
-          requestId: input.audit.correlationId,
-          occurredAt: input.tenant.createdAt,
-        });
-        return input.tenant;
-      });
+      return provisionOwnedTenant(db, input);
     },
 
     grantMembership(input) {
@@ -1031,6 +1006,86 @@ async function lockPeriod(tx: AppDatabase, tenantId: string, periodId: string, e
   return period;
 }
 
+function normalizeCompanyName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Opens a company for an owner. The lock and the lookup use the owner and the
+ * normalized name. A supplied tenant id is not a reason to return a different company.
+ */
+async function provisionOwnedTenant(
+  db: AppDatabase,
+  input: Parameters<LedgerStore["createTenant"]>[0],
+): Promise<TenantRecord> {
+  const normalized = normalizeCompanyName(input.tenant.name);
+  const lockKey = `${input.ownerActorId.length}:${input.ownerActorId}:${normalized}`;
+  try {
+    return await db.transaction(async (tx) => {
+      const scoped = tx as unknown as AppDatabase;
+      await scoped.execute(sql.raw("SET LOCAL ROLE nexora_app"));
+      await scoped.execute(sql`SELECT set_config('app.actor_id', ${input.ownerActorId}, true)`);
+      await scoped.execute(sql`SELECT set_config('app.tenant_id', '', true)`);
+      await scoped.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+      const owned = await scoped
+        .select({
+          tenantId: tenant.tenantId,
+          name: tenant.name,
+          homeRegion: tenant.homeRegion,
+          status: tenant.status,
+          createdAt: tenant.createdAt,
+        })
+        .from(membership)
+        .innerJoin(tenant, eq(membership.tenantId, tenant.tenantId))
+        .where(
+          and(
+            eq(membership.actorId, input.ownerActorId),
+            eq(membership.role, "owner"),
+            eq(membership.status, "active"),
+          ),
+        )
+        .orderBy(asc(tenant.createdAt), asc(tenant.tenantId));
+      const existing = owned.find((row) => normalizeCompanyName(row.name) === normalized);
+      if (existing) {
+        return {
+          tenantId: existing.tenantId,
+          name: existing.name,
+          homeRegion: existing.homeRegion,
+          status: existing.status === "suspended" ? "suspended" : "active",
+          createdAt: existing.createdAt,
+        } satisfies TenantRecord;
+      }
+      await scoped.execute(sql`SELECT set_config('app.tenant_id', ${input.tenant.tenantId}, true)`);
+      await scoped.insert(tenant).values({
+        tenantId: input.tenant.tenantId,
+        name: input.tenant.name,
+        homeRegion: input.tenant.homeRegion,
+        status: input.tenant.status,
+        createdAt: input.tenant.createdAt,
+      });
+      await scoped.insert(membership).values({
+        membershipId: input.membershipId,
+        tenantId: input.tenant.tenantId,
+        actorId: input.ownerActorId,
+        role: "owner",
+        createdAt: input.tenant.createdAt,
+      });
+      await writeAudit(scoped, input.tenant.tenantId, input.audit);
+      await writeRoleChangeAudit(scoped, {
+        actorId: input.ownerActorId,
+        tenantId: input.tenant.tenantId,
+        role: "owner",
+        grantedBy: input.audit.actorId,
+        requestId: input.audit.correlationId,
+        occurredAt: input.tenant.createdAt,
+      });
+      return input.tenant;
+    });
+  } catch (error) {
+    rethrowDomain(error);
+  }
+}
+
 export async function tenantTx<T>(
   db: AppDatabase,
   tenantId: string,
@@ -1056,6 +1111,10 @@ export async function actorTx<T>(
   actorId: string,
   fn: (tx: AppDatabase) => Promise<T>,
 ): Promise<T> {
+  const session = currentRlsSession();
+  if (session && session.actorId !== actorId) {
+    throw new KernelError("AUTH_SCOPE_DENIED", "The actor does not match the signed-in session");
+  }
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(sql.raw("SET LOCAL ROLE nexora_app"));

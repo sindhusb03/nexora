@@ -1,4 +1,10 @@
-export { createPgliteStore, createPostgresStore, migratePostgres, openPostgres } from "./client.js";
+export {
+  createPgliteFixture,
+  createPgliteStore,
+  createPostgresStore,
+  migratePostgres,
+  openPostgres,
+} from "./client.js";
 export type { AppDatabase, PostgresRuntime, PostgresRuntimeReport } from "./client.js";
 export { loadMigrationSql, loadMigrations, MIGRATION_NAMES } from "./migration.js";
 export { MigrationError, migrationStatus, runMigrations } from "./migrate.js";

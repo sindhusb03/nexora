@@ -18,10 +18,27 @@ export type AppDatabase = PgliteDatabase<typeof schema>;
 
 /** Embedded Postgres for tests and local development. Every migration is applied through the runner. */
 export async function createPgliteStore(): Promise<LedgerStore> {
+  const { store } = await createPgliteFixture();
+  return store;
+}
+
+/** Store plus a superuser query, so tests can arrange rows the app role cannot write. */
+export async function createPgliteFixture(): Promise<{
+  store: LedgerStore;
+  query<R extends Record<string, unknown>>(
+    text: string,
+    params?: readonly unknown[],
+  ): Promise<{ rows: R[] }>;
+}> {
   const client = new PGlite();
   await runMigrations(pgliteExecutor(client));
-  const database = drizzle({ client, schema });
-  return createLedgerStore(database);
+  return {
+    store: createLedgerStore(drizzle({ client, schema })),
+    async query<R extends Record<string, unknown>>(text: string, params?: readonly unknown[]) {
+      const result = await client.query<R>(text, params ? [...params] : undefined);
+      return { rows: result.rows };
+    },
+  };
 }
 
 export interface PostgresRuntimeReport {

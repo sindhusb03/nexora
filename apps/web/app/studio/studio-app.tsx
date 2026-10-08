@@ -77,6 +77,13 @@ import { SignInScreen, TwoFactorPanel } from "./sign-in";
 import type { AuthConfigView } from "./api";
 import type { CompanyCard, CopilotReply, PlatformView, SessionView, Workspace } from "./types";
 
+function ownsCompany(company: CompanyCard, name: string, actorId: string): boolean {
+  return (
+    company.name === name &&
+    (company.members ?? []).some((member) => member.actorId === actorId && member.role === "owner")
+  );
+}
+
 const NAV_ICONS: Record<string, typeof Inbox> = {
   dashboard: LayoutDashboard,
   onboarding: Upload,
@@ -268,7 +275,7 @@ export function StudioApp() {
         if (!provisioned.current) {
           const listed = await listCompanies(active.csrfToken);
           const existing =
-            listed.find((company) => company.name === input.name) ?? listed[0] ?? null;
+            listed.find((company) => ownsCompany(company, input.name, active.actorId)) ?? null;
           if (existing) {
             provisioned.current = {
               tenantId: existing.tenantId,
