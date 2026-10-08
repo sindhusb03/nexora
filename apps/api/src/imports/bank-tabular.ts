@@ -867,10 +867,12 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   if (ascending && descending && transactions.length > 1 && opening === null)
     issue("balance_mismatch", "Same-day transaction order needs confirmation");
   let running = opening === null ? null : new AnalyticalDecimal(opening);
+  let runningMismatch = false;
   for (const txn of ordered) {
     const stated = balances.get(txn);
     if (running) running = running.add(txn.amount);
     if (stated && running && !running.eq(stated.amount)) {
+      runningMismatch = true;
       issue(
         "balance_mismatch",
         "Running balance does not roll forward from the prior row",
@@ -935,9 +937,6 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   if (balanceCol >= 0 && closing !== null) {
     const closingReconciles =
       opening !== null && new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(closing);
-    const runningMismatch = issues.some((i) =>
-      i.message.startsWith("Running balance does not roll forward"),
-    );
     const lastPrintedBalance = body
       .map((line) => money(tokenAt(line, balanceCol)))
       .filter((amount): amount is string => amount !== null)

@@ -95,7 +95,7 @@ describe("bank row classification and balance safety", () => {
     expect(result.bank?.transactions.map((t) => t.amount)).toEqual(["-10.00", "-5.00"]);
     expect(result.issues.map((i) => i.code)).toContain("balance_mismatch");
   });
-  it("quarantines a conflicting labelled closing while keeping all three transactions", () => {
+  it("keeps a reconciling labelled closing and sends a running-balance conflict to review", () => {
     const result = parseBankText(conflictText);
     expect(result.bank?.opening).toBe("2500.00");
     expect(result.bank?.closing).toBe("3812.90");

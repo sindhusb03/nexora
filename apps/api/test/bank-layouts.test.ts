@@ -112,6 +112,38 @@ describe("bank uploads preserve values and traps persist open exceptions without
 });
 
 describe("generic held-out bank layouts", () => {
+  it("reads a bare Value as signed amount and keeps Value date distinct from Amount", () => {
+    const signed = parseBankText(
+      [
+        "Currency: GBP",
+        "Date,Description,Value,Balance",
+        ",Opening balance,,2500.00",
+        "2024-12-13,Water,-92.10,2407.90",
+        "2024-12-14,Receipt,20.00,2427.90",
+        ",Closing balance,,2427.90",
+      ].join("\n"),
+    );
+    expect(signed.issues).toEqual([]);
+    expect(signed.bank?.transactions.map((t) => [t.date, t.amount])).toEqual([
+      ["2024-12-13", "-92.10"],
+      ["2024-12-14", "20.00"],
+    ]);
+    const dated = parseBankText(
+      [
+        "Currency: GBP",
+        "Value date,Description,Amount,Balance",
+        ",Opening balance,,2500.00",
+        "2024-12-13,Water,-92.10,2407.90",
+        "2024-12-14,Receipt,20.00,2427.90",
+        ",Closing balance,,2427.90",
+      ].join("\n"),
+    );
+    expect(dated.issues).toEqual([]);
+    expect(dated.bank?.transactions.map((t) => [t.date, t.amount])).toEqual([
+      ["2024-12-13", "-92.10"],
+      ["2024-12-14", "20.00"],
+    ]);
+  });
   it("reads signed Value headers, strips narration apostrophes and leaves summaries absent", () => {
     for (const header of ["Value", "Bedrag", "Betrag", "Importe", "Montant"]) {
       const result = parseBankText(

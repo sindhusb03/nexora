@@ -330,7 +330,123 @@ function textWorkbook(rows: string[][]): Uint8Array {
   ]);
 }
 
+const uncertainPeriods = [
+  {
+    id: "portuguese-interim",
+    format: "pdf" as const,
+    rows: [
+      ["Demonstração dos resultados por naturezas"],
+      ["Período findo em 30 de junho de 2024 (montantes expressos em euros)"],
+      ["Account", "2024", "2023"],
+      ["Revenue", "2976247", "2000000"],
+    ],
+  },
+  ...["30.06.2024", "30. Juni 2024"].map((date) => ({
+    id: `swiss-interim-${date}`,
+    format: "xlsx" as const,
+    rows: [
+      [`Erfolgsrechnung per ${date}`, "CHF"],
+      ["Account", "Geschäftsjahr 2024", "Geschäftsjahr 2023"],
+      ["Revenue", "3000000.00", "2500000.00"],
+    ],
+  })),
+  {
+    id: "spanish-undated-neto",
+    format: "xlsx" as const,
+    rows: [
+      ["Balance de situación — Activo", "EUR"],
+      ["ACTIVO", "Neto 2024", "Neto 2023"],
+      ["Fixed assets", "3300.25", "3000.25"],
+    ],
+  },
+];
+
+describe("uncertain localized periods", () => {
+  it.each(uncertainPeriods)("holds period values for review: $id", async (fixture) => {
+    const bytes = encodeGrid(fixture.rows, fixture.format, "Report");
+    const fileName = `${fixture.id}.${fixture.format}`;
+    const result = await selectDocumentParser(fileName, bytes).parse({ fileName, bytes });
+    expect(result.cells).toEqual([]);
+    if (fixture.id === "portuguese-interim") {
+      // The PDF path raises a different review message for this case; no values are saved.
+      expect(result.issues.length).toBeGreaterThan(0);
+    } else {
+      expect(result.issues.some((i) => i.message.includes("Confirm period end"))).toBe(true);
+    }
+    // Neither an organization calendar nor an annual header can supply missing title evidence.
+    expect(
+      resolveStatementPeriods(
+        fixture.rows.at(-2)!.slice(1),
+        fixture.rows.slice(0, -2).flat().join("\n"),
+        { month: 12, day: 31 },
+      ),
+    ).toEqual([null, null]);
+  });
+
+  it.each(uncertainPeriods)("stores no values or auto-posts: $id", async (fixture) => {
+    const app = await testApp();
+    await sessions(app).register("platform-admin", "owner-period");
+    const tenant = await call(app, "POST", "/v1/tenants", {
+      actor: "platform-admin",
+      region: "us-east-1",
+      body: { name: fixture.id, homeRegion: "us-east-1", ownerActorId: "owner-period" },
+    });
+    expect(tenant.status).toBe(201);
+    const { tenantId } = (await tenant.json()) as { tenantId: string };
+    const options = { actor: "owner-period", tenant: tenantId, region: "us-east-1" };
+    const entity = await call(app, "POST", "/v1/entities", {
+      ...options,
+      body: {
+        legalName: fixture.id,
+        functionalCurrency: fixture.id.startsWith("swiss") ? "CHF" : "EUR",
+      },
+    });
+    expect(entity.status).toBe(201);
+    const { entityId } = (await entity.json()) as { entityId: string };
+    const session = await sessions(app).session("owner-period", "us-east-1", tenantId);
+    if (session instanceof Response) throw new Error("Missing session");
+    const form = new FormData();
+    form.set("entityId", entityId);
+    form.set(
+      "file",
+      new File(
+        [Buffer.from(encodeGrid(fixture.rows, fixture.format, "Report"))],
+        `${fixture.id}.${fixture.format}`,
+      ),
+    );
+    const upload = await app.request("/ingestion/uploads", {
+      method: "POST",
+      headers: {
+        cookie: session.cookie,
+        "x-csrf-token": session.csrfToken,
+        "idempotency-key": fixture.id,
+      },
+      body: form,
+    });
+    expect(upload.status).toBe(201);
+    const job = (await upload.json()) as { jobId: string; status: string };
+    expect(job.status).toBe("needs_review");
+    const values = await call(app, "GET", `/ingestion/jobs/${job.jobId}/values`, options);
+    expect(await values.json()).toMatchObject({ values: [] });
+    const journals = await call(app, "GET", `/v1/entities/${entityId}/journals`, options);
+    expect(await journals.json()).toMatchObject({ journals: [] });
+  });
+});
+
 describe("held-out localized statement semantics", () => {
+  it("resolves Neto years only from an explicit as-at title date", () => {
+    const labels = ["Neto 2024", "Neto 2023"];
+    expect(
+      resolveStatementPeriods(
+        labels,
+        "Balance de situación al 30 de junio de 2024 — Activo",
+        null,
+      ).map((p) => p?.periodEnd),
+    ).toEqual(["2024-06-30", "2023-06-30"]);
+    expect(
+      resolveStatementPeriods(labels, "Balance de situación — Activo", { month: 12, day: 31 }),
+    ).toEqual([null, null]);
+  });
   it("reads Swiss German fiscal years and text amounts with apostrophe thousands", async () => {
     const bytes = textWorkbook([
       ["Erfolgsrechnung per 31. Dezember 2024", "CHF"],
