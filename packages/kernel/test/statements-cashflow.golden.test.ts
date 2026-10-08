@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStatements, hashMaterial, type ClassifiedLine } from "../src/index.js";
+import { KernelError, buildStatements, hashMaterial, type ClassifiedLine } from "../src/index.js";
 
 function line(
   accountId: string,
@@ -33,6 +33,21 @@ const statements = (lines: readonly ClassifiedLine[]) =>
 describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.2.1)", () => {
   it("records the formula version", () => {
     expect(statements(opening).engineVersion).toBe("fe-kernel-0.2.1");
+  });
+
+  it("rejects journal cash movement without a matching counterpart with a kernel error", () => {
+    const build = () =>
+      statements([
+        line("cash", "asset", "cash", 10, 0, "one-sided"),
+        line("receivable", "asset", "cfo", 10, 0, "one-sided"),
+      ]);
+    expect(build).toThrow(KernelError);
+    expect(build).toThrow(
+      expect.objectContaining({
+        code: "FIN_STATEMENT_IMBALANCE",
+        message: "Journal one-sided cash movement has no counterpart",
+      }),
+    );
   });
 
   it("excludes equipment financed entirely by a loan from CFI and CFF", () => {

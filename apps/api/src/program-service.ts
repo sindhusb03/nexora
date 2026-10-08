@@ -302,6 +302,17 @@ async function readValuationVersion(store: LedgerStore, actor: ActorContext, id:
   };
 }
 
+function isOutdatedFinancialEngine(version: string | null | undefined): boolean {
+  const match = version?.match(/^fe-kernel-(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return true;
+  const minimum = [0n, 2n, 1n];
+  for (let index = 0; index < minimum.length; index++) {
+    const component = BigInt(match[index + 1]!);
+    if (component !== minimum[index]!) return component < minimum[index]!;
+  }
+  return false;
+}
+
 async function transitionFinancialState(
   store: LedgerStore,
   actor: ActorContext,
@@ -317,6 +328,15 @@ async function transitionFinancialState(
   const target = asStatus(to);
   if (target === "published") {
     assertCanPublish({ calculationStatus: current.calculationStatus, from });
+    if (!current.calculationRunId) {
+      throw new KernelError("PUBLISH_BLOCKED", "Financial state has no kernel calculation run");
+    }
+    if (isOutdatedFinancialEngine(current.engineVersion)) {
+      throw new KernelError(
+        "PUBLISH_BLOCKED",
+        "Financial state was calculated by an outdated engine version",
+      );
+    }
     const maker = readMaker(current.payload);
     assertMakerChecker(maker, actor.actorId);
   } else {

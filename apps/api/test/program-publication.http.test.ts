@@ -243,6 +243,55 @@ describe("kernel-derived financial state and atomic publication", () => {
     },
   );
 
+  it("refuses to publish a legacy draft without a kernel calculation run", async () => {
+    const current = await draft();
+    const stored = await store.getFinancialState(tenantId, current.financialStateId);
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await store.insertFinancialState({
+      tenantId,
+      id,
+      entityId,
+      periodId,
+      basis: "us-gaap",
+      currency: "USD",
+      stateHash: current.stateHash,
+      status: "draft",
+      engineVersion: stored!.engineVersion,
+      calculationStatus: "succeeded",
+      calculationRunId: null,
+      supersedesId: null,
+      makerActorId: "owner-1",
+      payload: stored!.payload as Record<string, unknown>,
+      createdAt: now,
+      audit: {
+        eventId: crypto.randomUUID(),
+        eventType: "LegacyStateFixture",
+        aggregateType: "financial_state",
+        aggregateId: id,
+        actorId: "owner-1",
+        correlationId: crypto.randomUUID(),
+        occurredAt: now,
+        payload: {},
+      },
+    });
+    let approvedId: string = id;
+    for (const to of ["validated", "review", "approved"]) {
+      const response = await transition(approvedId, to, "controller-1");
+      expect(response.status).toBe(200);
+      approvedId = ((await response.json()) as { financialStateId: string }).financialStateId;
+    }
+    const before = attemptedSuccessors.length;
+    const result = await transition(approvedId, "published", "controller-1");
+    expect(result.status).toBe(409);
+    expect(await result.json()).toMatchObject({ error: { code: "PUBLISH_BLOCKED" } });
+    const successors = await Promise.all(
+      attemptedSuccessors.slice(before).map((nextId) => store.getFinancialState(tenantId, nextId)),
+    );
+    expect(successors.filter((state) => state?.status === "published")).toHaveLength(0);
+    expect(await store.listLineage(tenantId, "financial_state", approvedId)).toHaveLength(0);
+  });
+
   it("uses the stored failed calculation status when checking publication", async () => {
     const current = await draft();
     const stored = await store.getFinancialState(tenantId, current.financialStateId);

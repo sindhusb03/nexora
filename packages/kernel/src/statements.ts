@@ -219,6 +219,12 @@ export function buildStatements(input: {
               : 1,
         );
       const total = counterparts.reduce((sum, { amount }) => sum + amount, 0n);
+      if (total === 0n) {
+        throw new KernelError(
+          "FIN_STATEMENT_IMBALANCE",
+          `Journal ${lines[0]!.journalId!} cash movement has no counterpart`,
+        );
+      }
       const allocations = counterparts.map(({ line, amount }) => ({
         line,
         amount: (cashDelta * amount) / total,
