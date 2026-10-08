@@ -26,7 +26,12 @@ describe("workspace MVP", () => {
         revenueMinor: string;
       };
       statements: {
-        periods: unknown[];
+        periods: {
+          final: boolean;
+          policy: { label: string };
+          issues: unknown[];
+          notices: unknown[];
+        }[];
         unavailablePeriods: unknown[];
         rows: { key: string; values: { minor: string }[] }[];
       };
@@ -46,6 +51,9 @@ describe("workspace MVP", () => {
     expect(body.latest.revenueMinor).toBe("15800000");
     expect(body.statements.periods.length).toBe(22);
     expect(body.statements.unavailablePeriods).toEqual([]);
+    expect(body.statements.periods.every((period) => period.final)).toBe(true);
+    expect(body.statements.periods.every((period) => period.policy.label === "IFRS 16")).toBe(true);
+    expect(body.statements.periods.every((period) => period.issues.length === 0)).toBe(true);
     const row = (key: string) => body.statements.rows.find((item) => item.key === key);
     expect(row("cfo")?.values[0]?.minor).toBe("0");
     expect(row("cfi")?.values[0]?.minor).toBe("0");

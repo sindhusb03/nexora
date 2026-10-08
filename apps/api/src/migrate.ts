@@ -1,4 +1,4 @@
-import { migratePostgres, MigrationError } from "@nexora/db";
+import { assertStoredCurrencyScales, migratePostgres } from "@nexora/db";
 
 import { errorFields, jsonLogger } from "./observability.js";
 
@@ -26,10 +26,12 @@ try {
     baselined: report.baselined.join(",") || null,
     alreadyApplied: report.skipped.length,
   });
+  await assertStoredCurrencyScales(url);
+  logger.info("currency_scale.ok", { message: "No stored currency uses a scale that changed." });
 } catch (error) {
   logger.error("migrate.failed", {
     ...errorFields(error),
-    message: error instanceof MigrationError ? error.message : null,
+    message: error instanceof Error ? error.message : null,
   });
   process.exit(1);
 }

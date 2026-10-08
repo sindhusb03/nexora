@@ -5,6 +5,7 @@ import {
   buildCashForecast,
   buildQoeBridge,
   buildStatements,
+  DEFAULT_STATEMENT_POLICY,
   currencyScale,
   explainVariance,
   forecastScenario,
@@ -21,6 +22,11 @@ import type { Hono } from "hono";
 import { z } from "zod";
 
 import { classifyPostedActivity, displaySourceRef } from "../classify-activity.js";
+import {
+  plainStatementMessage,
+  presentStatementFindings,
+  presentStatementPolicy,
+} from "../statement-presentation.js";
 import { answerCopilot, isAgent } from "../copilot/answer.js";
 import { cashWeekInputs, PLAN_BUDGET, PLANNING_DRIVERS } from "../demo/books.js";
 import { ApiError, readActor, type ActorContext, type AppEnv } from "../http.js";
@@ -386,6 +392,7 @@ async function snapshot(
           activity.filter((line) => line.periodStart <= period.endDate),
           period,
         ),
+        policy: DEFAULT_STATEMENT_POLICY,
       });
       return [{ period, statement }];
     } catch (error) {
@@ -395,9 +402,16 @@ async function snapshot(
         !(error instanceof KernelError) ||
         error.code !== "FIN_STATEMENT_IMBALANCE" ||
         period.periodId === selectedPeriod.periodId
-      )
+      ) {
+        if (error instanceof KernelError && error.code === "FIN_STATEMENT_IMBALANCE") {
+          throw new KernelError(error.code, plainStatementMessage(error.message));
+        }
         throw error;
-      unavailablePeriods.push({ periodId: period.periodId, reason: error.message });
+      }
+      unavailablePeriods.push({
+        periodId: period.periodId,
+        reason: plainStatementMessage(error.message),
+      });
       return [];
     }
   });
@@ -612,12 +626,19 @@ async function snapshot(
     ],
     statements: {
       unavailablePeriods,
-      periods: series.map((item) => ({
-        periodId: item.period.periodId,
-        label: item.period.endDate.slice(0, 7),
-        inputHash: item.statement.inputHash,
-        engineVersion: item.statement.engineVersion,
-      })),
+      periods: series.map((item) => {
+        const findings = presentStatementFindings(item.statement);
+        return {
+          periodId: item.period.periodId,
+          label: item.period.endDate.slice(0, 7),
+          inputHash: item.statement.inputHash,
+          engineVersion: item.statement.engineVersion,
+          policy: presentStatementPolicy(DEFAULT_STATEMENT_POLICY),
+          final: item.statement.issues.length === 0,
+          issues: findings.issues,
+          notices: findings.notices,
+        };
+      }),
       rows: statementRows(series, currency),
     },
     journals: journals.map((journal) => ({

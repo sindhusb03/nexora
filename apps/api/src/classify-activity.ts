@@ -1,12 +1,14 @@
 import type { PostedActivityLine } from "@nexora/db";
 import { KernelError, type ClassifiedLine } from "@nexora/kernel";
 
+/**
+ * Stored form of journalKind "opening". Written only when the post asks for
+ * an opening journal. A source reference the caller typed is never enough.
+ */
 const OPENING_PREFIX = "opening:";
-const LEGACY_OPENING_LABEL = "Opening trial balance";
 
 export function journalKindFromSource(sourceRef: string | null | undefined): "opening" | undefined {
-  if (!sourceRef) return undefined;
-  if (sourceRef.startsWith(OPENING_PREFIX) || sourceRef === LEGACY_OPENING_LABEL) return "opening";
+  if (sourceRef?.startsWith(OPENING_PREFIX)) return "opening";
   return undefined;
 }
 
@@ -18,10 +20,13 @@ export function displaySourceRef(sourceRef: string | null): string | null {
 
 export function openingSourceRef(label: string | null | undefined): string {
   const text = label?.replace(/^opening:/, "").trim();
-  return `${OPENING_PREFIX}${text && text.length > 0 ? text : LEGACY_OPENING_LABEL}`;
+  return `${OPENING_PREFIX}${text && text.length > 0 ? text : "Opening trial balance"}`;
 }
 
-/** One classifier for the statements API and the workspace snapshot. */
+/**
+ * One classifier for the statements API and the workspace snapshot.
+ * Journal lines do not store a per-line label, so sourceLabel is omitted.
+ */
 export function classifyPostedActivity(
   activity: readonly PostedActivityLine[],
   period: { readonly periodId: string; readonly startDate: string },

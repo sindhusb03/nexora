@@ -246,6 +246,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.3.14
         version: 0.3.16
+      '@nexora/currency':
+        specifier: workspace:*
+        version: link:../currency
       '@nexora/kernel':
         specifier: workspace:*
         version: link:../kernel

@@ -30,3 +30,8 @@ export type { RlsSessionContext } from "./session-context.js";
 export { schema } from "./schema.js";
 export { ingestionSchema } from "./ingestion-schema.js";
 export { createLedgerStore, isUniqueViolation } from "./store.js";
+export {
+  assertCurrencyScaleVisible,
+  assertStoredCurrencyScales,
+  STORED_CURRENCY_SQL,
+} from "./currency-scale-check.js";

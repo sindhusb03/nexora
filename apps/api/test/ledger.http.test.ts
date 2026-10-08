@@ -130,6 +130,10 @@ describe("financial kernel API", () => {
       };
       cashFlow: Record<string, { minor: string }>;
       retainedEarnings: { ending: { minor: string }; close: string };
+      final: boolean;
+      policy: { label: string; leaseAccounting: string };
+      issues: unknown[];
+      notices: unknown[];
     }>(statements);
     expect(body.incomeStatement.netIncome).toEqual({
       minor: "50000",
@@ -149,6 +153,10 @@ describe("financial kernel API", () => {
     expect(body.retainedEarnings.ending.minor).toBe("145000");
     expect(body.retainedEarnings.close).toBe("derived");
     expect(body.engineVersion).toBe("fe-kernel-0.3.0");
+    expect(body.final).toBe(true);
+    expect(body.policy).toEqual({ label: "IFRS 16", leaseAccounting: "ifrs16" });
+    expect(body.issues).toEqual([]);
+    expect(body.notices).toEqual([]);
 
     await call(app, "POST", "/v1/memberships", {
       actor: "owner-1",
@@ -309,6 +317,331 @@ describe("financial kernel API", () => {
     });
     expect(rejected.status).toBe(400);
   });
+
+  it("treats only an explicit opening journal as opening, and only in the first period", async () => {
+    const provision = await call(app, "POST", "/v1/tenants", {
+      actor: "platform-admin",
+      region: "us-east-1",
+      body: { name: "Opening books", homeRegion: "us-east-1", ownerActorId: "owner-1" },
+    });
+    const tenantId = (await readJson<{ tenantId: string }>(provision)).tenantId;
+    const entityId = (
+      await readJson<{ entityId: string }>(
+        await call(app, "POST", "/v1/entities", {
+          actor: "owner-1",
+          tenant: tenantId,
+          region: "us-east-1",
+          body: { legalName: "Opening Co", functionalCurrency: "USD" },
+        }),
+      )
+    ).entityId;
+    const cash = await account(app, tenantId, entityId, "1000", "Cash", "asset", "cash");
+    const revenue = await account(app, tenantId, entityId, "4000", "Revenue", "revenue", "cfo");
+    const re = await account(
+      app,
+      tenantId,
+      entityId,
+      "3000",
+      "Retained earnings",
+      "equity",
+      "non_cash",
+      true,
+    );
+    const first = await period(app, tenantId, entityId, "2024-01-01", "2024-12-31");
+    const later = await period(app, tenantId, entityId, "2025-01-01", "2025-12-31");
+
+    const opened = await journal(
+      app,
+      tenantId,
+      entityId,
+      first,
+      "open-kind",
+      [
+        [cash, "10.00", "0.00"],
+        [re, "0.00", "10.00"],
+      ],
+      "owner-1",
+      { journalKind: "opening", sourceRef: "Opening trial balance" },
+    );
+    expect(opened.status).toBe(201);
+    const openingStatement = await readJson<{
+      final: boolean;
+      policy: { label: string };
+      cashFlow: {
+        beginningCash: { minor: string };
+        cfo: { minor: string };
+        endingCash: { minor: string };
+      };
+      retainedEarnings: { opening: { minor: string } };
+    }>(
+      await call(app, "GET", `/v1/entities/${entityId}/periods/${first}/statements`, {
+        actor: "owner-1",
+        tenant: tenantId,
+        region: "us-east-1",
+      }),
+    );
+    expect(openingStatement.final).toBe(true);
+    expect(openingStatement.policy.label).toBe("IFRS 16");
+    expect(openingStatement.cashFlow).toMatchObject({
+      beginningCash: { minor: "1000" },
+      cfo: { minor: "0" },
+      endingCash: { minor: "1000" },
+    });
+    expect(openingStatement.retainedEarnings.opening.minor).toBe("1000");
+
+    const labeled = await journal(
+      app,
+      tenantId,
+      entityId,
+      first,
+      "label-only",
+      [
+        [cash, "5.00", "0.00"],
+        [revenue, "0.00", "5.00"],
+      ],
+      "owner-1",
+      { sourceRef: "Opening trial balance" },
+    );
+    expect(labeled.status).toBe(201);
+    const afterLabel = await readJson<{
+      incomeStatement: { netIncome: { minor: string } };
+      cashFlow: { beginningCash: { minor: string }; cfo: { minor: string } };
+    }>(
+      await call(app, "GET", `/v1/entities/${entityId}/periods/${first}/statements`, {
+        actor: "owner-1",
+        tenant: tenantId,
+        region: "us-east-1",
+      }),
+    );
+    expect(afterLabel.incomeStatement.netIncome.minor).toBe("500");
+    expect(afterLabel.cashFlow.beginningCash.minor).toBe("1000");
+    expect(afterLabel.cashFlow.cfo.minor).toBe("500");
+
+    const forged = await journal(
+      app,
+      tenantId,
+      entityId,
+      first,
+      "forged-prefix",
+      [
+        [cash, "1.00", "0.00"],
+        [revenue, "0.00", "1.00"],
+      ],
+      "owner-1",
+      { journalKind: "standard", sourceRef: "opening:forged" },
+    );
+    expect(forged.status).toBe(422);
+    const forgedBody = await readJson<{ error: { message: string } }>(forged);
+    expect(forgedBody.error.message).toMatch(/opening journal/i);
+    expect(forgedBody.error.message).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    );
+
+    const late = await journal(
+      app,
+      tenantId,
+      entityId,
+      later,
+      "late-opening",
+      [
+        [cash, "1.00", "0.00"],
+        [re, "0.00", "1.00"],
+      ],
+      "owner-1",
+      { journalKind: "opening" },
+    );
+    expect(late.status).toBe(422);
+    const lateBody = await readJson<{ error: { message: string } }>(late);
+    expect(lateBody.error.message).toMatch(/first period/i);
+
+    const quiet = await call(app, "POST", "/v1/entities", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: { legalName: "Quiet Co", functionalCurrency: "USD" },
+    });
+    const quietId = (await readJson<{ entityId: string }>(quiet)).entityId;
+    const quietCash = await account(app, tenantId, quietId, "1000", "Cash", "asset", "cash");
+    const quietRe = await account(
+      app,
+      tenantId,
+      quietId,
+      "3000",
+      "Retained earnings",
+      "equity",
+      "non_cash",
+      true,
+    );
+    await period(app, tenantId, quietId, "2024-01-01", "2024-12-31");
+    const quietLater = await period(app, tenantId, quietId, "2025-01-01", "2025-12-31");
+    const beforeActivity = await journal(
+      app,
+      tenantId,
+      quietId,
+      quietLater,
+      "before-activity",
+      [
+        [quietCash, "4.00", "0.00"],
+        [quietRe, "0.00", "4.00"],
+      ],
+      "owner-1",
+      { journalKind: "opening" },
+    );
+    expect(beforeActivity.status).toBe(201);
+  });
+
+  it("returns blocking statement findings and plain failure text", async () => {
+    const provision = await call(app, "POST", "/v1/tenants", {
+      actor: "platform-admin",
+      region: "us-east-1",
+      body: { name: "Findings books", homeRegion: "us-east-1", ownerActorId: "owner-1" },
+    });
+    const tenantId = (await readJson<{ tenantId: string }>(provision)).tenantId;
+    const entityId = (
+      await readJson<{ entityId: string }>(
+        await call(app, "POST", "/v1/entities", {
+          actor: "owner-1",
+          tenant: tenantId,
+          region: "us-east-1",
+          body: { legalName: "Findings Co", functionalCurrency: "USD" },
+        }),
+      )
+    ).entityId;
+    const cash = await account(app, tenantId, entityId, "cash", "Cash", "asset", "cash");
+    const fa = await account(
+      app,
+      tenantId,
+      entityId,
+      "fixed_assets",
+      "Fixed assets",
+      "asset",
+      "cfi",
+    );
+    const accum = await account(
+      app,
+      tenantId,
+      entityId,
+      "accumulated_depreciation",
+      "Accumulated depreciation",
+      "asset",
+      "non_cash",
+    );
+    const rouAccum = await account(
+      app,
+      tenantId,
+      entityId,
+      "rou_accumulated_depreciation",
+      "Accumulated depreciation on right-of-use assets",
+      "asset",
+      "non_cash",
+    );
+    const gain = await account(
+      app,
+      tenantId,
+      entityId,
+      "gain_loss_on_disposal",
+      "Gain or loss on disposal",
+      "revenue",
+      "cfi",
+    );
+    const dep = await account(
+      app,
+      tenantId,
+      entityId,
+      "depreciation",
+      "Depreciation",
+      "expense",
+      "non_cash",
+    );
+    await account(
+      app,
+      tenantId,
+      entityId,
+      "retained_earnings",
+      "Retained earnings",
+      "equity",
+      "non_cash",
+      true,
+    );
+    const current = await period(app, tenantId, entityId, "2024-01-01", "2024-12-31");
+    expect(
+      (
+        await journal(app, tenantId, entityId, current, "sale", [
+          [cash, "3.00", "0.00"],
+          [accum, "6.00", "0.00"],
+          [fa, "0.00", "8.00"],
+          [gain, "0.00", "1.00"],
+        ])
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await journal(app, tenantId, entityId, current, "da", [
+          [dep, "12.00", "0.00"],
+          [accum, "0.00", "10.00"],
+          [rouAccum, "0.00", "2.00"],
+        ])
+      ).status,
+    ).toBe(201);
+
+    const response = await call(
+      app,
+      "GET",
+      `/v1/entities/${entityId}/periods/${current}/statements`,
+      { actor: "owner-1", tenant: tenantId, region: "us-east-1" },
+    );
+    expect(response.status).toBe(200);
+    const body = await readJson<{
+      final: boolean;
+      policy: { label: string };
+      cashFlow: { cfi: { minor: string } };
+      issues: { code: string; message: string; action: string }[];
+      notices: unknown[];
+    }>(response);
+    expect(body.final).toBe(false);
+    expect(body.policy.label).toBe("IFRS 16");
+    expect(body.cashFlow.cfi.minor).toBe("300");
+    expect(body.issues).toHaveLength(1);
+    expect(body.issues[0]?.code).toBe("depreciation_split_needed");
+    expect(body.issues[0]?.message).toMatch(/Split it so asset sales are read correctly/);
+    expect(body.issues[0]?.message).not.toBe("depreciation_split_needed");
+    expect(body.issues[0]?.action).toMatch(/Split the combined depreciation line/);
+    expect(body.notices).toEqual([]);
+
+    const mystery = await account(
+      app,
+      tenantId,
+      entityId,
+      "mystery_equity",
+      "Unclassified equity",
+      "equity",
+      "non_cash",
+    );
+    expect(
+      (
+        await journal(app, tenantId, entityId, current, "ambiguous", [
+          [cash, "1.00", "0.00"],
+          [mystery, "0.00", "1.00"],
+        ])
+      ).status,
+    ).toBe(201);
+    const failed = await call(
+      app,
+      "GET",
+      `/v1/entities/${entityId}/periods/${current}/statements`,
+      { actor: "owner-1", tenant: tenantId, region: "us-east-1" },
+    );
+    expect(failed.status).toBe(422);
+    const failure = await readJson<{ error: { code: string; message: string } }>(failed);
+    expect(failure.error.code).toBe("FIN_STATEMENT_IMBALANCE");
+    expect(failure.error.message).toBe(
+      "Cash in this journal needs a cash-flow class. Set the class on the account the cash settles.",
+    );
+    expect(failure.error.message).not.toMatch(/Cash classification needed/);
+    expect(failure.error.message).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    );
+  });
 });
 
 async function account(
@@ -356,6 +689,7 @@ async function journal(
   idempotency: string,
   lines: ReadonlyArray<readonly [string, string, string]>,
   actor = "owner-1",
+  extras: { sourceRef?: string; journalKind?: "opening" | "standard" } = {},
 ): Promise<Response> {
   return call(app, "POST", "/v1/journals", {
     actor,
@@ -366,6 +700,8 @@ async function journal(
       entityId,
       periodId,
       currency: "USD",
+      ...(extras.sourceRef === undefined ? {} : { sourceRef: extras.sourceRef }),
+      ...(extras.journalKind === undefined ? {} : { journalKind: extras.journalKind }),
       lines: lines.map(([accountId, debit, credit]) => ({ accountId, debit, credit })),
     },
   });

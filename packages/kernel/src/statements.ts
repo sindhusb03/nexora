@@ -14,6 +14,19 @@ export interface StatementPolicy {
   readonly interestPaid?: "cfo" | "cff";
 }
 
+/**
+ * IFRS 16 is the statement default until an entity framework is stored.
+ * Callers may still pass ASC 842. The API does not, because that setting
+ * needs an approved schema change.
+ */
+export const DEFAULT_STATEMENT_POLICY: StatementPolicy = { leaseAccounting: "ifrs16" };
+
+export function statementPolicyLabel(leaseAccounting: LeaseAccounting = "ifrs16"): string {
+  if (leaseAccounting === "asc842_finance") return "ASC 842 finance";
+  if (leaseAccounting === "asc842_operating") return "ASC 842 operating";
+  return "IFRS 16";
+}
+
 export interface ClassifiedLine {
   readonly journalId?: string;
   readonly accountId: string;
@@ -271,6 +284,7 @@ export function buildStatements(input: {
     input.policy?.leaseAccounting ?? "ifrs16",
     movementLines,
   );
+  reclassifyInvestingCollections(flows, input.lines, journals);
   if (balanceCheck !== 0n) {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", "Classified lines are not in balance");
   }
@@ -409,6 +423,10 @@ function classifyJournal(
   );
   if (cashDelta === 0n) {
     if (lines.some((line) => line.accountId === retainedEarningsAccountId)) return;
+    // A non-cash journal whose other side is not operating (share-based pay,
+    // a credit sale) must not push the operating leg into CFO on its own.
+    // That leg is the add-back, so the net cash effect stays zero.
+    if (settlesOutsideOperating(lines)) return;
     for (const line of lines) {
       if (line.cashFlow !== "cfo" || isSpecial(line) || isDa(line)) continue;
       addFlow(flows, "cfo", effect(line));
@@ -497,7 +515,12 @@ function applyDisposals(
     "impairment",
   ]);
   for (const line of lines) {
-    if (line.accountCode === "gain_loss_on_disposal") flows.cfi += effect(line);
+    if (line.accountCode !== "gain_loss_on_disposal") continue;
+    if (line.journalId !== undefined) {
+      const journal = journals.get(line.journalId);
+      if (journal && isCreditDisposal(journal)) continue;
+    }
+    flows.cfi += effect(line);
   }
   flows.cfi -= impairmentCredits(lines, journals, "fixed_assets", legacy);
   flows.cfi -= impairmentCredits(lines, journals, "intangible_assets", legacy);
@@ -554,6 +577,81 @@ function impairmentCredits(
     credits += credit;
   }
   return credits;
+}
+
+function settlesOutsideOperating(lines: readonly ClassifiedLine[]): boolean {
+  return lines.some(
+    (line) =>
+      line.cashFlow !== "cash" && line.cashFlow !== "cfo" && !isSpecial(line) && !isDa(line),
+  );
+}
+
+function cashDeltaOf(lines: readonly ClassifiedLine[]): bigint {
+  return lines.reduce(
+    (sum, line) =>
+      sum +
+      (line.cashFlow === "cash" ? parseMinor(line.debitMinor) - parseMinor(line.creditMinor) : 0n),
+    0n,
+  );
+}
+
+/** Receivable created by a non-cash sale of a fixed or intangible asset. */
+function isCreditDisposal(lines: readonly ClassifiedLine[]): boolean {
+  if (cashDeltaOf(lines) !== 0n) return false;
+  const sold = lines.some(
+    (line) =>
+      (line.accountCode === "fixed_assets" || line.accountCode === "intangible_assets") &&
+      parseMinor(line.creditMinor) > 0n,
+  );
+  const receivable = lines.some(
+    (line) =>
+      line.report === "asset" && line.cashFlow === "cfo" && parseMinor(line.debitMinor) > 0n,
+  );
+  return sold && receivable;
+}
+
+/**
+ * Proceeds of a credit sale are investing when the receivable is collected,
+ * not when the non-cash sale is recorded.
+ */
+function reclassifyInvestingCollections(
+  flows: Flows,
+  lines: readonly ClassifiedLine[],
+  movementJournals: Map<string, ClassifiedLine[]>,
+): void {
+  const pool = new Map<string, bigint>();
+  for (const journal of groupJournals(lines).values()) {
+    if (!isCreditDisposal(journal)) continue;
+    for (const line of journal) {
+      if (line.report !== "asset" || line.cashFlow !== "cfo") continue;
+      const debit = parseMinor(line.debitMinor);
+      if (debit <= 0n) continue;
+      pool.set(line.accountId, (pool.get(line.accountId) ?? 0n) + debit);
+    }
+  }
+  if (pool.size === 0) return;
+  for (const line of lines) {
+    if (linePeriod(line) !== "opening" || line.report !== "asset" || line.cashFlow !== "cfo") {
+      continue;
+    }
+    const credit = parseMinor(line.creditMinor);
+    const open = pool.get(line.accountId) ?? 0n;
+    if (credit <= 0n || open <= 0n) continue;
+    pool.set(line.accountId, open > credit ? open - credit : 0n);
+  }
+  for (const journal of movementJournals.values()) {
+    if (cashDeltaOf(journal) === 0n) continue;
+    for (const line of journal) {
+      if (line.report !== "asset" || line.cashFlow !== "cfo") continue;
+      const credit = parseMinor(line.creditMinor);
+      const open = pool.get(line.accountId) ?? 0n;
+      if (credit <= 0n || open <= 0n) continue;
+      const take = open < credit ? open : credit;
+      pool.set(line.accountId, open - take);
+      flows.cfo -= take;
+      flows.cfi += take;
+    }
+  }
 }
 
 function applyDeferredTax(flows: Flows, lines: readonly ClassifiedLine[]): void {

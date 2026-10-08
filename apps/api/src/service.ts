@@ -1,6 +1,7 @@
 import type { AccountRecord, AuditWrite, JournalRecord, LedgerStore } from "@nexora/db";
 import { isUniqueViolation } from "@nexora/db";
 import {
+  DEFAULT_STATEMENT_POLICY,
   KernelError,
   assertCanonicalClassification,
   assertExpectedVersion,
@@ -26,6 +27,11 @@ import {
 
 import { classifyPostedActivity, openingSourceRef } from "./classify-activity.js";
 import type { ActorContext } from "./http.js";
+import {
+  plainStatementMessage,
+  presentStatementFindings,
+  presentStatementPolicy,
+} from "./statement-presentation.js";
 
 export function createLedgerService(store: LedgerStore, platformAdminActorIds: readonly string[]) {
   return {
@@ -371,6 +377,15 @@ async function postJournal(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   assertPeriodOpen(period.status);
+  if (input.journalKind !== "opening" && input.sourceRef?.startsWith("opening:")) {
+    throw new KernelError(
+      "FIN_INVALID_JOURNAL_LINE",
+      "Only an opening journal can use a reference that starts with opening:.",
+    );
+  }
+  if (input.journalKind === "opening") {
+    await assertOpeningPlacement(store, tenant.tenantId, entity.entityId, period.periodId);
+  }
   const accounts = await accountsById(store, tenant.tenantId, entity.entityId);
   const balanced = validateJournal({
     currency: input.currency,
@@ -580,7 +595,7 @@ async function statements(
     entityId,
     periodId,
   );
-  return presentStatement(statement);
+  return presentStatement(statement, DEFAULT_STATEMENT_POLICY);
 }
 
 /**
@@ -612,6 +627,7 @@ export async function loadClassifiedActivity(
     periodStart: period.startDate,
     periodEnd: period.endDate,
     lines,
+    policy: DEFAULT_STATEMENT_POLICY,
   };
 }
 
@@ -623,7 +639,39 @@ export async function computeStatementsForPeriod(
   periodId: string,
 ) {
   const inputs = await loadClassifiedActivity(store, tenantId, entityId, periodId);
-  return { statement: buildStatements(inputs), inputs };
+  try {
+    return { statement: buildStatements(inputs), inputs };
+  } catch (error) {
+    if (error instanceof KernelError && error.code === "FIN_STATEMENT_IMBALANCE") {
+      throw new KernelError(error.code, plainStatementMessage(error.message));
+    }
+    throw error;
+  }
+}
+
+/**
+ * An opening journal is the entity's first period, or it is posted before any
+ * standard journal. The stored opening: prefix is not a free-text signal.
+ */
+async function assertOpeningPlacement(
+  store: LedgerStore,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+) {
+  const periods = await store.listPeriods(tenantId, entityId);
+  const earliest = [...periods].sort(
+    (left, right) =>
+      left.startDate.localeCompare(right.startDate) || left.periodId.localeCompare(right.periodId),
+  )[0];
+  if (earliest?.periodId === periodId) return;
+  const journals = await store.listJournals(tenantId, entityId, null);
+  const hasStandard = journals.some((journal) => !journal.sourceRef?.startsWith("opening:"));
+  if (!hasStandard) return;
+  throw new KernelError(
+    "FIN_INVALID_JOURNAL_LINE",
+    "Opening journals are accepted only in the first period, or before any other activity is posted.",
+  );
 }
 
 async function calculateDcf(
@@ -825,17 +873,22 @@ function presentJournal(journal: JournalRecord, replayed: boolean) {
   };
 }
 
-function presentStatement(statement: StatementSet) {
+function presentStatement(statement: StatementSet, policy: typeof DEFAULT_STATEMENT_POLICY) {
   const scale = currencyScale(statement.currency);
   const amount = (minor: string) => ({
     minor,
     amount: formatMinor(minor, scale),
     currency: statement.currency,
   });
+  const findings = presentStatementFindings(statement);
   return {
     engineVersion: statement.engineVersion,
     inputHash: statement.inputHash,
     currency: statement.currency,
+    policy: presentStatementPolicy(policy),
+    final: statement.issues.length === 0,
+    issues: findings.issues,
+    notices: findings.notices,
     incomeStatement: {
       revenue: amount(statement.incomeStatement.revenueMinor),
       expenses: amount(statement.incomeStatement.expensesMinor),

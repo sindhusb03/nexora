@@ -109,7 +109,7 @@ export type {
   IngestionSeverity,
   IngestionStatement,
 } from "./ingestion-types.js";
-export { buildStatements } from "./statements.js";
+export { buildStatements, DEFAULT_STATEMENT_POLICY, statementPolicyLabel } from "./statements.js";
 export type {
   CashFlowClass,
   ClassifiedLine,

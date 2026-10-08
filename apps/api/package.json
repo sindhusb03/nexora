@@ -7,6 +7,7 @@
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "migrate": "tsx src/migrate.ts",
+    "check:currency-scale": "tsx src/check-currency-scale.ts",
     "user:create": "tsx src/create-user.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run && vitest run --config vitest.accuracy.config.ts",

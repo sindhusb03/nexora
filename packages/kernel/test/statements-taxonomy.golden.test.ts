@@ -545,4 +545,80 @@ describe("statement class taxonomy goldens", () => {
       ]),
     ).toThrow(/Deferred tax is never cash-settled/);
   });
+
+  it("adds back share-based pay so a non-cash reserve credit does not hit cash flow", () => {
+    const result = run([
+      leg("sbc", "expense", "cfo", 500, 0, "sbc"),
+      leg("reserve", "equity", "non_cash", 0, 500, "sbc", { accountCode: "oci_reserves" }),
+    ]);
+    expect(result.cashFlow).toEqual({
+      beginningCashMinor: "0",
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "0",
+    });
+    expect(result.incomeStatement.netIncomeMinor).toBe("-500");
+    expect(result.balanceSheet).toMatchObject({
+      assetsMinor: "0",
+      liabilitiesMinor: "0",
+      equityMinor: "0",
+    });
+
+    const financingReserve = run([
+      leg("sbc", "expense", "cfo", 500, 0, "sbc"),
+      leg("apic", "equity", "cff", 0, 500, "sbc"),
+    ]);
+    expect(financingReserve.cashFlow.cffMinor).toBe("0");
+    expect(financingReserve.cashFlow.cfoMinor).toBe("0");
+  });
+
+  it("keeps a credit sale out of cash flow until the receivable is collected", () => {
+    const sale = [
+      leg("ar", "asset", "cfo", 300, 0, "sale", { accountCode: "accounts_receivable" }),
+      leg("fa", "asset", "cfi", 0, 200, "sale", { accountCode: "fixed_assets" }),
+      leg("gain", "revenue", "cfi", 0, 100, "sale", { accountCode: "gain_loss_on_disposal" }),
+    ];
+    const recorded = run(sale);
+    expect(recorded.cashFlow).toEqual({
+      beginningCashMinor: "0",
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "0",
+    });
+    expect(recorded.incomeStatement.netIncomeMinor).toBe("100");
+    expect(recorded.balanceSheet.assetsMinor).toBe(recorded.balanceSheet.equityMinor);
+
+    const collected = run([
+      ...sale,
+      leg("cash", "asset", "cash", 300, 0, "collect"),
+      leg("ar", "asset", "cfo", 0, 300, "collect", { accountCode: "accounts_receivable" }),
+      leg("trade", "asset", "cfo", 40, 0, "accrual"),
+      leg("revenue", "revenue", "cfo", 0, 40, "accrual"),
+      leg("cash", "asset", "cash", 40, 0, "trade-collect"),
+      leg("trade", "asset", "cfo", 0, 40, "trade-collect"),
+    ]);
+    expect(collected.cashFlow).toEqual({
+      beginningCashMinor: "0",
+      cfoMinor: "40",
+      cfiMinor: "300",
+      cffMinor: "0",
+      endingCashMinor: "340",
+    });
+    expect(collected.incomeStatement.netIncomeMinor).toBe("140");
+
+    const later = run([
+      ...sale.map((line) => ({ ...line, period: "opening" as const })),
+      leg("cash", "asset", "cash", 300, 0, "collect"),
+      leg("ar", "asset", "cfo", 0, 300, "collect", { accountCode: "accounts_receivable" }),
+    ]);
+    expect(later.cashFlow).toMatchObject({
+      cfoMinor: "0",
+      cfiMinor: "300",
+      endingCashMinor: "300",
+    });
+    expect(later.incomeStatement.netIncomeMinor).toBe("0");
+    expect(later.balanceSheet.assetsMinor).toBe(later.balanceSheet.equityMinor);
+  });
 });

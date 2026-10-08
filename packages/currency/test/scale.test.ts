@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { lookupCurrencyScale } from "../src/index.js";
+import {
+  assertNoCurrencyScaleShift,
+  currencyScaleShift,
+  lookupCurrencyScale,
+} from "../src/index.js";
 
 describe("ISO 4217 minor units", () => {
   it("uses scale 0 for the zero-decimal currencies", () => {
@@ -68,5 +72,21 @@ describe("ISO 4217 minor units", () => {
     expect(lookupCurrencyScale("us")).toEqual({ ok: false, reason: "invalid" });
     expect(lookupCurrencyScale("usd")).toEqual({ ok: false, reason: "invalid" });
     expect(lookupCurrencyScale("US1")).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("flags currencies whose minor-unit scale changed and leaves the old table alone", () => {
+    for (const code of ["USD", "EUR", "INR", "JPY", "KRW", "VND", "BHD", "JOD", "KWD", "OMR"]) {
+      expect(currencyScaleShift(code)).toBeNull();
+    }
+    expect(currencyScaleShift("CLP")).toEqual({ code: "CLP", previousScale: 2, scale: 0 });
+    expect(currencyScaleShift("ISK")).toEqual({ code: "ISK", previousScale: 2, scale: 0 });
+    expect(currencyScaleShift("UGX")).toEqual({ code: "UGX", previousScale: 2, scale: 0 });
+    expect(currencyScaleShift("IQD")).toEqual({ code: "IQD", previousScale: 2, scale: 3 });
+    expect(currencyScaleShift("LYD")).toEqual({ code: "LYD", previousScale: 2, scale: 3 });
+    expect(currencyScaleShift("TND")).toEqual({ code: "TND", previousScale: 2, scale: 3 });
+    expect(currencyScaleShift("CLF")).toEqual({ code: "CLF", previousScale: 2, scale: 4 });
+    expect(currencyScaleShift("XAU")).toEqual({ code: "XAU", previousScale: 2, scale: null });
+    expect(() => assertNoCurrencyScaleShift(["USD", "JPY"])).not.toThrow();
+    expect(() => assertNoCurrencyScaleShift(["usd", "CLP"])).toThrow(/CLP/);
   });
 });
