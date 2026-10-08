@@ -626,11 +626,12 @@ async function deriveTranslatedGroup(
   entities: readonly EntityPeriodScope[],
   rates: readonly RateTriple[],
 ) {
-  assertUniqueScopes(entities);
+  assertUniqueEntities(entities);
   const loaded = [];
   for (const scope of entities) {
     loaded.push(await loadPostedTrialBalance(store, tenantId, scope.entityId, scope.periodId));
   }
+  assertSamePeriodEnd(loaded.map((entity) => entity.periodEnd));
   const translated = loaded.map((entity) => ({
     ...entity,
     translated: translateTrialBalance({
@@ -688,17 +689,26 @@ function entitySnapshot(entity: {
   };
 }
 
-function assertUniqueScopes(entities: readonly EntityPeriodScope[]): void {
+function assertUniqueEntities(entities: readonly EntityPeriodScope[]): void {
   const seen = new Set<string>();
   for (const scope of entities) {
-    const key = `${scope.entityId}:${scope.periodId}`;
-    if (seen.has(key)) {
+    if (seen.has(scope.entityId)) {
       throw new KernelError(
         "FIN_INVALID_JOURNAL_LINE",
-        "Duplicate entity and period in the consolidation scope",
+        "Duplicate entity in the consolidation scope",
       );
     }
-    seen.add(key);
+    seen.add(scope.entityId);
+  }
+}
+
+function assertSamePeriodEnd(periodEnds: readonly string[]): void {
+  const [first, ...rest] = periodEnds;
+  if (first !== undefined && rest.some((end) => end !== first)) {
+    throw new KernelError(
+      "FIN_INVALID_PERIOD",
+      "Consolidation periods must share the same end date",
+    );
   }
 }
 
@@ -746,6 +756,7 @@ async function loadPostedTrialBalance(
   return {
     entityId,
     periodId,
+    periodEnd: activity.periodEnd,
     sourceCurrency: activity.currency,
     journalIds,
     lines,

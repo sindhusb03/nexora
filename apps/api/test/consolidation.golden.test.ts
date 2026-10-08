@@ -30,6 +30,7 @@ describe("posted-ledger group consolidation", () => {
   let ukEntityId = "";
   let usPeriodId = "";
   let ukPeriodId = "";
+  let usPriorPeriodId = "";
   let usCash = "";
   let usAr = "";
   let usEquity = "";
@@ -75,7 +76,7 @@ describe("posted-ledger group consolidation", () => {
     ukEntityId = await createEntity("UK Sub", "GBP");
     usPeriodId = await createPeriod(usEntityId, "2024-01-01", "2024-12-31");
     ukPeriodId = await createPeriod(ukEntityId, "2024-01-01", "2024-12-31");
-    const usPriorPeriod = await createPeriod(usEntityId, "2023-01-01", "2023-12-31");
+    usPriorPeriodId = await createPeriod(usEntityId, "2023-01-01", "2023-12-31");
 
     usCash = await createAccount(usEntityId, "1000", "Cash", "asset", "cash", false);
     usAr = await createAccount(
@@ -111,11 +112,11 @@ describe("posted-ledger group consolidation", () => {
       { accountId: ukAp, debit: "0", credit: "7.50" },
       { accountId: ukEquity, debit: "0", credit: "42.50" },
     ]);
-    await post(usEntityId, usPriorPeriod, "USD", [
+    await post(usEntityId, usPriorPeriodId, "USD", [
       { accountId: usCash, debit: "1000000", credit: "0" },
       { accountId: usEquity, debit: "0", credit: "1000000" },
     ]);
-    await post(usEntityId, usPriorPeriod, "USD", [
+    await post(usEntityId, usPriorPeriodId, "USD", [
       { accountId: usExpense, debit: "20", credit: "0" },
       { accountId: usCash, debit: "0", credit: "20" },
     ]);
@@ -245,6 +246,132 @@ describe("posted-ledger group consolidation", () => {
     const body = await readJson<{ error: { code: string; message: string } }>(response);
     expect(body.error.code).toBe("FIN_STATEMENT_IMBALANCE");
     expect(body.error.message).toBe("Entity has no retained earnings account");
+  });
+
+  it("rejects an entity or period from another tenant", async () => {
+    const foreignTenant = await call(app, "POST", "/v1/tenants", {
+      actor: "platform-admin",
+      region: "us-east-1",
+      body: {
+        name: "Other consolidation tenant",
+        homeRegion: "us-east-1",
+        ownerActorId: "owner-2",
+      },
+    });
+    const foreignTenantId = (await readJson<{ tenantId: string }>(foreignTenant)).tenantId;
+    const foreignEntity = await call(app, "POST", "/v1/entities", {
+      actor: "owner-2",
+      tenant: foreignTenantId,
+      region: "us-east-1",
+      body: { legalName: "Foreign books", functionalCurrency: "USD" },
+    });
+    const foreignEntityId = (await readJson<{ entityId: string }>(foreignEntity)).entityId;
+    const foreignPeriod = await call(app, "POST", "/v1/periods", {
+      actor: "owner-2",
+      tenant: foreignTenantId,
+      region: "us-east-1",
+      body: { entityId: foreignEntityId, startDate: "2024-01-01", endDate: "2024-12-31" },
+    });
+    const foreignPeriodId = (await readJson<{ periodId: string }>(foreignPeriod)).periodId;
+
+    const entity = await translate({
+      ...ledgerBody(),
+      entities: [
+        { entityId: foreignEntityId, periodId: usPeriodId },
+        { entityId: ukEntityId, periodId: ukPeriodId },
+      ],
+    });
+    expect(entity.status).toBe(404);
+    expect((await readJson<{ error: { code: string } }>(entity)).error.code).toBe("FIN_NOT_FOUND");
+
+    const period = await translate({
+      ...ledgerBody(),
+      entities: [
+        { entityId: usEntityId, periodId: foreignPeriodId },
+        { entityId: ukEntityId, periodId: ukPeriodId },
+      ],
+    });
+    expect(period.status).toBe(404);
+    expect((await readJson<{ error: { code: string } }>(period)).error.code).toBe("FIN_NOT_FOUND");
+  });
+
+  it("rejects a period that belongs to another entity", async () => {
+    const response = await translate({
+      ...ledgerBody(),
+      entities: [
+        { entityId: usEntityId, periodId: ukPeriodId },
+        { entityId: ukEntityId, periodId: ukPeriodId },
+      ],
+    });
+    expect(response.status).toBe(404);
+    expect(
+      (await readJson<{ error: { code: string; message: string } }>(response)).error.message,
+    ).toBe("Period does not belong to the entity");
+  });
+
+  it("rejects periods that do not share an end date", async () => {
+    const scope = {
+      ...ledgerBody(),
+      entities: [
+        { entityId: usEntityId, periodId: usPriorPeriodId },
+        { entityId: ukEntityId, periodId: ukPeriodId },
+      ],
+    };
+    const translated = await translate(scope);
+    expect(translated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(translated)).error.code).toBe(
+      "FIN_INVALID_PERIOD",
+    );
+    const eliminated = await eliminate({
+      ...scope,
+      evidenceId: "ic-scope",
+      eliminations: [
+        { accountId: usAr, debitMinor: "0", creditMinor: "1", evidenceId: "ic-scope" },
+        { accountId: ukAp, debitMinor: "1", creditMinor: "0", evidenceId: "ic-scope" },
+      ],
+    });
+    expect(eliminated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(eliminated)).error.code).toBe(
+      "FIN_INVALID_PERIOD",
+    );
+  });
+
+  it("rejects a duplicate entity in the scope", async () => {
+    const scope = {
+      ...ledgerBody(),
+      entities: [
+        { entityId: usEntityId, periodId: usPeriodId },
+        { entityId: usEntityId, periodId: usPriorPeriodId },
+      ],
+    };
+    const translated = await translate(scope);
+    expect(translated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(translated)).error.code).toBe(
+      "FIN_INVALID_JOURNAL_LINE",
+    );
+    const eliminated = await eliminate({
+      ...scope,
+      evidenceId: "ic-scope",
+      eliminations: [
+        { accountId: usAr, debitMinor: "0", creditMinor: "1", evidenceId: "ic-scope" },
+        { accountId: ukAp, debitMinor: "1", creditMinor: "0", evidenceId: "ic-scope" },
+      ],
+    });
+    expect(eliminated.status).toBe(422);
+    expect((await readJson<{ error: { code: string } }>(eliminated)).error.code).toBe(
+      "FIN_INVALID_JOURNAL_LINE",
+    );
+  });
+
+  it("rejects a missing rate triple", async () => {
+    const response = await translate({
+      ...ledgerBody(),
+      rates: rates.filter((rate) => rate.sourceCurrency === "USD"),
+    });
+    expect(response.status).toBe(400);
+    expect((await readJson<{ error: { code: string } }>(response)).error.code).toBe(
+      "FX_RATE_MISSING",
+    );
   });
 
   function ledgerBody() {
