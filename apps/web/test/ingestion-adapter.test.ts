@@ -706,7 +706,7 @@ describe("http ingestion client", () => {
     expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("/exceptions");
   });
   it("converts corrected minor units with the kernel currency scale", async () => {
-    for (const currency of ["CLP", "JPY", "KWD", "BHD", "USD"]) {
+    for (const currency of ["BHD", "JOD", "KWD", "OMR", "JPY", "KRW", "VND", "CLP", "USD", "EUR"]) {
       expect(currencyScale(currency)).toBe(kernelCurrencyScale(currency));
     }
     for (const [currency, amount] of [
