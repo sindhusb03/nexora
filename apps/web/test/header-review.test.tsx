@@ -3,7 +3,7 @@ import { HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE, type Exception } from "@nexora/con
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getIngestionClient } from "../app/review/client";
+import { getIngestionClient, isMockIngestion } from "../app/review/client";
 import { DetailView } from "../app/review/detail-view";
 import { createHttpIngestionClient } from "../app/review/http-client";
 import { createMockIngestionClient, memoryStore } from "../app/review/mock-client";
@@ -14,7 +14,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => navigation,
   useSearchParams: () => navigation.search,
 }));
-vi.mock("../app/review/client", () => ({ getIngestionClient: vi.fn() }));
+vi.mock("../app/review/client", () => ({
+  getIngestionClient: vi.fn(),
+  isMockIngestion: vi.fn(),
+}));
 vi.mock("../app/review/shell", () => {
   const setAsOf = vi.fn();
   return {
@@ -70,6 +73,7 @@ async function readyClient() {
 }
 
 beforeEach(() => {
+  vi.mocked(isMockIngestion).mockReturnValue(true);
   navigation.search = new URLSearchParams();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
@@ -151,13 +155,13 @@ describe("header review probe", () => {
       vi.stubGlobal(
         "fetch",
         vi.fn(async (url: string, init: RequestInit) => {
-          expect(url).toBe(`https://ingestion.test/v1/ingestion/exceptions/${empty.id}/resolve`);
+          expect(url).toBe(`https://ingestion.test/ingestion/exceptions/${empty.id}/resolve`);
           expect(init.method).toBe("POST");
           const request = JSON.parse(String(init.body));
-          expect(request.action).toBe("accept");
+          expect(request).toEqual({ action: "accept", note: "Reviewed: accept" });
           const result = await client.resolve(
             empty.id,
-            request,
+            { ...request, correctedMinor: null, accountCode: null, idempotencyKey: "http-422" },
             "sindhu",
             ["controller"],
             "csrf-test",
@@ -215,4 +219,188 @@ describe("header review probe", () => {
       });
     },
   );
+});
+
+function httpReviewClient() {
+  const jobId = "10000000-0000-4000-8000-000000000001";
+  const documentId = "10000000-0000-4000-8000-000000000002";
+  const valueId = "10000000-0000-4000-8000-000000000003";
+  const provenance = {
+    fileName: "statement.csv",
+    page: null,
+    sheet: null,
+    row: 4,
+    col: 2,
+    bbox: null,
+    rawText: "Cash,100",
+  };
+  const job = {
+    jobId,
+    entityId: "10000000-0000-4000-8000-000000000004",
+    status: "needs_review",
+    currency: "USD",
+    formulaVersion: null,
+    inputHash: null,
+    outputHash: null,
+    documents: [
+      {
+        documentId,
+        fileName: "statement.csv",
+        statementKinds: ["balance_sheet"],
+        status: "parsed",
+        error: null,
+      },
+    ],
+    counts: {
+      documents: 1,
+      values: 3,
+      exceptionsOpen: 6,
+      exceptionsError: 1,
+      exceptionsWarn: 4,
+      exceptionsInfo: 1,
+    },
+    createdAt: "2026-09-30T12:00:00.000Z",
+    updatedAt: "2026-09-30T12:00:00.000Z",
+  };
+  const value = {
+    valueId,
+    documentId,
+    statementType: "balance_sheet",
+    role: "line",
+    label: "Cash",
+    periodKey: "FY2025",
+    periodEnd: "2025-12-31",
+    currency: "USD",
+    scale: "units",
+    minor: "10000",
+    accountCode: "cash",
+    mappingConfidence: "0.90",
+    mappingMethod: "stub",
+    mappingAccepted: false,
+    provenance,
+  };
+  const items = [
+    {
+      type: "mapping_low_confidence",
+      severity: "warn",
+      status: "open",
+      message: "Eligible boundary mapping",
+    },
+    {
+      type: "mapping_low_confidence",
+      severity: "error",
+      status: "open",
+      message: "Eligible error mapping",
+    },
+    { type: "missing_period", severity: "info", status: "open", message: "Unrelated advisory" },
+    {
+      type: "low_confidence_extraction",
+      severity: "warn",
+      status: "open",
+      message: "Unrelated extraction",
+    },
+    {
+      type: "mapping_low_confidence",
+      severity: "warn",
+      status: "accepted",
+      message: "Already accepted mapping",
+    },
+    {
+      type: "mapping_low_confidence",
+      severity: "warn",
+      status: "open",
+      message: "Below threshold mapping",
+      low: true,
+    },
+    {
+      type: "mapping_low_confidence",
+      severity: "warn",
+      status: "open",
+      message: "Missing value mapping",
+      missing: true,
+    },
+  ].map((item, index) => ({
+    ...item,
+    id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    jobId,
+    documentId,
+    values: { expected: null, actual: "10000", diff: null },
+    provenance: {
+      valueIds: [
+        item.low
+          ? "10000000-0000-4000-8000-000000000005"
+          : item.missing
+            ? "10000000-0000-4000-8000-000000000006"
+            : valueId,
+        // The server uses the first ID even when another linked value is eligible.
+        valueId,
+      ],
+      locations: [provenance],
+    },
+    resolution: null,
+  }));
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+    if (url.endsWith("/resolve"))
+      return Response.json(
+        { error: { code: "TEST_REJECTION", message: "Leave open" } },
+        { status: 422 },
+      );
+    if (url.endsWith("/values"))
+      return Response.json({
+        values: [
+          value,
+          { ...value, valueId: "10000000-0000-4000-8000-000000000007", accountCode: "INVALID" },
+          {
+            ...value,
+            valueId: "10000000-0000-4000-8000-000000000005",
+            mappingConfidence: "0.8999",
+          },
+        ],
+      });
+    if (url.endsWith("/exceptions")) return Response.json({ exceptions: items });
+    return Response.json(job);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.mocked(isMockIngestion).mockReturnValue(false);
+  vi.mocked(getIngestionClient).mockReturnValue(
+    createHttpIngestionClient("https://ingestion.test"),
+  );
+  return { jobId, exceptionId: items[0]!.id, fetchMock };
+}
+
+describe("HTTP review controls", () => {
+  it("lists only open mapping exceptions at or above the bulk threshold, including errors", async () => {
+    const { jobId } = httpReviewClient();
+    render(<QueueView jobId={jobId} />);
+    await screen.findByRole("link", { name: "Eligible boundary mapping" });
+    expect(screen.getByTestId("bulk-accept")).toHaveTextContent("Bulk-accept 2 high-confidence");
+    fireEvent.click(screen.getByTestId("bulk-accept"));
+    const list = await screen.findByTestId("bulk-list");
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(list).toHaveTextContent("Eligible boundary mapping");
+    expect(list).toHaveTextContent("Eligible error mapping");
+  });
+
+  it("offers known lowercase accounts and sends the chosen code when remapping", async () => {
+    const { jobId, exceptionId, fetchMock } = httpReviewClient();
+    render(<DetailView jobId={jobId} exceptionId={exceptionId} />);
+    fireEvent.click(await screen.findByTestId("action-remap"));
+    const picker = screen.getByTestId("account-picker");
+    expect(within(picker).getByRole("option", { name: "cash cash" })).toHaveValue("cash");
+    expect(
+      within(picker).queryByRole("option", { name: "INVALID INVALID" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("confirm-resolution")).toBeDisabled();
+    fireEvent.change(picker, { target: { value: "cash" } });
+    fireEvent.change(screen.getByTestId("resolution-note"), { target: { value: "Use cash" } });
+    fireEvent.click(screen.getByTestId("confirm-resolution"));
+    await screen.findByRole("alert");
+    const call = fetchMock.mock.calls.find(([url]) => url.endsWith("/resolve"));
+    expect(call?.[0]).toBe(`https://ingestion.test/ingestion/exceptions/${exceptionId}/resolve`);
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      action: "remap",
+      note: "Use cash",
+      accountCode: "cash",
+    });
+  });
 });

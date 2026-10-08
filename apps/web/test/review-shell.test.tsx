@@ -27,7 +27,10 @@ vi.mock("../app/studio/api", () => ({
   login: vi.fn(),
   selectTenant: vi.fn(),
 }));
-vi.mock("../app/review/client", () => ({ getIngestionClient: vi.fn() }));
+vi.mock("../app/review/client", () => ({
+  getIngestionClient: vi.fn(),
+  isMockIngestion: () => true,
+}));
 
 const tenantless: SessionView = {
   actorId: "sindhu",

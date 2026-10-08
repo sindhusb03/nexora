@@ -187,6 +187,9 @@ jobs:
       - name: Browser flows
         run: pnpm --filter @nexora/web test:e2e
 
+      - name: Review HTTP flow
+        run: INGESTION_HTTP_E2E=1 pnpm --filter @nexora/web test:e2e
+
   audit:
     name: audit
     runs-on: ubuntu-latest

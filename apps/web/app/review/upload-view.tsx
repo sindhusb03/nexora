@@ -7,10 +7,15 @@ import { useEffect, useState } from "react";
 
 import { getIngestionClient } from "./client";
 import { newIdempotencyKey } from "./format";
-import { useReviewAsOf, useReviewSession } from "./shell";
+import { useReviewAsOf, useReviewEntity, useReviewSession } from "./shell";
 import { bytesToBase64 } from "./simple-pdf";
 
+const mockMode =
+  process.env.NEXT_PUBLIC_INGESTION_MODE === "mock" ||
+  process.env.NEXT_PUBLIC_INGESTION_MODE === "demo";
+
 export function UploadView() {
+  const { entityId, error: entityError } = useReviewEntity();
   const session = useReviewSession();
   const { setAsOf } = useReviewAsOf();
   const [files, setFiles] = useState<readonly UploadFile[]>([]);
@@ -28,6 +33,7 @@ export function UploadView() {
         .then((result) => {
           if (result.ok) {
             setJob(result.value);
+            if (result.value.error) setError(result.value.error.message);
             setAsOf(result.value.context.asOf);
           } else setError(`${result.error.code}: ${result.error.message}`);
         });
@@ -68,15 +74,18 @@ export function UploadView() {
 
   async function start() {
     setError(null);
-    const result = await getIngestionClient().upload(
-      { files: [...files], idempotencyKey: newIdempotencyKey() },
-      session.csrfToken,
-    );
+    if (!mockMode && !entityId) {
+      setError(entityError ?? "The active company entity is still loading.");
+      return;
+    }
+    const input = { files: [...files], entityId, idempotencyKey: newIdempotencyKey() };
+    const result = await getIngestionClient().upload(input, session.csrfToken);
     if (!result.ok) {
       setError(`${result.error.code}: ${result.error.message}`);
       return;
     }
     setJob(result.value);
+    if (result.value.error) setError(result.value.error.message);
     setAsOf(result.value.context.asOf);
     window.sessionStorage.setItem("nexora.review.lastJob", result.value.id);
   }
@@ -123,13 +132,18 @@ export function UploadView() {
         </label>
         <Button
           type="button"
-          disabled={files.length === 0 || reading || job !== null}
+          disabled={files.length === 0 || reading || job !== null || (!mockMode && !entityId)}
           onClick={() => void start()}
           data-testid="start-extraction"
         >
           {reading ? "Reading files" : "Start extraction"}
         </Button>
       </div>
+      {entityError ? (
+        <p className="nx-notice" role="alert">
+          {entityError}
+        </p>
+      ) : null}
       {error ? (
         <p className="nx-notice" role="alert">
           {error}
@@ -148,7 +162,10 @@ export function UploadView() {
       {job ? (
         <div className="nx-stack">
           <p data-testid="job-status" role="status">
-            Job {job.id}: <strong>{job.status}</strong>
+            Job {job.id}:{" "}
+            <strong>
+              {mockMode ? job.status : job.context.basis.replace("needs_review", "needs review")}
+            </strong>
           </p>
           <ul className="review-files">
             {job.uploads.map((file) => (
@@ -164,11 +181,16 @@ export function UploadView() {
           {job.status === "ready" && job.summary ? (
             <p>
               <Link href={`/review/jobs/${job.id}`} data-testid="open-exceptions">
-                Review {job.summary.exceptionCount} exceptions ({job.summary.blockingOpen} blocking)
+                {job.context.basis === "posted" ? "View" : "Review"} {job.summary.exceptionCount}{" "}
+                exceptions ({job.summary.blockingOpen} blocking)
               </Link>
             </p>
           ) : (
-            <p className="muted">Waiting for the extraction job to finish checks.</p>
+            <p className="muted">
+              {job.status === "failed"
+                ? "Extraction failed. Check the source files and upload again."
+                : "Waiting for the extraction job to finish checks."}
+            </p>
           )}
         </div>
       ) : null}

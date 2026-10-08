@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   canResolveIngestion,
+  BULK_ACCEPT_MIN_CONFIDENCE,
   EXCEPTION_TYPES,
   HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
   headerValueNotAcceptable,
@@ -21,7 +22,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getIngestionClient } from "./client";
+import { getIngestionClient, isMockIngestion } from "./client";
 import {
   formatConfidence,
   formatMinor,
@@ -43,6 +44,7 @@ import {
 } from "./queue";
 
 export function QueueView({ jobId }: { readonly jobId: string }) {
+  const mockMode = isMockIngestion();
   const session = useReviewSession();
   const { setAsOf } = useReviewAsOf();
   const canResolve = canResolveIngestion(session.roles);
@@ -97,7 +99,17 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
   );
   const counts = exceptions ? queueCounts(exceptions) : null;
   const progress = exceptions ? modelProgress(exceptions) : null;
-  const candidates = exceptions ? bulkCandidates(exceptions) : [];
+  const candidates = exceptions
+    ? mockMode
+      ? bulkCandidates(exceptions)
+      : exceptions.filter(
+          (item) =>
+            "apiType" in item &&
+            item.apiType === "mapping_low_confidence" &&
+            item.status === "open" &&
+            Number(item.confidence) >= Number(BULK_ACCEPT_MIN_CONFIDENCE),
+        )
+    : [];
   const selected = rows[index] ?? null;
 
   useEffect(() => {
@@ -205,10 +217,16 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
         current?.map((existing) => (existing.id === result.value.id ? result.value : existing)) ??
         null,
     );
+    if (!mockMode) {
+      const current = await getIngestionClient().getJob(jobId);
+      if (current.ok) setJob(current.value);
+    }
     setNotice(
-      action === "accept"
-        ? "Acceptance recorded as a proposal. Nothing was posted."
-        : "Marked not applicable. Nothing was posted.",
+      mockMode
+        ? action === "accept"
+          ? "Acceptance recorded as a proposal. Nothing was posted."
+          : "Marked not applicable. Nothing was posted."
+        : "Resolution applied. The engine revalidated this job.",
     );
   }
 
@@ -230,8 +248,14 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
     }
     setExceptions(result.value);
     setBulkOpen(false);
+    if (!mockMode) {
+      const current = await getIngestionClient().getJob(jobId);
+      if (current.ok) setJob(current.value);
+    }
     setNotice(
-      `${candidates.length} high-confidence items accepted as proposals. Nothing was posted.`,
+      mockMode
+        ? `${candidates.length} high-confidence items accepted as proposals. Nothing was posted.`
+        : "High-confidence mappings accepted. The engine revalidated this job.",
     );
   }
 
@@ -271,7 +295,9 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
         <p role="status" data-testid="confirm-key">
           Press {armed === "accept" ? "a" : "n"} again to{" "}
           {armed === "accept" ? "accept" : "mark not applicable"} “{selected.message}”. This records
-          a proposal and does not post.
+          {mockMode
+            ? "a proposal and does not post."
+            : "a resolution; the engine may post after validation."}
         </p>
       ) : null}
       {progress && counts ? (
@@ -293,7 +319,13 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
               {progress.blockingOpen} blocking errors remaining
             </span>
             <strong data-testid="model-ready">
-              {progress.ready ? "Model ready" : "Model not ready"}
+              {mockMode
+                ? progress.ready
+                  ? "Model ready"
+                  : "Model not ready"
+                : job?.context.basis === "posted"
+                  ? "Posted"
+                  : "Needs review"}
             </strong>
           </div>
           <progress
@@ -302,8 +334,9 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
             aria-label="Resolved exceptions"
           />
           <p className="small muted">
-            Model ready means every blocking error has a proposal. It does not mean the kernel built
-            or posted a model.
+            {mockMode
+              ? "Model ready means every blocking error has a proposal. It does not mean the kernel built or posted a model."
+              : "Posting status comes from the ingestion engine."}
           </p>
         </div>
       ) : null}
@@ -484,10 +517,13 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
       <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
         <DialogContent data-testid="bulk-confirm">
           <DialogHeader>
-            <DialogTitle>Bulk-accept {candidates.length} proposals</DialogTitle>
+            <DialogTitle>
+              Bulk-accept {candidates.length} {mockMode ? "proposals" : "mappings"}
+            </DialogTitle>
             <DialogDescription>
-              Each item below is open, not an error, and at least 90% confidence. Accepting them
-              does not post a journal. Blocking errors stay in the queue.
+              {mockMode
+                ? "Each item below is open, not an error, and at least 90% confidence. Accepting them does not post a journal. Blocking errors stay in the queue."
+                : "The engine accepts eligible mappings at 90% confidence or above and then revalidates the job. Posting may follow validation."}
             </DialogDescription>
           </DialogHeader>
           <ul data-testid="bulk-list">
@@ -509,7 +545,7 @@ export function QueueView({ jobId }: { readonly jobId: string }) {
               data-testid="bulk-confirm-submit"
               onClick={() => void confirmBulk()}
             >
-              Accept these proposals
+              Accept these {mockMode ? "proposals" : "mappings"}
             </Button>
           </DialogFooter>
         </DialogContent>

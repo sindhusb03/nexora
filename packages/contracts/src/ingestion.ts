@@ -332,12 +332,12 @@ export const bulkAcceptRequestSchema = z.object({
 export type BulkAcceptRequest = z.infer<typeof bulkAcceptRequestSchema>;
 
 export const ingestionPaths = {
-  uploads: "/v1/ingestion/uploads",
-  job: (id: string) => `/v1/ingestion/jobs/${encodeURIComponent(id)}`,
-  values: (id: string) => `/v1/ingestion/jobs/${encodeURIComponent(id)}/values`,
-  exceptions: (id: string) => `/v1/ingestion/jobs/${encodeURIComponent(id)}/exceptions`,
-  resolve: (id: string) => `/v1/ingestion/exceptions/${encodeURIComponent(id)}/resolve`,
-  bulkAccept: "/v1/ingestion/exceptions/bulk-accept",
+  uploads: "/ingestion/uploads",
+  job: (id: string) => `/ingestion/jobs/${encodeURIComponent(id)}`,
+  values: (id: string) => `/ingestion/jobs/${encodeURIComponent(id)}/values`,
+  exceptions: (id: string) => `/ingestion/jobs/${encodeURIComponent(id)}/exceptions`,
+  resolve: (id: string) => `/ingestion/exceptions/${encodeURIComponent(id)}/resolve`,
+  bulkAccept: "/ingestion/exceptions/bulk-accept",
 } as const;
 
 const STATUS_FOR_ACTION: Record<ResolveAction, ExceptionStatus> = {
