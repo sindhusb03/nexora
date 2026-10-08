@@ -43,6 +43,7 @@ import {
   decodeTranslation,
   displayRows,
   explainConsolidationError,
+  controlBalanceLabel,
   formatMinorAccounting,
   rateTypeLabel,
   type RateTripleInput,
@@ -191,6 +192,7 @@ export function GroupScreen({
       rateFor: (currency, rateType) => submittedRates[currency]?.[rateType] ?? null,
     });
   }, [result, entityRows, accountsByEntity, submittedRates]);
+  const balance = result ? controlBalanceLabel(result.controlTotalMinor) : null;
 
   async function createGroup() {
     const name = groupName.trim();
@@ -616,8 +618,11 @@ export function GroupScreen({
               </TableFooter>
             </Table>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" data-testid="zero-sum">
-                Balances to zero
+              <Badge
+                variant={balance?.balances ? "secondary" : "destructive"}
+                data-testid="zero-sum"
+              >
+                {balance?.label}
               </Badge>
               <span className="text-muted-foreground text-sm">
                 CTA {formatMinorAccounting(result.ctaMinor, result.groupCurrency)}

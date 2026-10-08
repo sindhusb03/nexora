@@ -76,7 +76,6 @@ export function createProgramService(store: LedgerStore) {
     createGroup: (actor: ActorContext, input: { name: string; reportingCurrency: string }) =>
       createGroup(store, actor, input),
     listGroups: (actor: ActorContext) => listGroups(store, actor),
-    deleteGroup: (actor: ActorContext, groupId: string) => deleteGroup(store, actor, groupId),
     createModel: (actor: ActorContext, input: { name: string }) => createModel(store, actor, input),
     saveModelVersion: (actor: ActorContext, modelId: string, nodes: readonly CalcNode[]) =>
       saveModelVersion(store, actor, modelId, nodes),
@@ -882,20 +881,6 @@ async function createGroup(
     audit: audit(actor, "ConsolidationGroupCreated", "consolidation_group", id, now, input),
   });
   return { consolidationGroupId: id };
-}
-
-async function deleteGroup(store: LedgerStore, actor: ActorContext, groupId: string) {
-  const tenant = await scope(store, actor, "consolidation.run");
-  const now = new Date().toISOString();
-  const removed = await store.deleteConsolidationGroup(
-    tenant.tenantId,
-    groupId,
-    audit(actor, "ConsolidationGroupDeleted", "consolidation_group", groupId, now, {}),
-  );
-  if (!removed) {
-    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
-  }
-  return { consolidationGroupId: groupId };
 }
 
 async function createModel(store: LedgerStore, actor: ActorContext, input: { name: string }) {

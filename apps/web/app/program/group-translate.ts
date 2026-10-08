@@ -78,6 +78,15 @@ export interface DisplayRow {
   readonly cta: boolean;
 }
 
+/** The server total is already an integer minor-unit string. This only compares it with zero. */
+export function controlBalanceLabel(controlTotalMinor: string): {
+  readonly label: "Balances to zero" | "Does not balance";
+  readonly balances: boolean;
+} {
+  const balances = controlTotalMinor === "0";
+  return { label: balances ? "Balances to zero" : "Does not balance", balances };
+}
+
 export function formatMinorAccounting(minor: string | null, currency: string): string {
   if (minor === null || !MINOR.test(minor)) return "—";
   const negative = minor.startsWith("-");

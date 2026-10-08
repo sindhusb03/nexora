@@ -161,23 +161,6 @@ describe("consolidation group list", () => {
     expect(repeat.calculationRunId).not.toBe(fxBody.calculationRunId);
   });
 
-  it("deletes a group that has no eliminations", async () => {
-    const created = await createGroup(tenantA, "owner-1", "Disposable", "EUR");
-    const removed = await call(app, "DELETE", `/v1/consolidation-groups/${created}`, {
-      actor: "owner-1",
-      tenant: tenantA,
-      region: "us-east-1",
-    });
-    expect(removed.status).toBe(200);
-    const listed = await call(app, "GET", "/v1/consolidation-groups", {
-      actor: "owner-1",
-      tenant: tenantA,
-      region: "us-east-1",
-    });
-    const body = (await listed.json()) as { groups: { consolidationGroupId: string }[] };
-    expect(body.groups.map((group) => group.consolidationGroupId)).not.toContain(created);
-  });
-
   async function provision(name: string, owner: string) {
     const response = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",

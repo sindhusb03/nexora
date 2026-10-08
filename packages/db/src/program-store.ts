@@ -333,22 +333,6 @@ export function createProgramStore(db: AppDatabase) {
         return row ? { id: row.id, reportingCurrency: row.reportingCurrency.trim() } : null;
       });
     },
-    deleteConsolidationGroup(tenantId: string, id: string, audit: AuditWrite) {
-      return tenantTx(db, tenantId, async (tx) => {
-        const removed = await tx
-          .delete(consolidationGroup)
-          .where(
-            and(
-              eq(consolidationGroup.tenantId, tenantId),
-              eq(consolidationGroup.consolidationGroupId, id),
-            ),
-          )
-          .returning({ id: consolidationGroup.consolidationGroupId });
-        if (removed.length === 0) return false;
-        await writeAudit(tx, tenantId, audit);
-        return true;
-      });
-    },
     insertElimination(input: EliminationWrite) {
       return tenantTx(db, input.tenantId, async (tx) => {
         await tx.insert(eliminationEntry).values({

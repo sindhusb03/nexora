@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildTranslateRequest,
+  controlBalanceLabel,
   decodeTranslation,
   displayRows,
   explainConsolidationError,
@@ -14,6 +15,15 @@ describe("group translation presentation", () => {
     expect(formatMinorAccounting("-10001225", "EUR")).toBe("(€100,012.25)");
     expect(formatMinorAccounting("0", "USD")).toBe("$0.00");
     expect(formatMinorAccounting(null, "USD")).toBe("—");
+  });
+
+  it("reads a zero server total as balanced", () => {
+    expect(controlBalanceLabel("0")).toEqual({ label: "Balances to zero", balances: true });
+  });
+
+  it("reads any other server total as out of balance", () => {
+    expect(controlBalanceLabel("1")).toEqual({ label: "Does not balance", balances: false });
+    expect(controlBalanceLabel("-100")).toEqual({ label: "Does not balance", balances: false });
   });
 
   it("sends entities, periods, and rates without trial-balance lines or amounts", () => {

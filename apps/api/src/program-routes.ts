@@ -75,9 +75,6 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
     const body = groupSchema.parse(await c.req.json());
     return c.json(await program.createGroup(readActor(c), body), 201);
   });
-  app.delete("/v1/consolidation-groups/:id", async (c) => {
-    return c.json(await program.deleteGroup(readActor(c), z.uuid().parse(c.req.param("id"))));
-  });
   app.post("/v1/consolidation-groups/:id/translate", async (c) => {
     const raw = await c.req.json();
     rejectCallerTrialBalance(raw);
