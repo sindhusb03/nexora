@@ -227,6 +227,9 @@ describe("studio with a non-demo company", () => {
     expect(screen.getByTestId("screen-board")).toHaveTextContent("Unavailable for this company.");
 
     fireEvent.click(screen.getByTestId("nav-statements"));
-    expect(await screen.findByTestId("screen-statements")).toHaveTextContent("Ending cash");
+    expect(await screen.findByTestId("screen-statements")).toHaveTextContent("Monthly actuals");
+    expect(screen.getByTestId("screen-statements")).toHaveTextContent(
+      "No posted journals in this period.",
+    );
   });
 });
