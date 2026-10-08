@@ -495,16 +495,32 @@ export function StudioApp() {
   }
   if (phase === "setup" && session) {
     return (
-      <main className="nx-gate" data-testid="setup-screen">
-        <FirstRun busy={busy} notice={notice} onOpen={openNewCompany} />
-        <button
-          type="button"
-          className="nx-text-btn"
-          data-testid="sign-out"
-          onClick={() => void onSignOut()}
-        >
-          Sign out
-        </button>
+      <main className="nx-gate nx-setup-gate" data-testid="setup-screen">
+        <div className="nx-setup-account">
+          <AccountMenu
+            actorId={session.actorId}
+            roles={session.roles}
+            open={menuOpen}
+            onToggle={() => setMenuOpen((current) => !current)}
+            onTwoFactor={() => void openTwoFactor()}
+            onSignOut={() => void onSignOut()}
+          />
+        </div>
+        {factor ? (
+          <TwoFactorPanel
+            secret={factor.secret}
+            qrDataUrl={factor.qrDataUrl}
+            recoveryCodes={factor.recoveryCodes}
+            busy={busy}
+            notice={notice}
+            onConfirm={confirmTwoFactor}
+            onEnroll={startEnroll}
+            onDisable={turnOffTwoFactor}
+            onClose={() => setFactor(null)}
+          />
+        ) : (
+          <FirstRun busy={busy} notice={notice} onOpen={openNewCompany} />
+        )}
       </main>
     );
   }
@@ -662,29 +678,14 @@ export function StudioApp() {
             >
               Copilot
             </Button>
-            <div className="nx-avatar-wrap">
-              <button
-                type="button"
-                className="nx-avatar"
-                aria-label={`Account ${session.actorId}`}
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
-              >
-                {initials(session.actorId)}
-              </button>
-              {menuOpen ? (
-                <div className="nx-menu">
-                  <p>{session.actorId}</p>
-                  <small>{session.roles.join(", ") || "member"}</small>
-                  <button type="button" data-testid="open-2fa" onClick={() => void openTwoFactor()}>
-                    Two-factor
-                  </button>
-                  <button type="button" onClick={() => void onSignOut()} data-testid="sign-out">
-                    Sign out
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            <AccountMenu
+              actorId={session.actorId}
+              roles={session.roles}
+              open={menuOpen}
+              onToggle={() => setMenuOpen((current) => !current)}
+              onTwoFactor={() => void openTwoFactor()}
+              onSignOut={() => void onSignOut()}
+            />
           </div>
         </header>
         {notice ? (
@@ -1060,6 +1061,41 @@ function isUnreadyCompany(error: unknown): boolean {
     error instanceof ApiFailure &&
     error.status === 404 &&
     (error.message === "Entity is not ready" || error.message === "Period not found")
+  );
+}
+
+function AccountMenu(props: {
+  readonly actorId: string;
+  readonly roles: readonly string[];
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onTwoFactor: () => void;
+  readonly onSignOut: () => void;
+}) {
+  return (
+    <div className="nx-avatar-wrap">
+      <button
+        type="button"
+        className="nx-avatar"
+        aria-label={`Account ${props.actorId}`}
+        aria-expanded={props.open}
+        onClick={props.onToggle}
+      >
+        {initials(props.actorId)}
+      </button>
+      {props.open ? (
+        <div className="nx-menu">
+          <p>{props.actorId}</p>
+          <small>{props.roles.join(", ") || "member"}</small>
+          <button type="button" data-testid="open-2fa" onClick={props.onTwoFactor}>
+            Two-factor
+          </button>
+          <button type="button" onClick={props.onSignOut} data-testid="sign-out">
+            Sign out
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

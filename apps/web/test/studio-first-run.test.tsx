@@ -88,6 +88,9 @@ describe("studio first sign-in", () => {
   it("opens the company the kernel recorded", async () => {
     render(<StudioApp />);
     expect(await screen.findByTestId("first-run")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Account ada" }));
+    expect(screen.getByTestId("open-2fa")).toBeInTheDocument();
+    expect(screen.getByTestId("sign-out")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("company-name"), { target: { value: "Harbor Analytics" } });
     fireEvent.click(screen.getByTestId("first-run-next"));
     fireEvent.change(screen.getByTestId("base-currency"), { target: { value: "INR" } });
