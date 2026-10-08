@@ -617,7 +617,13 @@ export function detectCurrency(
   text: string,
   functionalCurrency: string | null = null,
 ): string | null {
-  return currencyEvidence(text, functionalCurrency).currency;
+  const evidence = currencyEvidence(text, functionalCurrency);
+  if (/단위\s*[:：]\s*원(?:\s|$|[)）])/.test(text)) {
+    return evidence.conflict || (evidence.currency !== null && evidence.currency !== "KRW")
+      ? null
+      : "KRW";
+  }
+  return evidence.currency;
 }
 
 export function detectScale(text: string): AmountScale {

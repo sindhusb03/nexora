@@ -5,6 +5,8 @@ import { decimalToMinor } from "../src/ingestion/service.js";
 import { localizedCorpus } from "./fixtures/localized-corpus.js";
 import { encodeGrid } from "./fixtures/adversarial-corpus.js";
 import { call, sessions, testApp, type TestApp } from "./harness.js";
+import { parseStatementPdf } from "../src/imports/statement-pdf.js";
+import { resolveStatementPeriods } from "../src/imports/period.js";
 import { writeXlsx } from "../src/imports/xlsx-write.js";
 
 const scores: Record<string, { cells: number; wrong: number; held: number }> = {};
@@ -315,4 +317,124 @@ describe("localized upload safety", () => {
       expect(await journals.json()).toMatchObject({ journals: [] });
     },
   );
+});
+
+function textWorkbook(rows: string[][]): Uint8Array {
+  return writeXlsx([
+    {
+      name: "Report",
+      cells: rows.flatMap((row, r) =>
+        row.map((value, c) => ({ row: r + 1, col: c + 1, value, kind: "string" as const })),
+      ),
+    },
+  ]);
+}
+
+describe("held-out localized statement semantics", () => {
+  it("reads Swiss German fiscal years and text amounts with apostrophe thousands", async () => {
+    const bytes = textWorkbook([
+      ["Erfolgsrechnung per 31. Dezember 2024", "CHF"],
+      ["Account", "Geschäftsjahr 2024", "Geschäftsjahr 2023"],
+      ["Revenue", "3'000'000.00", "2'500'000.00"],
+      ["Expense", "-2'217'196.88", "-2'000'000.00"],
+    ]);
+    const result = await selectDocumentParser("swiss.xlsx", bytes).parse({
+      fileName: "swiss.xlsx",
+      bytes,
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.cells.every((c) => c.scale === "units" && c.currency === "CHF")).toBe(true);
+    expect(
+      result.cells.map((c) => [
+        c.label,
+        new AnalyticalDecimal(c.amount).toFixed(),
+        c.periodEnd,
+        c.statementType,
+      ]),
+    ).toEqual([
+      ["Revenue", "3000000", "2024-12-31", "income_statement"],
+      ["Revenue", "2500000", "2023-12-31", "income_statement"],
+      ["Expense", "-2217196.88", "2024-12-31", "income_statement"],
+      ["Expense", "-2000000", "2023-12-31", "income_statement"],
+    ]);
+  });
+  it("reads Portuguese text PDF fiscal years, spaced thousands and parentheses", () => {
+    const rows = [
+      ["Demonstração dos resultados por naturezas"],
+      ["Período findo em 31 de dezembro de 2024 (montantes expressos em euros)"],
+      ["Account", "Exercício 2024", "Exercício 2023"],
+      ["Revenue", "2 976 247", "2 000 000"],
+      ["Expense", "(987 630)", "(800 000)"],
+    ];
+    const lines = rows.map((row, r) => ({
+      page: 1,
+      y: 700 - r * 20,
+      items: row.map((text, c) => ({ text, x: [30, 300, 450][c]!, y: 700 - r * 20 })),
+    }));
+    const result = parseStatementPdf(
+      { pages: 1, lines, textItems: lines.reduce((n, l) => n + l.items.length, 0) },
+      "report.pdf",
+    );
+    expect(result.layoutUnresolved).toBe(false);
+    expect(result.droppedAmounts).toEqual([]);
+    expect(result.sheets).toHaveLength(1);
+    const sheet = result.sheets[0]!;
+    const periods = resolveStatementPeriods(
+      sheet.periods.map((p) => p.label),
+      sheet.periodContext!,
+      null,
+    );
+    expect(periods.map((p) => p?.periodEnd)).toEqual(["2024-12-31", "2023-12-31"]);
+    expect(sheet.statementType).toBe("income_statement");
+    expect(sheet.lines.flatMap((l) => l.values.map((v) => [l.label, v.amount]))).toEqual([
+      ["Revenue", "2976247"],
+      ["Revenue", "2000000"],
+      ["Expense", "-987630"],
+      ["Expense", "-800000"],
+    ]);
+  });
+  it("commits only Spanish Neto period columns, excluding gross and depreciation", async () => {
+    const bytes = textWorkbook([
+      ["Balance de situación al 31 de diciembre de 2024 — Activo", "EUR"],
+      ["ACTIVO", "Bruto", "Amortización y deterioro", "Neto 2024", "Neto 2023"],
+      ["Fixed assets", "4500.50", "1200.25", "3300.25", "3000.25"],
+    ]);
+    const result = await selectDocumentParser("spanish.xlsx", bytes).parse({
+      fileName: "spanish.xlsx",
+      bytes,
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.cells.map((c) => [c.label, c.amount, c.periodEnd, c.statementType])).toEqual([
+      ["Fixed assets", "3300.25", "2024-12-31", "balance_sheet"],
+      ["Fixed assets", "3000.25", "2023-12-31", "balance_sheet"],
+    ]);
+  });
+  it("uses a Korean explicit range for a single current fiscal-period column", async () => {
+    const bytes = textWorkbook([
+      ["손익계산서"],
+      ["제 12 기  2024년 1월 1일부터 2024년 12월 31일까지"],
+      ["(단위: 원)"],
+      ["Account", "제 12 (당) 기"],
+      ["Revenue", "2976247"],
+      ["Expense", "-987630"],
+    ]);
+    const result = await selectDocumentParser("korean.xlsx", bytes).parse({
+      fileName: "korean.xlsx",
+      bytes,
+    });
+    expect(result.issues).toEqual([]);
+    expect(
+      result.cells.map((c) => [
+        c.label,
+        c.amount,
+        c.periodEnd,
+        c.spanMonths,
+        c.currency,
+        c.statementType,
+      ]),
+    ).toEqual([
+      ["Revenue", "2976247", "2024-12-31", 12, "KRW", "income_statement"],
+      ["Expense", "-987630", "2024-12-31", 12, "KRW", "income_statement"],
+    ]);
+  });
 });

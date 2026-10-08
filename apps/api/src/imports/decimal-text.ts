@@ -140,11 +140,12 @@ export type NumberConvention = "dot" | "comma" | "unknown" | "conflict";
 /** Infer once from amount cells, never from years, reference numbers, or currency alone. */
 export function numberConvention(values: readonly string[], context = ""): NumberConvention {
   const evidence = new Set<"dot" | "comma">();
-  if (/\b(?:de-DE|de-AT|fr-FR|it-IT|es-ES|pt-PT|nl-NL)\b|Dezember|décembre/i.test(context))
-    evidence.add("comma");
+  if (/\b(?:de-DE|de-AT|fr-FR|it-IT|es-ES|pt-PT|nl-NL)\b/i.test(context)) evidence.add("comma");
   if (/\b(?:en-US|en-GB|en-IN|en-AU|ja-JP)\b/i.test(context)) evidence.add("dot");
   for (const raw of values) {
-    const token = stripCurrency(raw.normalize("NFKC")).replace(/[()\s+-]|CR|DR/gi, "");
+    const token = stripCurrency(raw.normalize("NFKC"))
+      .replace(/['’]/g, "")
+      .replace(/[()\s+-]|CR|DR/gi, "");
     if (/^\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?$/.test(token) || /^\d[\d.]*,\d{1,2}$/.test(token))
       evidence.add("comma");
     if (
@@ -160,7 +161,16 @@ export function numberConvention(values: readonly string[], context = ""): Numbe
 
 export function parseMoneyToken(value: string, convention?: NumberConvention): string | null {
   let text = stripCurrency(value.normalize("NFKC").replace(/\u2212/g, "-")).trim();
-  text = text.replace(/(\d)[ '\u2019](?=\d{3}(?:[ '\u2019.,)]|$))/g, "$1");
+  // Accept only complete thousands groups before removing their separators.
+  const body = text.replace(/\s*(?:CR|DR)$/i, "");
+  if (/[ '’]/.test(body)) {
+    const grouped =
+      /^([+(-]?)(\d{1,3}([ '’])\d{3}(?:\3\d{3})*)((?:[.,]\d+)?(?:\)|-|\s*(?:CR|DR))?)$/i.exec(text);
+    if (!grouped) return null;
+    text = grouped[1]! + grouped[2]!.replace(/[ '’]/g, "") + grouped[4]!;
+  }
+  if (text.startsWith("+") && /[()-]|DR\s*$/i.test(text.slice(1))) return null;
+  text = text.replace(/^\+/, "");
   if (convention === "conflict") return null;
   if (convention === "unknown" && /\d[.,]\d{3}(?:\)|-|\s*(?:CR|DR))?$/i.test(text)) return null;
   if (convention === "comma" || /\d{1,3}(?:\.\d{3}){2,}/.test(text)) {

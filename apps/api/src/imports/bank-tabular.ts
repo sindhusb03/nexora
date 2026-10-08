@@ -605,6 +605,13 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   const signCols = roles.flatMap((role, i) => (role === "sign" ? [i] : []));
   const summaries = lines.filter((l) => !repeatedHeader(l) && classify(l));
   const body = lines.slice(headerIndex + 1).filter((l) => !repeatedHeader(l) && !classify(l));
+  const counterpartyCol = col("counterparty");
+  const typeCol = header.findIndex((h) => h.trim().toLowerCase() === "type");
+  const typeValues = body.map((l) => l.cells[typeCol]?.trim() ?? "").filter(Boolean);
+  const prefixType =
+    amountCol >= 0 &&
+    typeValues.length > 0 &&
+    typeValues.every((value) => /^[a-z/]{1,4}$/i.test(value));
   const moneyCols = roles.flatMap((r, i) =>
     ["amount", "debit", "credit", "balance", "fee"].includes(r) ? [i] : [],
   );
@@ -712,7 +719,13 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
     narrationCol >= 0 && ((balanceCol >= 0 && signCols.length === 0) || declaredGrouping);
   for (const line of body) {
     let date = resolvedDates.get(line);
-    const narration = tokenAt(line, narrationCol);
+    const narration = [
+      prefixType ? tokenAt(line, typeCol) : "",
+      tokenAt(line, counterpartyCol).replace(/^'/, ""),
+      tokenAt(line, narrationCol).replace(/^'/, ""),
+    ]
+      .filter(Boolean)
+      .join(" ");
     if (line.cells.length !== header.length) {
       issue("layout_unresolved", "Transaction field count differs from the header", line);
       if (!date) issue("ambiguous_date", "A transaction has no printed date", line);
@@ -848,7 +861,7 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   // Sorting equal-day rows cannot invent an intra-day order.
   const ascending = transactions.every((t, i) => i === 0 || t.date >= transactions[i - 1]!.date);
   const descending = transactions.every((t, i) => i === 0 || t.date <= transactions[i - 1]!.date);
-  const ordered = !ascending && descending ? [...transactions].reverse() : transactions;
+  const ordered = !ascending && descending ? [...transactions].reverse() : [...transactions];
   if (!ascending && !descending)
     issue("balance_mismatch", "Transaction ordering needs confirmation");
   if (ascending && descending && transactions.length > 1 && opening === null)
@@ -857,12 +870,13 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   for (const txn of ordered) {
     const stated = balances.get(txn);
     if (running) running = running.add(txn.amount);
-    if (stated && running && !running.eq(stated.amount))
+    if (stated && running && !running.eq(stated.amount)) {
       issue(
         "balance_mismatch",
         "Running balance does not roll forward from the prior row",
         stated.line,
       );
+    }
     if (!running && stated) running = new AnalyticalDecimal(stated.amount);
   }
   const last = ordered.at(-1);
@@ -918,6 +932,30 @@ function parseMatrix(lines: readonly SourceLine[]): BankParse | null {
   }
   // Running balances can reconcile transactions, but only labelled summaries
   // supply a closing value for persistence.
+  if (balanceCol >= 0 && closing !== null) {
+    const closingReconciles =
+      opening !== null && new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(closing);
+    const runningMismatch = issues.some((i) =>
+      i.message.startsWith("Running balance does not roll forward"),
+    );
+    const lastPrintedBalance = body
+      .map((line) => money(tokenAt(line, balanceCol)))
+      .filter((amount): amount is string => amount !== null)
+      .at(-1);
+    if (
+      !closingReconciles &&
+      !runningMismatch &&
+      lastPrintedBalance !== undefined &&
+      !new AnalyticalDecimal(lastPrintedBalance).eq(closing)
+    ) {
+      issue(
+        "balance_mismatch",
+        "Labelled closing balance disagrees with transactions or last running balance",
+        closingLine,
+      );
+      closing = null;
+    }
+  }
   const checkClosing = closing ?? (issues.length === 0 ? (finalBalance?.amount ?? null) : null);
   if (
     opening === null ||
@@ -1071,13 +1109,14 @@ function parseNarrative(lines: readonly SourceLine[], text: string): BankParse {
     });
   }
   if (!opening || !closing || !period?.[1] || !period[2]) return { bank: null, issues };
-  if (!new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(closing))
+  if (!new AnalyticalDecimal(opening).add(sumAmounts(transactions)).eq(closing)) {
     issues.push({
       code: "balance_mismatch",
       message: "Narrative bank balances do not reconcile",
       raw: closingRaw,
       page: closingPage,
     });
+  }
   return {
     bank: {
       periodStart: period[1],
@@ -1193,6 +1232,7 @@ function columnRole(
   | "value_date"
   | "posting_date"
   | "narration"
+  | "counterparty"
   | "debit"
   | "credit"
   | "amount"
@@ -1207,6 +1247,8 @@ function columnRole(
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
   if (text.length === 0) return "note";
+  if (/^(?:counterparty|counter party|naam tegenpartij)$/.test(text)) return "counterparty";
+  if (/^(?:note|account name|account number)$/.test(text)) return "note";
   if (/^(?:currency|ccy|curr|account currency)$/.test(text)) return "currency";
   if (/^(dr cr|cr dr|direction|credit debit indicator|transaction type)$/.test(text)) return "sign";
   if (/\b(?:completed|completion|booked|booking|posting|posted)\b/.test(text))

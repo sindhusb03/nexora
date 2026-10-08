@@ -661,6 +661,12 @@ function normalizeDateText(text: string): string {
   return text
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC")
+    .replace(
+      /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g,
+      (_, y: string, m: string, d: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`,
+    )
+    .replace(/(\d{4}-\d{2}-\d{2})부터\s*(\d{4}-\d{2}-\d{2})까지/g, "$1 to $2")
     .replace(
       /令和\s*(元|\d{1,2})\s*年/g,
       (_, year: string) => `${2018 + (year === "元" ? 1 : Number(year))}年`,
@@ -679,6 +685,9 @@ function normalizeDateText(text: string): string {
       /\b(?:fiscal\s+year\s+ended|Geschaftsjahr\s+(?:zum|zum Ende des)|Jahr\s+zum|Exercice\s+clos\s+(?:le|au)|Ejercicio\s+(?:terminado|finalizado|cerrado)\s+(?:el|al)|Esercizio\s+(?:chiuso|terminato)\s+al|Boekjaar\s+(?:eindigend op|geeindigd op)|Exercicio\s+(?:encerrado|findo)\s+em)\s*/gi,
       "year ended ",
     )
+    .replace(/\b(?:Erfolgsrechnung\s+per|Periodo\s+findo\s+em)\s+/gi, "year ended ")
+    .replace(/\bBalance\s+(?:de\s+)?situacion\s+al\s+/gi, "as at ")
+    .replace(/^Neto\s+(\d{4})$/gi, "FY $1")
     .replace(/\b(?:Bilanz\s+zum)\s+(?=\d{1,2}\s)/gi, "as at ")
     .replace(/\b(?:Bilan\s+au|Balance\s+al)\s+/gi, "as at ")
     .replace(/(^|\n)\s*(?:zum|au|al)\s+(?=\d{1,2}[\s./-]|\d{4}-\d{2}-\d{2})/gi, "$1as at ")

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AnalyticalDecimal } from "@nexora/kernel";
 import { selectDocumentParser } from "../src/imports/document-parser.js";
+import { parseBankText, parseBankPdfLines } from "../src/imports/bank-tabular.js";
 import { bankLayoutCorpus } from "./fixtures/bank-layout-corpus.js";
 import { call, sessions, testApp, type TestApp } from "./harness.js";
 
@@ -107,5 +108,120 @@ describe("bank uploads preserve values and traps persist open exceptions without
     );
     const journals = await call(app, "GET", `/v1/entities/${entityId}/journals`, options);
     expect(await journals.json()).toMatchObject({ journals: [] });
+  });
+});
+
+describe("generic held-out bank layouts", () => {
+  it("reads signed Value headers, strips narration apostrophes and leaves summaries absent", () => {
+    for (const header of ["Value", "Bedrag", "Betrag", "Importe", "Montant"]) {
+      const result = parseBankText(
+        [
+          "Currency: GBP",
+          `Date,Type,Description,${header},Balance,Account Name,Account Number`,
+          "2024-12-13,D/D,'THAMES WATER,-92.10,2407.90,Current,12345678",
+          "2024-12-14,POS,'SHOP,-45.00,2362.90,Current,12345678",
+          "2024-12-15,BAC,'ELM STREET VETS LTD,-10.00,2352.90,Current,12345678",
+          "2024-12-16,OTR,'TRANSFER,20.00,2372.90,Current,12345678",
+        ].join("\n"),
+      );
+      expect(result.bank?.opening).toBeNull();
+      expect(result.bank?.closing).toBeNull();
+      expect(result.bank?.transactions.map((t) => [t.description, t.amount, t.date])).toEqual([
+        ["D/D THAMES WATER", "-92.10", "2024-12-13"],
+        ["POS SHOP", "-45.00", "2024-12-14"],
+        ["BAC ELM STREET VETS LTD", "-10.00", "2024-12-15"],
+        ["OTR TRANSFER", "20.00", "2024-12-16"],
+      ]);
+      expect(result.issues.every((i) => i.code === "balance_mismatch")).toBe(true);
+      const broken = parseBankText(
+        [
+          `Date,Description,${header},Balance`,
+          "2024-12-13,Water,-92.10,2407.90",
+          "2024-12-14,Shop,-45.00,2363.90",
+        ].join("\n"),
+      );
+      expect(broken.issues.some((i) => i.message.includes("Running balance"))).toBe(true);
+      expect(broken.bank?.transactions.map((t) => t.description)).toEqual(["Water", "Shop"]);
+    }
+  });
+  it("does not prefix a Starling transaction with a long Type value", () => {
+    const result = parseBankText(
+      [
+        "Currency: GBP",
+        "Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP)",
+        "2024-12-13,Acme,Invoice 123,FASTER PAYMENT,-92.10,2407.90",
+      ].join("\n"),
+    );
+    expect(result.bank?.transactions[0]?.description).toBe("Acme");
+  });
+  it("reads Dutch explicit signs and decimal commas with counterparty and description", () => {
+    const result = parseBankText(
+      [
+        '"IBAN/BBAN","Munt","BIC","Volgnr","Datum","Rentedatum","Bedrag","Saldo na trn","Naam tegenpartij","Omschrijving-1"',
+        '"NL00TEST0123456789","EUR","TESTNL2A","1","13-12-2024","13-12-2024","-151,24","9.848,76","Eneco Services","Termijnbedrag mei"',
+        '"NL00TEST0123456789","EUR","TESTNL2A","2","14-12-2024","14-12-2024","+4.818,00","14.666,76","Albert Heijn 1102","Betaalautomaat 14:22 pasnr. 012"',
+        '"NL00TEST0123456789","EUR","TESTNL2A","3","15-12-2024","15-12-2024","+28.945,26","43.612,02","Other client",""',
+      ].join("\n"),
+    );
+    expect(result.bank?.opening).toBeNull();
+    expect(result.bank?.closing).toBeNull();
+    expect(result.bank?.transactions.map((t) => [t.description, t.amount, t.date])).toEqual([
+      ["Eneco Services Termijnbedrag mei", "-151.24", "2024-12-13"],
+      ["Albert Heijn 1102 Betaalautomaat 14:22 pasnr. 012", "4818.00", "2024-12-14"],
+      ["Other client", "28945.26", "2024-12-15"],
+    ]);
+  });
+  it("reads Swiss preamble balances and posting dates with apostrophe grouping", () => {
+    const result = parseBankText(
+      [
+        "Anfangssaldo:;38'958.97",
+        "Schlusssaldo:;44'422.87",
+        "Bewertet in:;CHF",
+        "Abschlussdatum;Buchungsdatum;Valuta;Währung;Belastung;Gutschrift;Saldo;Beschreibung",
+        "2024-12-31;13-12-2024;14-12-2024;CHF;;5'463.90;44'422.87;Receipt",
+      ].join("\n"),
+    );
+    expect(result.issues).toEqual([]);
+    expect([result.bank?.opening, result.bank?.closing]).toEqual(["38958.97", "44422.87"]);
+    expect(result.bank?.transactions.map((t) => [t.description, t.amount, t.date])).toEqual([
+      ["Receipt", "5463.90", "2024-12-13"],
+    ]);
+  });
+  it("reads PDF B/F and C/F, carries reconciled dates and appends wrapped narration", () => {
+    const rows = [
+      ["Currency: INR"],
+      ["Date", "Description", "Chq.No", "Debit", "Credit", "Balance"],
+      ["", "B/F", "", "", "", "1,34,146.57"],
+      ["13-12-2024", "Cheque payment", "987654", "1,000.00", "", "1,33,146.57"],
+      ["", "wrapped narration", "", "", "", ""],
+      ["", "Receipt", "", "", "2,000.00", "1,35,146.57"],
+      ["", "C/F", "", "", "", "1,35,146.57"],
+    ];
+    const lines = rows.map((row, r) => ({
+      page: 1,
+      y: 700 - r * 10,
+      items: row.flatMap((text, c) =>
+        text ? [{ text, x: [30, 130, 310, 410, 510, 610][c]!, y: 700 - r * 10 }] : [],
+      ),
+    }));
+    const result = parseBankPdfLines(lines);
+    expect(result.issues).toEqual([]);
+    expect([result.bank?.opening, result.bank?.closing]).toEqual(["134146.57", "135146.57"]);
+    expect(result.bank?.transactions.map((t) => [t.description, t.amount, t.date])).toEqual([
+      ["Cheque payment wrapped narration", "-1000.00", "2024-12-13"],
+      ["Receipt", "2000.00", "2024-12-13"],
+    ]);
+    const broken = parseBankPdfLines(
+      lines.map((l, r) =>
+        r === 5
+          ? {
+              ...l,
+              items: l.items.map((i) => (i.x === 610 ? { ...i, text: "1,35,147.57" } : i)),
+            }
+          : l,
+      ),
+    );
+    expect(broken.bank).toBeNull();
+    expect(broken.issues.map((i) => i.code)).toContain("balance_mismatch");
   });
 });
