@@ -177,7 +177,22 @@ const session: SessionView = {
   csrfToken: "csrf-token",
 };
 
+const elementLayout = {
+  height: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight"),
+  width: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth"),
+};
+
 beforeEach(() => {
+  // jsdom reports a 0×0 scrollport. The statement grid virtualizer then emits
+  // no rows, even though the row model still holds the kernel lines.
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get: () => 800,
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get: () => 1200,
+  });
   vi.mocked(fetchSession).mockResolvedValue(session);
   vi.mocked(listCompanies).mockResolvedValue([
     {
@@ -192,13 +207,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  if (elementLayout.height) {
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", elementLayout.height);
+  }
+  if (elementLayout.width) {
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", elementLayout.width);
+  }
 });
 
 describe("studio with a non-demo company", () => {
   it("renders kernel figures and unavailable plan panels instead of crashing", async () => {
     render(<StudioApp />);
-    expect(await screen.findByTestId("screen-dashboard")).toBeInTheDocument();
+    const dashboard = await screen.findByTestId("screen-dashboard");
+    expect(dashboard).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Real entity" })).toBeInTheDocument();
+    expect(dashboard).toHaveTextContent("Ending cash");
+    expect(dashboard).toHaveTextContent("$0.60");
+    expect(dashboard).toHaveTextContent("fe-kernel-0.2.1");
     expect(screen.getByTestId("kpi-unavailable")).toHaveTextContent("Unavailable");
     expect(screen.getByTestId("kpi-unavailable")).toHaveTextContent("no tenant plan data");
 
@@ -227,6 +252,9 @@ describe("studio with a non-demo company", () => {
     expect(screen.getByTestId("screen-board")).toHaveTextContent("Unavailable for this company.");
 
     fireEvent.click(screen.getByTestId("nav-statements"));
-    expect(await screen.findByTestId("screen-statements")).toHaveTextContent("Ending cash");
+    const statements = await screen.findByTestId("screen-statements");
+    expect(statements).toHaveTextContent("Ending cash");
+    expect(statements).toHaveTextContent("0.60");
+    expect(statements).toHaveTextContent("No posted journals in this period.");
   });
 });
