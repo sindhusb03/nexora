@@ -466,6 +466,12 @@ export function resolveStatementPeriods(
     return labels.map(() => null);
   const asAtTitle = new RegExp(`\\bas (?:at|of)\\s+${DATE_TOKEN}`, "i").exec(normalizedTitle);
   const netoEnd = asAtTitle ? normalizePeriod(asAtTitle[0], true) : null;
+  const latestNetoYear = Math.max(
+    ...labels.flatMap((label) => {
+      const neto = /^Neto\s+(\d{4})$/i.exec(label.trim());
+      return neto ? [Number(neto[1])] : [];
+    }),
+  );
   const titles = statementPeriods(title);
   const titleSpan = statementSpan(datedRangePhrase(title) ?? title);
   if (titleSpan !== null && titleSpan !== 12) return labels.map(() => null);
@@ -492,7 +498,7 @@ export function resolveStatementPeriods(
   const own = labels.map((label) => {
     const neto = /^Neto\s+(\d{4})$/i.exec(label.trim());
     if (neto) {
-      if (!netoEnd) return null;
+      if (!netoEnd || latestNetoYear !== Number(netoEnd.periodEnd.slice(0, 4))) return null;
       return normalizePeriod(`FY ${neto[1]}`, true, false, {
         month: Number(netoEnd.periodEnd.slice(5, 7)),
         day: Number(netoEnd.periodEnd.slice(8)),

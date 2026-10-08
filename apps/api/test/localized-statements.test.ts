@@ -525,6 +525,44 @@ describe("held-out localized statement semantics", () => {
       ["Fixed assets", "3000.25", "2023-12-31", "balance_sheet"],
     ]);
   });
+  it("holds Spanish Neto columns when the latest year disagrees with the as-at title", async () => {
+    const title = "Balance de situación al 31 de marzo de 2025 — Activo";
+    const bytes = textWorkbook([
+      [title, "EUR"],
+      ["ACTIVO", "Bruto", "Amortización y deterioro", "Neto 2024", "Neto 2023"],
+      ["Fixed assets", "4500.50", "1200.25", "3300.25", "3000.25"],
+    ]);
+    const result = await selectDocumentParser("spanish.xlsx", bytes).parse({
+      fileName: "spanish.xlsx",
+      bytes,
+    });
+    expect(result.cells).toEqual([]);
+    expect(result.issues.some((issue) => issue.message.includes("Confirm period end"))).toBe(true);
+    expect(
+      resolveStatementPeriods(["Neto 2024", "Neto 2023"], title, { month: 12, day: 31 }),
+    ).toEqual([null, null]);
+  });
+  it("resolves Spanish Neto columns when the latest year matches the as-at title", async () => {
+    const title = "Balance de situación al 31 de marzo de 2025 — Activo";
+    const labels = ["Neto 2025", "Neto 2024"];
+    const bytes = textWorkbook([
+      [title, "EUR"],
+      ["ACTIVO", "Bruto", "Amortización y deterioro", ...labels],
+      ["Fixed assets", "4500.50", "1200.25", "3300.25", "3000.25"],
+    ]);
+    const result = await selectDocumentParser("spanish.xlsx", bytes).parse({
+      fileName: "spanish.xlsx",
+      bytes,
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.cells.map((cell) => [cell.amount, cell.periodEnd])).toEqual([
+      ["3300.25", "2025-03-31"],
+      ["3000.25", "2024-03-31"],
+    ]);
+    expect(resolveStatementPeriods(labels, title, null).map((period) => period?.periodEnd)).toEqual(
+      ["2025-03-31", "2024-03-31"],
+    );
+  });
   it("uses a Korean explicit range for a single current fiscal-period column", async () => {
     const bytes = textWorkbook([
       ["손익계산서"],
