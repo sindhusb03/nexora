@@ -31,10 +31,14 @@ import {
   withCurrency,
 } from "./format";
 import { StatementGrid } from "./statement-grid";
-import type { JournalView, PlatformView, Workspace } from "./types";
+import type { JournalView, MoneyCell, PlatformView, Workspace } from "./types";
 
 export function money(minor: string, currency: string): string {
   return withCurrency(minorToDisplay(minor, currency), currency);
+}
+
+function moneyCell(cell: MoneyCell | null, currency: string): string {
+  return cell ? withCurrency(cell.display, currency) : "Unavailable";
 }
 
 function colors(dark: boolean) {
@@ -193,19 +197,27 @@ export function DashboardView({
         />
         {workspace.kpis
           .filter((item) => item.id === "normalized")
-          .map((item) => (
-            <KpiCard
-              key={item.id}
-              label={item.label}
-              display={withCurrency(item.display, currency)}
-              delta={null}
-              currency={currency}
-              spark={[]}
-              color={tone.plan}
-              hash={item.lineage.inputHash}
-              engine={item.lineage.engineVersion}
-            />
-          ))}
+          .map((item) =>
+            item.display !== null && item.lineage !== null ? (
+              <KpiCard
+                key={item.id}
+                label={item.label}
+                display={withCurrency(item.display, currency)}
+                delta={null}
+                currency={currency}
+                spark={[]}
+                color={tone.plan}
+                hash={item.lineage.inputHash}
+                engine={item.lineage.engineVersion}
+              />
+            ) : (
+              <article key={item.id} className="nx-kpi" data-testid="kpi-unavailable">
+                <p>{item.label}</p>
+                <strong>Unavailable</strong>
+                <small>{item.reason ?? "No tenant plan data"}</small>
+              </article>
+            ),
+          )}
       </div>
       <section className="nx-panel">
         <div className="nx-panel-head">
@@ -219,16 +231,20 @@ export function DashboardView({
       <div className="nx-split">
         <section className="nx-panel">
           <h2>Variance versus plan</h2>
-          <ul className="nx-list">
-            {workspace.variance.lines.map((line) => (
-              <li key={line.key}>
-                <span>{line.label}</span>
-                <strong className={line.favorable ? "is-good" : "is-bad"}>
-                  {money(line.varianceMinor, currency)}
-                </strong>
-              </li>
-            ))}
-          </ul>
+          {workspace.variance.status === "unavailable" ? (
+            <p className="nx-muted">{workspace.variance.reason ?? "No tenant plan data"}</p>
+          ) : (
+            <ul className="nx-list">
+              {workspace.variance.lines.map((line) => (
+                <li key={line.key}>
+                  <span>{line.label}</span>
+                  <strong className={line.favorable ? "is-good" : "is-bad"}>
+                    {money(line.varianceMinor, currency)}
+                  </strong>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
         <section className="nx-panel">
           <h2>Waiting on you</h2>
@@ -351,8 +367,9 @@ export function OnboardingView({ workspace }: { readonly workspace: Workspace })
           <p className="nx-kicker">Onboarding</p>
           <h1>Trial balance, statements, then a certificate</h1>
           <p className="nx-lede">
-            The demo books are a balanced reconstruction of Nazareno Services. Workbook totals are
-            evidence, not silent journal imports.
+            {certificate.status === "unavailable"
+              ? "Book cash comes from the kernel. A bank import is required before this certificate can reconcile."
+              : "The demo books are a balanced reconstruction of Nazareno Services. Workbook totals are evidence, not silent journal imports."}
           </p>
         </div>
       </header>
@@ -376,11 +393,11 @@ export function OnboardingView({ workspace }: { readonly workspace: Workspace })
           </div>
           <div>
             <dt>Staged bank figure</dt>
-            <dd>{withCurrency(certificate.bankCash.display, workspace.context.currency)}</dd>
+            <dd>{moneyCell(certificate.bankCash, workspace.context.currency)}</dd>
           </div>
           <div>
             <dt>Difference</dt>
-            <dd>{withCurrency(certificate.difference.display, workspace.context.currency)}</dd>
+            <dd>{moneyCell(certificate.difference, workspace.context.currency)}</dd>
           </div>
           <div>
             <dt>Status</dt>
@@ -388,7 +405,7 @@ export function OnboardingView({ workspace }: { readonly workspace: Workspace })
           </div>
           <div>
             <dt>Source</dt>
-            <dd>{certificate.sourceDocument}</dd>
+            <dd>{certificate.sourceDocument ?? "Unavailable"}</dd>
           </div>
           <div>
             <dt>Lineage</dt>
@@ -531,20 +548,24 @@ export function ForecastView({
     scenarioGrowthRate: string;
   }) => void;
 }) {
-  const drivers = workspace.forecast.drivers;
-  const [revenueMinor, setRevenue] = useState(drivers.revenueMinor);
-  const [growthRate, setGrowth] = useState(drivers.growthRate);
-  const [grossMargin, setMargin] = useState(drivers.grossMargin);
-  const [opexMinor, setOpex] = useState(drivers.opexMinor);
-  const [scenarioGrowthRate, setScenario] = useState(workspace.forecast.scenarioGrowthRate);
+  const forecast = workspace.forecast;
+  const drivers = forecast.drivers;
+  const base = forecast.base;
+  const scenarioCase = forecast.scenario;
+  const [revenueMinor, setRevenue] = useState(drivers.revenueMinor ?? "");
+  const [growthRate, setGrowth] = useState(drivers.growthRate ?? "");
+  const [grossMargin, setMargin] = useState(drivers.grossMargin ?? "");
+  const [opexMinor, setOpex] = useState(drivers.opexMinor ?? "");
+  const [scenarioGrowthRate, setScenario] = useState(forecast.scenarioGrowthRate ?? "");
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(
-    () => ({
+  const option = useMemo<echarts.EChartsOption>(() => {
+    if (!base || !scenarioCase) return baseOption(dark, currency);
+    return {
       ...baseOption(dark, currency),
       xAxis: {
         ...(baseOption(dark, currency).xAxis as object),
-        data: workspace.forecast.base.months.map((month) => `M${month.period}`),
+        data: base.months.map((month) => `M${month.period}`),
       },
       series: [
         {
@@ -554,9 +575,7 @@ export function ForecastView({
           showSymbol: false,
           connectNulls: true,
           areaStyle: { color: tone.revenue, opacity: 0.12 },
-          data: workspace.forecast.base.months.map((month) =>
-            minorToAxis(month.revenueMinor, currency),
-          ),
+          data: base.months.map((month) => minorToAxis(month.revenueMinor, currency)),
           color: tone.revenue,
         },
         {
@@ -565,22 +584,25 @@ export function ForecastView({
           smooth: true,
           showSymbol: false,
           connectNulls: true,
-          data: workspace.forecast.scenario.months.map((month) =>
-            minorToAxis(month.revenueMinor, currency),
-          ),
+          data: scenarioCase.months.map((month) => minorToAxis(month.revenueMinor, currency)),
           color: tone.plan,
         },
       ],
-    }),
-    [
-      currency,
-      dark,
-      tone.plan,
-      tone.revenue,
-      workspace.forecast.base.months,
-      workspace.forecast.scenario.months,
-    ],
-  );
+    };
+  }, [base, currency, dark, scenarioCase, tone.plan, tone.revenue]);
+  if (!base || !scenarioCase) {
+    return (
+      <div className="nx-stack" data-testid="screen-forecast">
+        <ScreenState
+          title="Forecast unavailable"
+          body={
+            forecast.reason ??
+            "No tenant plan data. Drivers and scenarios stay empty until a plan exists."
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="nx-stack" data-testid="screen-forecast">
       <header className="nx-page-head">
@@ -589,7 +611,7 @@ export function ForecastView({
           <h1>Twelve months, two cases</h1>
           <p className="nx-lede">
             Period 1 is the opening run-rate. Later months compound growth inside the kernel. Hash{" "}
-            {shortHash(workspace.forecast.base.inputHash)}.
+            {shortHash(base.inputHash)}.
           </p>
         </div>
       </header>
@@ -646,8 +668,8 @@ export function ForecastView({
             </tr>
           </thead>
           <tbody>
-            {workspace.forecast.base.months.map((month, index) => {
-              const scenario = workspace.forecast.scenario.months[index];
+            {base.months.map((month, index) => {
+              const scenario = scenarioCase.months[index];
               return (
                 <tr key={month.period}>
                   <td>M{month.period}</td>
@@ -677,8 +699,9 @@ export function CashView({
   const cash = scenario === "base" ? workspace.cash.base : workspace.cash.downside;
   const currency = workspace.context.currency;
   const tone = colors(dark);
-  const option = useMemo<echarts.EChartsOption>(
-    () => ({
+  const option = useMemo<echarts.EChartsOption>(() => {
+    if (!cash) return baseOption(dark, currency);
+    return {
       ...baseOption(dark, currency),
       xAxis: {
         ...(baseOption(dark, currency).xAxis as object),
@@ -694,9 +717,21 @@ export function CashView({
           })),
         },
       ],
-    }),
-    [cash.weeks, currency, dark, tone.alert, tone.cash],
-  );
+    };
+  }, [cash, currency, dark, tone.alert, tone.cash]);
+  if (!cash) {
+    return (
+      <div className="nx-stack" data-testid="screen-cash">
+        <ScreenState
+          title="Cash forecast unavailable"
+          body={
+            workspace.cash.reason ??
+            "No tenant plan data. The 13-week cash view needs a tenant plan."
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="nx-stack" data-testid="screen-cash">
       <header className="nx-page-head">
@@ -752,6 +787,7 @@ export function VarianceView({
   readonly workspace: Workspace;
   readonly dark: boolean;
 }) {
+  const variance = workspace.variance;
   const currency = workspace.context.currency;
   const tone = colors(dark);
   const option = useMemo<echarts.EChartsOption>(
@@ -759,25 +795,35 @@ export function VarianceView({
       ...baseOption(dark, currency),
       xAxis: {
         ...(baseOption(dark, currency).xAxis as object),
-        data: workspace.variance.lines.map((line) => line.label),
+        data: variance.lines.map((line) => line.label),
       },
       series: [
         {
           name: "Actual",
           type: "bar",
-          data: workspace.variance.lines.map((line) => minorToAxis(line.actualMinor, currency)),
+          data: variance.lines.map((line) => minorToAxis(line.actualMinor, currency)),
           color: tone.revenue,
         },
         {
           name: "Plan",
           type: "bar",
-          data: workspace.variance.lines.map((line) => minorToAxis(line.planMinor, currency)),
+          data: variance.lines.map((line) => minorToAxis(line.planMinor, currency)),
           color: tone.plan,
         },
       ],
     }),
-    [currency, dark, tone.plan, tone.revenue, workspace.variance.lines],
+    [currency, dark, tone.plan, tone.revenue, variance.lines],
   );
+  if (variance.status === "unavailable" || variance.inputHash === null) {
+    return (
+      <div className="nx-stack" data-testid="screen-variance">
+        <ScreenState
+          title="Variance unavailable"
+          body={variance.reason ?? "No tenant plan data. Actual versus plan needs a tenant budget."}
+        />
+      </div>
+    );
+  }
   return (
     <div className="nx-stack" data-testid="screen-variance">
       <header className="nx-page-head">
@@ -786,7 +832,7 @@ export function VarianceView({
           <h1>Actual minus plan</h1>
           <p className="nx-lede">
             Favorable means higher revenue or profit, or lower expense. Hash{" "}
-            {shortHash(workspace.variance.inputHash)}.
+            {shortHash(variance.inputHash)}.
           </p>
         </div>
       </header>
@@ -832,12 +878,37 @@ export function QoeView({
   readonly workspace: Workspace;
   readonly dark: boolean;
 }) {
+  const qoe = workspace.qoe;
+  const reported = qoe.reported;
+  const normalized = qoe.normalized;
+  const inputHash = qoe.inputHash;
   const currency = workspace.context.currency;
   const tone = colors(dark);
   const option = useMemo<echarts.EChartsOption>(
-    () => waterfall(workspace, dark, currency, tone),
-    [currency, dark, tone, workspace],
+    () =>
+      reported !== null && normalized !== null
+        ? waterfall(workspace, reported, normalized, dark, currency, tone)
+        : baseOption(dark, currency),
+    [currency, dark, normalized, reported, tone, workspace],
   );
+  if (
+    qoe.status === "unavailable" ||
+    reported === null ||
+    normalized === null ||
+    inputHash === null
+  ) {
+    return (
+      <div className="nx-stack" data-testid="screen-qoe">
+        <ScreenState
+          title="Quality of earnings unavailable"
+          body={
+            qoe.reason ??
+            "No tenant plan data. The bridge needs reported earnings and accepted adjustments."
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="nx-stack" data-testid="screen-qoe">
       <header className="nx-page-head">
@@ -846,8 +917,7 @@ export function QoeView({
           <h1>Reported net income, then accepted add-backs</h1>
           <p className="nx-lede">
             The bridge starts from kernel net income. These books have no depreciation line, so the
-            result is normalized earnings, not a full EBITDA build. Hash{" "}
-            {shortHash(workspace.qoe.inputHash)}.
+            result is normalized earnings, not a full EBITDA build. Hash {shortHash(inputHash)}.
           </p>
         </div>
       </header>
@@ -857,9 +927,9 @@ export function QoeView({
       <ol className="nx-bridge">
         <li>
           <span>Reported</span>
-          <strong>{money(workspace.qoe.reported, currency)}</strong>
+          <strong>{money(reported, currency)}</strong>
         </li>
-        {workspace.qoe.steps.map((step) => (
+        {qoe.steps.map((step) => (
           <li key={step.adjustmentId}>
             <span>{step.label}</span>
             <strong>+ {money(step.amount, currency)}</strong>
@@ -868,7 +938,7 @@ export function QoeView({
         ))}
         <li>
           <span>Normalized</span>
-          <strong>{money(workspace.qoe.normalized, currency)}</strong>
+          <strong>{money(normalized, currency)}</strong>
         </li>
       </ol>
     </div>
@@ -891,15 +961,19 @@ export function BoardView({ workspace }: { readonly workspace: Workspace }) {
       {workspace.board.sections.map((section) => (
         <section key={section.heading} className="nx-panel">
           <h2>{section.heading}</h2>
-          <div className="nx-figures">
-            {section.figures.map((figure) => (
-              <article key={figure.label}>
-                <p>{figure.label}</p>
-                <strong>{withCurrency(figure.display, workspace.context.currency)}</strong>
-                <small title={figure.inputHash}>{shortHash(figure.inputHash)}</small>
-              </article>
-            ))}
-          </div>
+          {section.figures.length === 0 ? (
+            <p className="nx-muted">Unavailable for this company.</p>
+          ) : (
+            <div className="nx-figures">
+              {section.figures.map((figure) => (
+                <article key={figure.label}>
+                  <p>{figure.label}</p>
+                  <strong>{withCurrency(figure.display, workspace.context.currency)}</strong>
+                  <small title={figure.inputHash}>{shortHash(figure.inputHash)}</small>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
       ))}
     </div>
@@ -1018,14 +1092,16 @@ function ScreenState({ title, body }: { readonly title: string; readonly body: s
 
 function waterfall(
   workspace: Workspace,
+  reported: string,
+  normalized: string,
   dark: boolean,
   currency: string,
   tone: ReturnType<typeof colors>,
 ): echarts.EChartsOption {
   const steps = [
-    { label: "Reported", minor: workspace.qoe.reported, total: true },
+    { label: "Reported", minor: reported, total: true },
     ...workspace.qoe.steps.map((step) => ({ label: step.label, minor: step.amount, total: false })),
-    { label: "Normalized", minor: workspace.qoe.normalized, total: true },
+    { label: "Normalized", minor: normalized, total: true },
   ];
   let running = 0;
   const assist: number[] = [];

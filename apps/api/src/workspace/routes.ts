@@ -50,6 +50,7 @@ const memberSchema = z.object({
   role: z.enum(["owner", "controller", "viewer", "auditor"]),
 });
 const statusSchema = z.object({ status: z.enum(["active", "suspended"]) });
+const SUPPORT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const supportSchema = z.object({
   tenantId: z.uuid(),
   hours: z.number().int().min(1).max(24).optional(),
@@ -281,6 +282,8 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
         : NaN;
     if (!Number.isFinite(expiry) || expiry <= Date.now())
       return c.json({ error: "A future support expiry is required" }, 422);
+    if (expiry > Date.now() + SUPPORT_EXPIRY_MS)
+      return c.json({ error: "A valid future support expiry is required" }, 422);
     if (!(await deps.store.getTenant(body.tenantId)))
       throw new KernelError("FIN_NOT_FOUND", "Tenant not found");
     const membershipId = crypto.randomUUID();

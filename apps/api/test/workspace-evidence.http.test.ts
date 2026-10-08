@@ -312,6 +312,22 @@ describe("workspace evidence boundaries", () => {
     ).toHaveLength(0);
   });
 
+  it("rejects support expiry more than 24 hours ahead and keeps a nearer expiry", async () => {
+    const f = await fixture();
+    const grant = (expiresAt: string) =>
+      call(f.app, "POST", "/v1/admin/support", {
+        actor: "platform-admin",
+        body: { tenantId: f.tenant, reason: "Investigate", expiresAt },
+      });
+    const tooFar = await grant(new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString());
+    expect(tooFar.status).toBe(422);
+    expect(await tooFar.json()).toEqual({ error: "A valid future support expiry is required" });
+    expect(await store.listRoles(f.tenant, "platform-admin")).toEqual([]);
+    const within = await grant(new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString());
+    expect(within.status).toBe(200);
+    expect(await store.listRoles(f.tenant, "platform-admin")).toEqual(["auditor"]);
+  });
+
   it("records the exact live corpus hash, byte count and source IDs without document text", async () => {
     const f = await fixture();
     const documentId = await record(
