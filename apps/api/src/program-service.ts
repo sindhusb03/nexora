@@ -743,6 +743,14 @@ async function loadPostedTrialBalance(
   periodId: string,
 ) {
   const activity = await loadClassifiedActivity(store, tenantId, entityId, periodId);
+  for (const line of activity.lines) {
+    if (line.currency !== activity.currency) {
+      throw new KernelError(
+        "FIN_CURRENCY_MISMATCH",
+        "Posted journal currency does not match the entity functional currency",
+      );
+    }
+  }
   const lines = trialBalanceFromClassifiedLines(activity.lines, activity.retainedEarningsAccountId);
   if (lines.length === 0) {
     throw new KernelError(

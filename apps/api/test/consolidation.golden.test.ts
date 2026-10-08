@@ -374,6 +374,61 @@ describe("posted-ledger group consolidation", () => {
     );
   });
 
+  it("keeps a later period out of the 2024 consolidation", async () => {
+    const later = await createPeriod(usEntityId, "2025-01-01", "2025-12-31");
+    await post(usEntityId, later, "USD", [
+      { accountId: usCash, debit: "500", credit: "0" },
+      { accountId: usEquity, debit: "0", credit: "500" },
+    ]);
+    const translated = await translate(ledgerBody());
+    expect(translated.status).toBe(200);
+    const fx = await readJson<TranslationBody>(translated);
+    const lines = lineMap(fx.lines);
+    expect(lines.get(usCash)).toBe("90006300");
+    expect(lines.get(usEquity)).toBe("-80008000");
+    expect(fx.ctaMinor).toBe("-10001225");
+  });
+
+  it("splits prior and current income between retained earnings and the income account", async () => {
+    const entityId = await createEntity("Income split", "USD");
+    const prior = await createPeriod(entityId, "2023-01-01", "2023-12-31");
+    const current = await createPeriod(entityId, "2024-01-01", "2024-12-31");
+    const cash = await createAccount(entityId, "1000", "Cash", "asset", "cash", false);
+    const revenue = await createAccount(entityId, "4000", "Revenue", "revenue", "cfo", false);
+    const retained = await createAccount(
+      entityId,
+      "3900",
+      "Retained earnings",
+      "equity",
+      "non_cash",
+      true,
+    );
+    await post(entityId, prior, "USD", [
+      { accountId: cash, debit: "100", credit: "0" },
+      { accountId: revenue, debit: "0", credit: "100" },
+    ]);
+    await post(entityId, current, "USD", [
+      { accountId: cash, debit: "40", credit: "0" },
+      { accountId: revenue, debit: "0", credit: "40" },
+    ]);
+    const translated = await translate({
+      ctaAccountId: "cta",
+      entities: [{ entityId, periodId: current }],
+      rates: [rates[0]],
+    });
+    expect(translated.status).toBe(200);
+    const fx = await readJson<TranslationBody>(translated);
+    expect(lineMap(fx.lines)).toEqual(
+      new Map([
+        [cash, "12600"],
+        [revenue, "-3400"],
+        [retained, "-8000"],
+        ["cta", "-1200"],
+      ]),
+    );
+    expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
+  });
+
   function ledgerBody() {
     return {
       ctaAccountId: "cta",
