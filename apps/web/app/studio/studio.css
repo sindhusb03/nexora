@@ -571,6 +571,10 @@ html.dark {
   font-size: 0.75rem;
 }
 
+.nx-signin a {
+  color: var(--primary);
+}
+
 .nx-text-btn {
   align-self: flex-start;
   padding: 0;
@@ -1097,4 +1101,100 @@ html.dark {
   background: var(--surface-muted);
   color: var(--text);
   border-color: var(--border);
+}
+
+.nx-setup {
+  width: min(52rem, 100%);
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 1.25rem 1.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.nx-setup-steps {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nx-setup-steps li {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  gap: 0.4rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.nx-setup-steps li[aria-current="step"] {
+  background: var(--primary-soft);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.nx-field-grid {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  gap: 0.65rem 0.75rem;
+  align-items: center;
+}
+
+.nx-field-grid .nx-span {
+  grid-column: 1 / -1;
+}
+
+.nx-field-grid h1 {
+  margin: 0;
+}
+
+.nx-fye {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem;
+  gap: 0.5rem;
+}
+
+.nx-fye select {
+  min-width: 0;
+  width: 100%;
+}
+
+.nx-setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.nx-home-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 0;
+}
+
+.nx-home-facts dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nx-home-facts dd {
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .nx-setup,
+  .nx-field-grid,
+  .nx-home-facts {
+    grid-template-columns: 1fr;
+  }
 }

@@ -21,7 +21,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiFailure,
@@ -30,6 +30,7 @@ import {
   fetchPlatform,
   confirmTotp,
   consumeMagicLink,
+  createLegalEntity,
   disableTotp,
   enrollTotp,
   fetchAuthConfig,
@@ -38,8 +39,10 @@ import {
   grantSupport,
   inviteMember,
   listCompanies,
+  listLegalEntities,
   login,
   logout,
+  provisionTenant,
   requestMagicLink,
   verifySecondFactor,
   saveForecast,
@@ -62,6 +65,13 @@ import {
   StatementsView,
   VarianceView,
 } from "./studio-views";
+import {
+  CompanyHome,
+  FirstRun,
+  fiscalYearEndLabel,
+  type CompanySetup,
+  type OpenedCompany,
+} from "./first-run";
 import { SignInScreen, TwoFactorPanel } from "./sign-in";
 import type { AuthConfigView } from "./api";
 import type { CompanyCard, CopilotReply, PlatformView, SessionView, Workspace } from "./types";
@@ -114,7 +124,9 @@ export function StudioApp() {
   const [companies, setCompanies] = useState<readonly CompanyCard[]>([]);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [platform, setPlatform] = useState<PlatformView | null>(null);
-  const [phase, setPhase] = useState<"loading" | "signed-out" | "ready" | "error">("loading");
+  const [phase, setPhase] = useState<"loading" | "signed-out" | "setup" | "ready" | "error">(
+    "loading",
+  );
   const [error, setError] = useState("The workspace could not be loaded.");
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [dark, setDark] = useState(false);
@@ -140,6 +152,8 @@ export function StudioApp() {
     qrDataUrl: string;
     recoveryCodes: readonly string[];
   } | null>(null);
+  const [opened, setOpened] = useState<OpenedCompany | null>(null);
+  const provisioned = useRef<{ tenantId: string; name: string; csrf: string } | null>(null);
 
   const boot = useCallback(async () => {
     setPhase("loading");
@@ -206,14 +220,85 @@ export function StudioApp() {
     setSession(active);
     if (!active.tenantId) {
       setWorkspace(null);
-      setPhase("ready");
-      if (active.platformAdmin) setScreen("platform");
+      setOpened(null);
+      if (active.platformAdmin) {
+        setPhase("ready");
+        setScreen("platform");
+        return;
+      }
+      setPhase("setup");
       return;
     }
-    const snapshot = await fetchWorkspace(active.csrfToken);
-    setWorkspace(snapshot);
-    setPeriodIndex(Math.max(0, snapshot.statements.periods.length - 1));
-    setPhase("ready");
+    try {
+      const snapshot = await fetchWorkspace(active.csrfToken);
+      setWorkspace(snapshot);
+      setOpened(null);
+      setPeriodIndex(Math.max(0, snapshot.statements.periods.length - 1));
+      setPhase("ready");
+    } catch (caught) {
+      if (!isUnreadyCompany(caught)) throw caught;
+      const entities = await listLegalEntities(active.csrfToken);
+      const entity = entities[0];
+      if (!entity) {
+        setWorkspace(null);
+        setOpened(null);
+        setPhase("setup");
+        return;
+      }
+      setWorkspace(null);
+      setOpened({
+        name: entity.legalName,
+        legalName: entity.legalName,
+        currency: entity.functionalCurrency,
+        region: active.region,
+        fiscalYearEndLabel: null,
+      });
+      setPhase("ready");
+    }
+  }
+
+  async function openNewCompany(input: CompanySetup) {
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      let active = session;
+      if (!active.tenantId) {
+        if (!provisioned.current) {
+          const tenant = await provisionTenant(active.csrfToken, {
+            name: input.name,
+            homeRegion: active.region,
+            ownerActorId: active.actorId,
+          });
+          provisioned.current = {
+            tenantId: tenant.tenantId,
+            name: tenant.name,
+            csrf: active.csrfToken,
+          };
+        }
+        active = await selectTenant(provisioned.current.csrf, provisioned.current.tenantId);
+        setSession(active);
+      }
+      const entity = await createLegalEntity(active.csrfToken, {
+        legalName: input.name,
+        functionalCurrency: input.currency,
+        fiscalYearEndMonth: input.fiscalYearEndMonth,
+        fiscalYearEndDay: input.fiscalYearEndDay,
+      });
+      setOpened({
+        name: provisioned.current?.name ?? entity.legalName,
+        legalName: entity.legalName,
+        currency: entity.functionalCurrency,
+        region: active.region,
+        fiscalYearEndLabel: fiscalYearEndLabel(input.fiscalYearEndMonth, input.fiscalYearEndDay),
+      });
+      setWorkspace(null);
+      setPhase("ready");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "The company could not be opened");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function acceptLogin(result: Awaited<ReturnType<typeof login>>) {
@@ -405,6 +490,21 @@ export function StudioApp() {
         <Button type="button" onClick={() => void boot()}>
           Try again
         </Button>
+      </main>
+    );
+  }
+  if (phase === "setup" && session) {
+    return (
+      <main className="nx-gate" data-testid="setup-screen">
+        <FirstRun busy={busy} notice={notice} onOpen={openNewCompany} />
+        <button
+          type="button"
+          className="nx-text-btn"
+          data-testid="sign-out"
+          onClick={() => void onSignOut()}
+        >
+          Sign out
+        </button>
       </main>
     );
   }
@@ -606,7 +706,8 @@ export function StudioApp() {
               onClose={() => setFactor(null)}
             />
           ) : null}
-          {!workspace ? (
+          {!workspace && opened ? <CompanyHome company={opened} /> : null}
+          {!workspace && !opened ? (
             <div className="nx-state" role="status">
               <h2>No company yet</h2>
               <p>
@@ -952,6 +1053,14 @@ function StreamingText({ text }: { readonly text: string }) {
     return () => window.clearInterval(timer);
   }, [text]);
   return <>{text.slice(0, count)}</>;
+}
+
+function isUnreadyCompany(error: unknown): boolean {
+  return (
+    error instanceof ApiFailure &&
+    error.status === 404 &&
+    (error.message === "Entity is not ready" || error.message === "Period not found")
+  );
 }
 
 function initials(actorId: string): string {
