@@ -68,6 +68,9 @@ export function registerProgramRoutes(app: Hono<AppEnv>, program: ProgramService
     const body = fxSetSchema.parse(await c.req.json());
     return c.json(await program.createFxRateSet(readActor(c), body), 201);
   });
+  app.get("/v1/consolidation-groups", async (c) => {
+    return c.json(await program.listGroups(readActor(c)));
+  });
   app.post("/v1/consolidation-groups", async (c) => {
     const body = groupSchema.parse(await c.req.json());
     return c.json(await program.createGroup(readActor(c), body), 201);

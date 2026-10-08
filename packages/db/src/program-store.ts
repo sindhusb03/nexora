@@ -1,5 +1,5 @@
 import { KernelError } from "@nexora/kernel";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
 import type { AppDatabase } from "./client.js";
@@ -295,6 +295,24 @@ export function createProgramStore(db: AppDatabase) {
         });
         await writeAudit(tx, input.tenantId, input.audit);
         return { id: input.id };
+      });
+    },
+    listConsolidationGroups(tenantId: string) {
+      return tenantTx(db, tenantId, async (tx) => {
+        const rows = await tx
+          .select({
+            consolidationGroupId: consolidationGroup.consolidationGroupId,
+            name: consolidationGroup.name,
+            reportingCurrency: consolidationGroup.reportingCurrency,
+          })
+          .from(consolidationGroup)
+          .where(eq(consolidationGroup.tenantId, tenantId))
+          .orderBy(asc(consolidationGroup.createdAt), asc(consolidationGroup.consolidationGroupId));
+        return rows.map((row) => ({
+          consolidationGroupId: row.consolidationGroupId,
+          name: row.name,
+          reportingCurrency: row.reportingCurrency.trim(),
+        }));
       });
     },
     getConsolidationGroup(tenantId: string, id: string) {

@@ -75,6 +75,7 @@ export function createProgramService(store: LedgerStore) {
       eliminateGroup(store, actor, groupId, input),
     createGroup: (actor: ActorContext, input: { name: string; reportingCurrency: string }) =>
       createGroup(store, actor, input),
+    listGroups: (actor: ActorContext) => listGroups(store, actor),
     createModel: (actor: ActorContext, input: { name: string }) => createModel(store, actor, input),
     saveModelVersion: (actor: ActorContext, modelId: string, nodes: readonly CalcNode[]) =>
       saveModelVersion(store, actor, modelId, nodes),
@@ -554,6 +555,7 @@ async function translateGroup(
       sourceCurrency: entity.sourceCurrency,
       rateSetId: entity.translated.rateSetId,
       ctaMinor: entity.translated.ctaMinor,
+      sourceLines: entity.lines,
       lines: entity.translated.lines,
     })),
     calculationRunId,
@@ -844,6 +846,12 @@ export async function loadPostedTrialBalance(
     journalIds,
     lines,
   };
+}
+
+async function listGroups(store: LedgerStore, actor: ActorContext) {
+  const tenant = await scope(store, actor, "consolidation.run");
+  const groups = await store.listConsolidationGroups(tenant.tenantId);
+  return { groups };
 }
 
 async function createGroup(

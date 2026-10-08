@@ -72,6 +72,12 @@ export interface Entity {
   readonly retainedEarningsAccountId: string | null;
 }
 
+export interface ConsolidationGroup {
+  readonly consolidationGroupId: string;
+  readonly name: string;
+  readonly reportingCurrency: string;
+}
+
 export interface Account {
   readonly accountId: string;
   readonly code: string;
@@ -262,6 +268,16 @@ export function provisionTenant(
   });
 }
 
+export function listConsolidationGroups(
+  session: Session,
+): Promise<ApiResult<readonly ConsolidationGroup[]>> {
+  return request(session, {
+    method: "GET",
+    path: "/v1/consolidation-groups",
+    decode: listOf("groups", decodeConsolidationGroup),
+  });
+}
+
 export function listEntities(session: Session): Promise<ApiResult<readonly Entity[]>> {
   return request(session, {
     method: "GET",
@@ -420,6 +436,15 @@ function decodeTenant(value: unknown): Tenant | null {
   const name = str(value, "name");
   if (tenantId === null || homeRegion === null || name === null) return null;
   return { tenantId, homeRegion, name };
+}
+
+function decodeConsolidationGroup(value: unknown): ConsolidationGroup | null {
+  if (!isRecord(value)) return null;
+  const consolidationGroupId = str(value, "consolidationGroupId");
+  const name = str(value, "name");
+  const reportingCurrency = str(value, "reportingCurrency");
+  if (consolidationGroupId === null || name === null || reportingCurrency === null) return null;
+  return { consolidationGroupId, name, reportingCurrency };
 }
 
 function decodeEntity(value: unknown): Entity | null {
