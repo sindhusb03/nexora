@@ -63,6 +63,20 @@ describe("program gates", () => {
       },
     });
     cashId = (await readJson<{ accountId: string }>(cash)).accountId;
+    const retained = await call(app, "POST", "/v1/accounts", {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      body: {
+        entityId,
+        code: "3000",
+        name: "Retained earnings",
+        report: "equity",
+        cashFlow: "non_cash",
+        retainedEarnings: true,
+      },
+    });
+    expect(retained.status).toBe(201);
   });
 
   it("publishes an OpenAPI document from the route schemas", async () => {
@@ -77,8 +91,8 @@ describe("program gates", () => {
   });
 
   it("publishes one hash, blocks the maker, and records lineage", async () => {
-    const draft = await state(app, tenantId, entityId, periodId, "50000", "Draft view");
-    const again = await state(app, tenantId, entityId, periodId, "50000", "Published view");
+    const draft = await state(app, tenantId, entityId, periodId, "Draft view");
+    const again = await state(app, tenantId, entityId, periodId, "Published view");
     expect(draft.stateHash).toBe(again.stateHash);
     expect(draft.stateHash).toHaveLength(64);
 
@@ -198,7 +212,7 @@ describe("program gates", () => {
     }>(created);
     expect(valuation.enterpriseValue).toBe("1340.909090909091");
     expect(valuation.equityValue).toBe("1180.909090909091");
-    expect(valuation.engineVersion).toBe("fe-kernel-0.2.0");
+    expect(valuation.engineVersion).toBe("fe-kernel-0.2.1");
     expect(valuation.calculationStatus).toBe("succeeded");
 
     const draftPack = await call(app, "POST", "/v1/report-packs", {
@@ -254,12 +268,12 @@ describe("program gates", () => {
       runs: { id: string; enterpriseValue: string; calculationRunId: string }[];
       engineVersion: string;
     }>(sensitivity);
-    expect(shocked.engineVersion).toBe("fe-kernel-0.2.0");
+    expect(shocked.engineVersion).toBe("fe-kernel-0.2.1");
     expect(shocked.runs[0]?.id).toBe("wacc-up");
     expect(shocked.runs[0]?.enterpriseValue).not.toBe("1340.909090909091");
     expect(shocked.runs[0]?.calculationRunId).toBeTruthy();
 
-    const statement = await state(app, tenantId, entityId, periodId, "50000", "Board");
+    const statement = await state(app, tenantId, entityId, periodId, "Board");
     const publishedStatementId = await publishState(app, tenantId, statement.financialStateId);
 
     const pack = await call(app, "POST", "/v1/report-packs", {
@@ -335,7 +349,7 @@ describe("program gates", () => {
       engineVersion: string;
     }>(translated);
     expect(fx.ctaMinor).toBe("-1000");
-    expect(fx.engineVersion).toBe("fe-kernel-0.2.0");
+    expect(fx.engineVersion).toBe("fe-kernel-0.2.1");
     expect(fx.lines.reduce((sum, line) => sum + BigInt(line.debitPositiveMinor), 0n)).toBe(0n);
 
     const eliminated = await call(app, "POST", `/v1/consolidation-groups/${groupId}/eliminate`, {
@@ -416,7 +430,7 @@ describe("program gates", () => {
       engineVersion: string;
     }>(calculated);
     expect(calc.outputs.out).toBe("22.000000000000");
-    expect(calc.engineVersion).toBe("fe-kernel-0.2.0");
+    expect(calc.engineVersion).toBe("fe-kernel-0.2.1");
 
     const scenario = await call(app, "POST", "/v1/scenarios", {
       actor: "owner-1",
@@ -502,7 +516,7 @@ describe("program gates", () => {
       body: { entryEquity: "100", exitEquity: "200", holdYears: "5" },
     });
     expect(lbo.status).toBe(200);
-    expect((await readJson<{ engineVersion: string }>(lbo)).engineVersion).toBe("fe-kernel-0.2.0");
+    expect((await readJson<{ engineVersion: string }>(lbo)).engineVersion).toBe("fe-kernel-0.2.1");
 
     const rows = [{ rowNo: 1, account: "1000", amount: "500.00" }];
     const imported = await call(app, "POST", "/v1/imports", {
@@ -577,7 +591,7 @@ describe("program gates", () => {
       "FIN_UNBALANCED_JOURNAL",
     );
 
-    const published = await state(app, tenantId, entityId, periodId, "50000", "Deal");
+    const published = await state(app, tenantId, entityId, periodId, "Deal");
     const deal = await call(app, "POST", "/v1/deals", {
       actor: "owner-1",
       tenant: tenantId,
@@ -620,14 +634,13 @@ async function state(
   tenantId: string,
   entityId: string,
   periodId: string,
-  netIncomeMinor: string,
   label: string,
 ) {
   const response = await call(app, "POST", "/v1/financial-states", {
     actor: "owner-1",
     tenant: tenantId,
     region: "us-east-1",
-    body: { entityId, periodId, basis: "us-gaap", currency: "USD", netIncomeMinor, label },
+    body: { entityId, periodId, basis: "us-gaap", label },
   });
   expect(response.status).toBe(201);
   return readJson<{ financialStateId: string; stateHash: string }>(response);

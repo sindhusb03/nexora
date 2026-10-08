@@ -28,7 +28,6 @@ const TRANSITION_LABEL: Readonly<Record<string, string>> = {
 };
 
 const DECIMAL_PATTERN = /^-?\d+(\.\d+)?$/;
-const MINOR_PATTERN = /^-?\d+$/;
 
 function nextStatus(status: string): string | null {
   const index = FLOW.indexOf(status as (typeof FLOW)[number]);
@@ -169,24 +168,19 @@ export function PublishPanel({
   checkerId: string;
   grantActorId: string;
   checkerGranted: boolean;
-  stateVersion: StateVersion | null;
-  onDraft: (netIncomeMinor: string) => Promise<void>;
+  stateVersion:
+    | (StateVersion & { readonly netIncomeMinor: string | null; readonly currency: string | null })
+    | null;
+  onDraft: () => Promise<void>;
   onTransition: (to: string) => Promise<boolean>;
   onLineage: () => Promise<void>;
   onGrantChecker: () => Promise<void>;
 }) {
-  const [netIncomeMinor, setNetIncomeMinor] = useState("50000");
-  const [formError, setFormError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!MINOR_PATTERN.test(netIncomeMinor.trim())) {
-      setFormError("Net income must be a whole number of minor units, for example 50000.");
-      return;
-    }
-    setFormError(null);
-    void onDraft(netIncomeMinor.trim());
+    void onDraft();
   }
 
   const published = stateVersion?.status === "published";
@@ -209,14 +203,6 @@ export function PublishPanel({
           <span className="muted small">{scopeLabel}</span>
         </div>
         <div className="form-row">
-          <Field label="Net income, minor units">
-            <Input
-              value={netIncomeMinor}
-              onChange={(event) => setNetIncomeMinor(event.target.value)}
-              inputMode="numeric"
-              className="input-figure"
-            />
-          </Field>
           <Field label="Basis">
             <Input value="us-gaap" readOnly className="input-medium" />
           </Field>
@@ -227,7 +213,6 @@ export function PublishPanel({
             Draft state
           </Button>
         </div>
-        {formError ? <p className="form-error">{formError}</p> : null}
       </form>
 
       {stateVersion ? (
@@ -240,6 +225,11 @@ export function PublishPanel({
             </span>
           </div>
           <dl className="kv">
+            <dt>Net income (minor units)</dt>
+            <dd>
+              <Figure value={stateVersion.netIncomeMinor ?? "?"} />{" "}
+              {stateVersion.currency ?? currency}
+            </dd>
             <dt>State hash</dt>
             <dd>
               <code className="hash-wrap">{stateVersion.stateHash}</code>

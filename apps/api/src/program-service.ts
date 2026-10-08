@@ -35,10 +35,20 @@ import {
   type PublicationStatus,
 } from "@nexora/kernel";
 
-import type { ActorContext } from "./http.js";
+import { ApiError, type ActorContext } from "./http.js";
+import { computeStatementsForPeriod } from "./service.js";
 
 const STATUSES = ["draft", "validated", "review", "approved", "published", "rejected"] as const;
-const STATE_ALLOW = ["entityId", "periodId", "basis", "currency", "netIncomeMinor"] as const;
+const STATE_ALLOW = [
+  "entityId",
+  "periodId",
+  "basis",
+  "currency",
+  "netIncomeMinor",
+  "inputHash",
+  "outputHash",
+  "engineVersion",
+] as const;
 
 export function createProgramService(store: LedgerStore) {
   return {
@@ -164,45 +174,89 @@ interface StateInput {
   readonly entityId: string;
   readonly periodId: string;
   readonly basis: string;
-  readonly currency: string;
-  readonly netIncomeMinor: string;
+  readonly currency?: string | undefined;
+  readonly netIncomeMinor?: string | undefined;
   readonly label?: string | undefined;
 }
 
 async function createFinancialState(store: LedgerStore, actor: ActorContext, input: StateInput) {
   const tenant = await scope(store, actor, "state.write");
+  const { statement, inputs } = await computeStatementsForPeriod(
+    store,
+    tenant.tenantId,
+    input.entityId,
+    input.periodId,
+  );
+  const netIncomeMinor = statement.incomeStatement.netIncomeMinor;
+  if (
+    input.netIncomeMinor !== undefined &&
+    BigInt(input.netIncomeMinor) !== BigInt(netIncomeMinor)
+  ) {
+    throw new ApiError(
+      422,
+      "FIN_CLIENT_TOTAL_MISMATCH",
+      "Client net income does not match the kernel statement",
+    );
+  }
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const hash = stateHash(
-    {
-      entityId: input.entityId,
-      periodId: input.periodId,
-      basis: input.basis,
-      currency: input.currency,
-      netIncomeMinor: input.netIncomeMinor,
-      label: input.label,
-    },
-    STATE_ALLOW,
-  );
+  const calculationRunId = crypto.randomUUID();
+  const source = {
+    entityId: input.entityId,
+    periodId: input.periodId,
+    basis: input.basis,
+    currency: statement.currency,
+    netIncomeMinor,
+    inputHash: statement.inputHash,
+    outputHash: hashMaterial(statement),
+    engineVersion: statement.engineVersion,
+  };
+  const hash = stateHash(source, STATE_ALLOW);
+  const run = await store.insertCalculationRun({
+    run: runRecord(
+      tenant.tenantId,
+      actor,
+      calculationRunId,
+      "statements",
+      "succeeded",
+      statement.engineVersion,
+      statement.inputHash,
+      inputs,
+      statement,
+      now,
+    ),
+    audit: audit(actor, "CalculationCompleted", "calculation_run", calculationRunId, now, {
+      inputHash: statement.inputHash,
+      outputHash: source.outputHash,
+    }),
+  });
   await store.insertFinancialState({
     tenantId: tenant.tenantId,
     id,
     entityId: input.entityId,
     periodId: input.periodId,
     basis: input.basis,
-    currency: input.currency,
+    currency: statement.currency,
     stateHash: hash,
     status: "draft",
-    engineVersion: ENGINE_VERSION,
-    calculationStatus: "succeeded",
-    calculationRunId: null,
+    engineVersion: statement.engineVersion,
+    calculationStatus: run.status,
+    calculationRunId: run.calculationRunId,
     supersedesId: null,
     makerActorId: actor.actorId,
-    payload: { ...input, stateHash: hash, makerActorId: actor.actorId },
+    payload: { ...source, label: input.label, stateHash: hash, makerActorId: actor.actorId },
     createdAt: now,
     audit: audit(actor, "FinancialStateDrafted", "financial_state", id, now, { stateHash: hash }),
   });
-  return { financialStateId: id, status: "draft", stateHash: hash, engineVersion: ENGINE_VERSION };
+  return {
+    financialStateId: id,
+    status: "draft",
+    stateHash: hash,
+    engineVersion: statement.engineVersion,
+    netIncomeMinor,
+    currency: statement.currency,
+    calculationRunId: run.calculationRunId,
+  };
 }
 
 /** Read-only view of one stored version, so a checker in a separate session reviews what the kernel recorded. */
@@ -214,6 +268,10 @@ async function readFinancialStateVersion(store: LedgerStore, actor: ActorContext
   }
   return {
     financialStateId: current.id,
+    netIncomeMinor: stringField(isRecord(current.payload) ? current.payload : {}, "netIncomeMinor"),
+    currency: stringField(isRecord(current.payload) ? current.payload : {}, "currency"),
+    calculationStatus: current.calculationStatus,
+    calculationRunId: current.calculationRunId,
     status: current.status,
     stateHash: current.stateHash,
     engineVersion: current.engineVersion,
@@ -244,6 +302,17 @@ async function readValuationVersion(store: LedgerStore, actor: ActorContext, id:
   };
 }
 
+function isOutdatedFinancialEngine(version: string | null | undefined): boolean {
+  const match = version?.match(/^fe-kernel-(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return true;
+  const minimum = [0n, 2n, 1n];
+  for (let index = 0; index < minimum.length; index++) {
+    const component = BigInt(match[index + 1]!);
+    if (component !== minimum[index]!) return component < minimum[index]!;
+  }
+  return false;
+}
+
 async function transitionFinancialState(
   store: LedgerStore,
   actor: ActorContext,
@@ -258,7 +327,16 @@ async function transitionFinancialState(
   const from = asStatus(current.status);
   const target = asStatus(to);
   if (target === "published") {
-    assertCanPublish({ calculationStatus: "succeeded", from });
+    assertCanPublish({ calculationStatus: current.calculationStatus, from });
+    if (!current.calculationRunId) {
+      throw new KernelError("PUBLISH_BLOCKED", "Financial state has no kernel calculation run");
+    }
+    if (isOutdatedFinancialEngine(current.engineVersion)) {
+      throw new KernelError(
+        "PUBLISH_BLOCKED",
+        "Financial state was calculated by an outdated engine version",
+      );
+    }
     const maker = readMaker(current.payload);
     assertMakerChecker(maker, actor.actorId);
   } else {
@@ -267,54 +345,64 @@ async function transitionFinancialState(
   const now = new Date().toISOString();
   const nextId = crypto.randomUUID();
   const payload = isRecord(current.payload) ? current.payload : {};
-  await store.insertFinancialState({
-    tenantId: tenant.tenantId,
-    id: nextId,
-    entityId: stringField(payload, "entityId"),
-    periodId: stringField(payload, "periodId"),
-    basis: stringField(payload, "basis"),
-    currency: stringField(payload, "currency"),
-    stateHash: current.stateHash,
-    status: target,
-    engineVersion: ENGINE_VERSION,
-    calculationStatus: "succeeded",
-    calculationRunId: null,
-    supersedesId: current.id,
-    makerActorId: readMaker(current.payload),
-    payload: { ...payload, status: target },
-    createdAt: now,
-    audit: audit(actor, "FinancialStateTransitioned", "financial_state", nextId, now, {
-      from,
-      to: target,
+  await store.transitionFinancialStateAtomic({
+    successor: {
+      tenantId: tenant.tenantId,
+      id: nextId,
+      entityId: stringField(payload, "entityId"),
+      periodId: stringField(payload, "periodId"),
+      basis: stringField(payload, "basis"),
+      currency: stringField(payload, "currency"),
       stateHash: current.stateHash,
-    }),
-  });
-  await store.insertApproval({
-    tenantId: tenant.tenantId,
-    approvalId: crypto.randomUUID(),
-    objectType: "financial_state",
-    objectId: nextId,
-    actorId: actor.actorId,
-    decision: target,
-    policyVersion: "publication-1",
-    createdAt: now,
-    audit: audit(actor, "ApprovalRecorded", "approval", nextId, now, { decision: target }),
-  });
-  await store.insertLineage({
-    tenantId: tenant.tenantId,
-    lineageEdgeId: crypto.randomUUID(),
-    fromType: "financial_state",
-    fromId: current.id,
-    toType: "financial_state",
-    toId: nextId,
-    relation: "supersedes",
-    createdAt: now,
+      status: target,
+      engineVersion: current.engineVersion,
+      calculationStatus: current.calculationStatus,
+      calculationRunId: current.calculationRunId,
+      supersedesId: current.id,
+      makerActorId: readMaker(current.payload),
+      payload: { ...payload, status: target },
+      createdAt: now,
+      audit: audit(actor, "FinancialStateTransitioned", "financial_state", nextId, now, {
+        from,
+        to: target,
+        stateHash: current.stateHash,
+      }),
+    },
+    approval: {
+      tenantId: tenant.tenantId,
+      approvalId: crypto.randomUUID(),
+      objectType: "financial_state",
+      objectId: nextId,
+      actorId: actor.actorId,
+      decision: target,
+      policyVersion: "publication-1",
+      createdAt: now,
+      audit: audit(actor, "ApprovalRecorded", "approval", nextId, now, { decision: target }),
+    },
+    lineage: {
+      tenantId: tenant.tenantId,
+      lineageEdgeId: crypto.randomUUID(),
+      fromType: "financial_state",
+      fromId: current.id,
+      toType: "financial_state",
+      toId: nextId,
+      relation: "supersedes",
+      createdAt: now,
+      audit: audit(actor, "LineageRecorded", "financial_state", nextId, now, {
+        fromId: current.id,
+        toId: nextId,
+        relation: "supersedes",
+      }),
+    },
   });
   return {
     financialStateId: nextId,
     status: target,
     stateHash: current.stateHash,
     supersedesId: current.id,
+    engineVersion: current.engineVersion,
+    netIncomeMinor: stringField(payload, "netIncomeMinor"),
+    currency: stringField(payload, "currency"),
   };
 }
 
@@ -379,6 +467,8 @@ async function translateGroup(
   input: TranslateInput,
 ) {
   const tenant = await scope(store, actor, "consolidation.run");
+  if (!(await store.getConsolidationGroup(tenant.tenantId, groupId)))
+    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
   const result = translateTrialBalance(input);
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
@@ -421,6 +511,8 @@ async function eliminateGroup(
   input: EliminateInput,
 ) {
   const tenant = await scope(store, actor, "consolidation.run");
+  if (!(await store.getConsolidationGroup(tenant.tenantId, groupId)))
+    throw new KernelError("FIN_NOT_FOUND", "Consolidation group not found");
   const result = eliminateIntercompany({
     balances: input.balances,
     eliminations: input.eliminations,
@@ -476,6 +568,8 @@ async function saveModelVersion(
   nodes: readonly CalcNode[],
 ) {
   const tenant = await scope(store, actor, "model.write");
+  if (!(await store.getModel(tenant.tenantId, modelId)))
+    throw new KernelError("FIN_NOT_FOUND", "Model not found");
   const now = new Date().toISOString();
   const modelVersionId = crypto.randomUUID();
   const inputHash = hashMaterial(nodes);
@@ -505,6 +599,8 @@ async function calculateModel(
   nodes: readonly CalcNode[],
 ) {
   const tenant = await scope(store, actor, "model.calculate");
+  if (!(await store.getModel(tenant.tenantId, modelId)))
+    throw new KernelError("FIN_NOT_FOUND", "Model not found");
   const result = evaluateGraph(nodes);
   const now = new Date().toISOString();
   const calculationRunId = crypto.randomUUID();
@@ -540,6 +636,8 @@ async function createScenario(
   },
 ) {
   const tenant = await scope(store, actor, "scenario.write");
+  if (!(await store.getModelVersion(tenant.tenantId, input.baseVersionId)))
+    throw new KernelError("FIN_NOT_FOUND", "Base model version not found");
   const projected = projectScenario(input.base, input.overrides);
   const now = new Date().toISOString();
   const scenarioId = crypto.randomUUID();
@@ -837,6 +935,7 @@ interface DebtInput {
 
 async function saveDebt(store: LedgerStore, actor: ActorContext, input: DebtInput) {
   const tenant = await scope(store, actor, "capital.write");
+  await requireProgramEntity(store, tenant.tenantId, input.entityId);
   const rolled = rollDebt(input);
   const now = new Date().toISOString();
   const instrumentId = crypto.randomUUID();
@@ -874,6 +973,7 @@ interface CapInput {
 
 async function saveCapTable(store: LedgerStore, actor: ActorContext, input: CapInput) {
   const tenant = await scope(store, actor, "capital.write");
+  await requireProgramEntity(store, tenant.tenantId, input.entityId);
   const reconciled = reconcileCapTable(input.holdings);
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -1142,6 +1242,8 @@ async function recordOwnership(
   },
 ) {
   const tenant = await scope(store, actor, "consolidation.run");
+  await requireProgramEntity(store, tenant.tenantId, input.parentEntityId);
+  await requireProgramEntity(store, tenant.tenantId, input.childEntityId);
   const now = new Date().toISOString();
   await store.insertOwnershipEdge({
     tenantId: tenant.tenantId,
@@ -1337,4 +1439,9 @@ function readCalculationStatus(payload: unknown): "succeeded" | "failed" {
     return "failed";
   }
   return "succeeded";
+}
+
+async function requireProgramEntity(store: LedgerStore, tenantId: string, entityId: string) {
+  if (!(await store.getEntity(tenantId, entityId)))
+    throw new KernelError("FIN_NOT_FOUND", "Legal entity not found");
 }

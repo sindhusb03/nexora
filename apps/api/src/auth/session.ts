@@ -1,10 +1,11 @@
-import { runWithRlsSession, type IdentityStore } from "@nexora/db";
+import { runWithRlsSession, type IdentityStore, type LedgerStore } from "@nexora/db";
 import type { MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 
 import type { AuthConfig } from "../config.js";
 import { ApiError, type AppContext, type AppEnv, type Identity } from "../http.js";
 import { csrfTokenMatches, readSignedSessionId, signSessionId } from "./crypto.js";
+import { enforceSupportExpiry } from "./support-expiry.js";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -103,7 +104,7 @@ function devHeaderIdentity(c: AppContext): Identity | null {
 
 /** Every /v1 route passes through here. No verified identity means 401 before any handler runs. */
 export function requireIdentity(deps: {
-  readonly store: IdentityStore;
+  readonly store: LedgerStore;
   readonly auth: AuthConfig;
   readonly webOrigins: readonly string[];
 }): MiddlewareHandler<AppEnv> {
@@ -130,6 +131,22 @@ export function requireIdentity(deps: {
     }
     if (!identity) {
       throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
+    }
+    if (
+      identity.tenantId &&
+      (await enforceSupportExpiry(
+        deps.store,
+        identity.tenantId,
+        identity.actorId,
+        c.get("requestId"),
+      )) === "expired"
+    ) {
+      if (identity.sessionId) await deps.store.selectSessionTenant(identity.sessionId, null);
+      throw new ApiError(
+        403,
+        "AUTH_SUPPORT_EXPIRED",
+        "Support access has expired; choose another company",
+      );
     }
     c.set("identity", identity);
     await runWithRlsSession({ actorId: identity.actorId, tenantId: identity.tenantId }, () =>

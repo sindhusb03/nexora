@@ -35,7 +35,7 @@ describe("workspace MVP", () => {
       onboarding: { certificate: { status: string } };
       engineVersion: string;
     };
-    expect(body.engineVersion).toBe("fe-kernel-0.2.0");
+    expect(body.engineVersion).toBe("fe-kernel-0.2.1");
     expect(BigInt(body.latest.assetsMinor)).toBe(
       BigInt(body.latest.liabilitiesMinor) + BigInt(body.latest.equityMinor),
     );

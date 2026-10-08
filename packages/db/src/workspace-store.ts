@@ -2,7 +2,13 @@ import { KernelError } from "@nexora/kernel";
 import { and, asc, eq } from "drizzle-orm";
 
 import type { AppDatabase } from "./client.js";
-import type { LedgerStore, WorkspaceRow, WorkspaceUpdate, WorkspaceWrite } from "./records.js";
+import type {
+  AuditWrite,
+  LedgerStore,
+  WorkspaceRow,
+  WorkspaceUpdate,
+  WorkspaceWrite,
+} from "./records.js";
 import { legalEntity, membership, tenant } from "./schema.js";
 import { tenantTx, writeAudit } from "./store.js";
 import { workspaceRecord } from "./workspace-schema.js";
@@ -138,6 +144,42 @@ export function createWorkspaceStore(db: AppDatabase) {
             ),
           );
         await writeAudit(tx, input.tenantId, input.audit);
+      });
+    },
+
+    expireSupportGrant(input: {
+      tenantId: string;
+      grantId: string;
+      membershipId: string;
+      updatedAt: string;
+      membershipAudit: AuditWrite;
+      grantAudit: AuditWrite;
+    }): Promise<boolean> {
+      return tenantTx(db, input.tenantId, async (tx) => {
+        const changed = await tx
+          .update(workspaceRecord)
+          .set({ status: "expired", updatedAt: input.updatedAt })
+          .where(
+            and(
+              eq(workspaceRecord.workspaceRecordId, input.grantId),
+              eq(workspaceRecord.tenantId, input.tenantId),
+              eq(workspaceRecord.kind, "support"),
+              eq(workspaceRecord.status, "active"),
+            ),
+          )
+          .returning({ id: workspaceRecord.workspaceRecordId });
+        if (changed.length === 0) return false;
+        await tx
+          .delete(membership)
+          .where(
+            and(
+              eq(membership.membershipId, input.membershipId),
+              eq(membership.tenantId, input.tenantId),
+            ),
+          );
+        await writeAudit(tx, input.tenantId, input.membershipAudit);
+        await writeAudit(tx, input.tenantId, input.grantAudit);
+        return true;
       });
     },
   };

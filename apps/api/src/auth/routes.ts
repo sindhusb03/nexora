@@ -7,7 +7,7 @@ import type { AuthConfig } from "../config.js";
 import { ApiError, type AppContext, type AppEnv, type Identity } from "../http.js";
 import type { Logger } from "../observability.js";
 import { DEMO_REGION } from "../demo/seed.js";
-import { expireSupportGrants } from "../workspace/routes.js";
+import { enforceSupportExpiry } from "./support-expiry.js";
 import { burnPasswordCheck, csrfTokenFor, hashPassword, verifyPassword } from "./crypto.js";
 import type { EmailSender, MemoryMailbox } from "./email.js";
 import { openChallenge, registerFactorRoutes } from "./factors.js";
@@ -30,6 +30,15 @@ import {
 
 export const ACTOR_ID = /^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$/;
 const REGION = /^[a-z]{2}(-[a-z]+)+-\d$/;
+const RESERVED_ACTOR_IDS = new Set([
+  "admin",
+  "administrator",
+  "platform-admin",
+  "root",
+  "support",
+  "system",
+  "nexora",
+]);
 
 const actorIdSchema = z
   .string()
@@ -116,6 +125,12 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
       );
     }
     const body = signupSchema.parse(await c.req.json());
+    if (
+      RESERVED_ACTOR_IDS.has(body.actorId) ||
+      deps.platformAdminActorIds.some((actorId) => actorId.trim().toLowerCase() === body.actorId)
+    ) {
+      throw new ApiError(409, "AUTH_ACTOR_TAKEN", "That account could not be created");
+    }
     const outcome = await store.createUser({
       actorId: body.actorId,
       passwordHash: await hashPassword(body.password, deps.passwordCost),
@@ -253,7 +268,16 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRouteDeps): void
     assertCsrf(c, auth, deps.webOrigins, session.sessionId);
     const body = tenantSelectionSchema.parse(await c.req.json());
     if (body.tenantId !== null) {
-      await expireSupportGrants(store, body.tenantId, session.actorId, c.get("requestId"));
+      if (
+        (await enforceSupportExpiry(store, body.tenantId, session.actorId, c.get("requestId"))) ===
+        "expired"
+      ) {
+        throw new ApiError(
+          403,
+          "AUTH_SUPPORT_EXPIRED",
+          "Support access has expired; choose another company",
+        );
+      }
       const tenant = await store.getTenant(body.tenantId);
       if (!tenant) {
         throw new KernelError("FIN_NOT_FOUND", "Tenant not found");
@@ -356,6 +380,23 @@ async function requireSession(
   }
   if (session.status === "none") {
     throw new ApiError(401, "AUTH_UNAUTHENTICATED", "Sign in to continue");
+  }
+  if (
+    session.identity.tenantId &&
+    (await enforceSupportExpiry(
+      deps.store,
+      session.identity.tenantId,
+      session.identity.actorId,
+      c.get("requestId"),
+    )) === "expired"
+  ) {
+    assertCsrf(c, deps.auth, deps.webOrigins, session.identity.sessionId);
+    await deps.store.selectSessionTenant(session.identity.sessionId, null);
+    throw new ApiError(
+      403,
+      "AUTH_SUPPORT_EXPIRED",
+      "Support access has expired; choose another company",
+    );
   }
   c.set("identity", session.identity);
   return session.identity;
