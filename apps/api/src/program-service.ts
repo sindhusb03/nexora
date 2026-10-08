@@ -741,7 +741,8 @@ function rateTripleFor(
   return { closing: selected.closing, historical: selected.historical, average: selected.average };
 }
 
-async function loadPostedTrialBalance(
+/** Posted activity for one entity period. Journal posting rejects a foreign currency before storage, so the HTTP routes cannot reach the currency check. */
+export async function loadPostedTrialBalance(
   store: LedgerStore,
   tenantId: string,
   entityId: string,
