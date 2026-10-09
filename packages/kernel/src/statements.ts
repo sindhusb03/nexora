@@ -1264,7 +1264,8 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
   const movement = lines.filter(
     (line) => line.journalKind !== "opening" && line.period === "movement",
   );
-  const deferred = closingDebit(movement, (line) => line.accountCode === "asset_sale_receivable");
+  const quiet = nonCashJournals(movement);
+  const deferred = settledBeyondOpening(lines, movement, quiet, receivableAccounts(lines), "asset");
   if (deferred > 0n) {
     items.push({
       type: "deferred_consideration",
@@ -1272,8 +1273,8 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
       message: "PP&E disposed of for deferred consideration",
     });
   }
-  const financed = financedAccounts(nonCashJournals(movement));
-  const debt = netCredit(movement, financed.debt);
+  const financed = financedAccounts(quiet);
+  const debt = nonCashAmount(quiet, financed.debt, "liability");
   if (debt > 0n) {
     items.push({
       type: "asset_acquired_with_debt",
@@ -1281,7 +1282,7 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
       message: "Assets acquired with debt",
     });
   }
-  const capex = netCredit(movement, financed.capex);
+  const capex = settledBeyondOpening(lines, movement, quiet, financed.capex, "liability");
   if (capex > 0n) {
     items.push({
       type: "capex_on_credit",
@@ -1325,25 +1326,71 @@ function financedAccounts(journals: readonly (readonly ClassifiedLine[])[]): {
   return { debt, capex };
 }
 
-function netCredit(lines: readonly ClassifiedLine[], accounts: ReadonlySet<string>): bigint {
-  let net = 0n;
+function receivableAccounts(lines: readonly ClassifiedLine[]): Set<string> {
+  const accounts = new Set<string>();
   for (const line of lines) {
-    if (!accounts.has(line.accountId)) continue;
-    net += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
+    if (line.accountCode === "asset_sale_receivable") accounts.add(line.accountId);
   }
-  return net > 0n ? net : 0n;
+  return accounts;
 }
 
-function closingDebit(
-  lines: readonly ClassifiedLine[],
-  match: (line: ClassifiedLine) => boolean,
+/** Credit on a liability, or debit on a receivable, inside non-cash journals only. */
+function nonCashAmount(
+  journals: readonly (readonly ClassifiedLine[])[],
+  accounts: ReadonlySet<string>,
+  kind: "asset" | "liability",
 ): bigint {
-  let net = 0n;
-  for (const line of lines) {
-    if (!match(line)) continue;
-    net += parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
+  let total = 0n;
+  for (const accountId of accounts) {
+    let net = 0n;
+    for (const journal of journals) {
+      for (const line of journal) {
+        if (line.accountId !== accountId) continue;
+        const debit = parseMinor(line.debitMinor);
+        const credit = parseMinor(line.creditMinor);
+        net += kind === "asset" ? debit - credit : credit - debit;
+      }
+    }
+    if (net > 0n) total += net;
   }
-  return net > 0n ? net : 0n;
+  return total;
+}
+
+/**
+ * Cash settlement reduces a non-cash disclosure only past the opening balance.
+ * A drawdown or repayment of debt does not. That amount stays on the cash flow.
+ */
+function settledBeyondOpening(
+  lines: readonly ClassifiedLine[],
+  movement: readonly ClassifiedLine[],
+  quiet: readonly (readonly ClassifiedLine[])[],
+  accounts: ReadonlySet<string>,
+  kind: "asset" | "liability",
+): bigint {
+  let total = 0n;
+  for (const accountId of accounts) {
+    const originated = nonCashAmount(quiet, new Set([accountId]), kind);
+    let opening = 0n;
+    for (const line of lines) {
+      if (line.accountId !== accountId || linePeriod(line) !== "opening") continue;
+      const debit = parseMinor(line.debitMinor);
+      const credit = parseMinor(line.creditMinor);
+      opening += kind === "asset" ? debit - credit : credit - debit;
+    }
+    if (opening < 0n) opening = 0n;
+    let settled = 0n;
+    for (const journal of groupJournals(movement).values()) {
+      if (cashDeltaOf(journal) === 0n) continue;
+      for (const line of journal) {
+        if (line.accountId !== accountId) continue;
+        settled += kind === "asset" ? parseMinor(line.creditMinor) : parseMinor(line.debitMinor);
+      }
+    }
+    const beyond = settled > opening ? settled - opening : 0n;
+    const net = originated > beyond ? originated - beyond : 0n;
+    total += net;
+  }
+  return total;
 }
 
 function policyMaterial(policy: StatementPolicy | undefined): { policy?: StatementPolicy } {

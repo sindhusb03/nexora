@@ -862,6 +862,52 @@ describe("statement class taxonomy goldens", () => {
     expect(paid.nonCash.items).toEqual([]);
   });
 
+  it("keeps a cash draw or repayment out of the non-cash disclosure", () => {
+    const drawn = run([
+      leg("fa", "asset", "cfi", 500, 0, "buy", { accountCode: "fixed_assets" }),
+      leg("debt", "liability", "cff", 0, 500, "buy", { accountCode: "long_term_debt" }),
+      leg("cash", "asset", "cash", 1000, 0, "draw"),
+      leg("debt", "liability", "cff", 0, 1000, "draw", { accountCode: "long_term_debt" }),
+    ]);
+    expect(drawn.nonCash.items).toEqual([
+      expect.objectContaining({ type: "asset_acquired_with_debt", amountMinor: "500" }),
+    ]);
+    expect(drawn.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "1000" });
+
+    const repaid = run([
+      leg("fa", "asset", "cfi", 500, 0, "buy", { accountCode: "fixed_assets" }),
+      leg("debt", "liability", "cff", 0, 500, "buy", { accountCode: "long_term_debt" }),
+      leg("cash", "asset", "cash", 1000, 0, "draw"),
+      leg("debt", "liability", "cff", 0, 1000, "draw", { accountCode: "long_term_debt" }),
+      leg("debt", "liability", "cff", 200, 0, "repay", { accountCode: "long_term_debt" }),
+      leg("cash", "asset", "cash", 0, 200, "repay"),
+    ]);
+    expect(repaid.nonCash.items).toEqual([
+      expect.objectContaining({ type: "asset_acquired_with_debt", amountMinor: "500" }),
+    ]);
+    expect(repaid.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "800" });
+
+    const sold = run([
+      leg("recv", "asset", "cfi", 200, 0, "old", {
+        accountCode: "asset_sale_receivable",
+        period: "opening",
+      }),
+      leg("fa", "asset", "cfi", 0, 200, "old", {
+        accountCode: "fixed_assets",
+        period: "opening",
+      }),
+      leg("recv", "asset", "cfi", 300, 0, "sale", { accountCode: "asset_sale_receivable" }),
+      leg("fa", "asset", "cfi", 0, 200, "sale", { accountCode: "fixed_assets" }),
+      leg("gain", "revenue", "cfi", 0, 100, "sale", { accountCode: "gain_loss_on_disposal" }),
+      leg("cash", "asset", "cash", 200, 0, "collect"),
+      leg("recv", "asset", "cfi", 0, 200, "collect", { accountCode: "asset_sale_receivable" }),
+    ]);
+    expect(sold.nonCash.items).toEqual([
+      expect.objectContaining({ type: "deferred_consideration", amountMinor: "300" }),
+    ]);
+    expect(sold.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "200", cffMinor: "0" });
+  });
+
   it("G38e does not treat a steady lease month as a new lease", () => {
     const steady = run(
       [
@@ -1275,6 +1321,28 @@ describe("statement class taxonomy goldens", () => {
         }),
       ]),
     ).toThrow(/Map the line to a borrowing or a long-term provision/);
+  });
+
+  it("blocks close when other non-current accounts stay classified as investing", () => {
+    const assets = run([
+      leg("other", "asset", "cfi", 40, 0, "move", { accountCode: "other_noncurrent_assets" }),
+      leg("equity", "equity", "cff", 0, 40, "move"),
+    ]);
+    expect(assets.issues).toEqual([
+      expect.objectContaining({ code: "other_noncurrent_review", severity: "error" }),
+    ]);
+    expect(assets.notices).toEqual([]);
+
+    const liabilities = run([
+      leg("other", "liability", "cfi", 0, 40, "move", {
+        accountCode: "other_noncurrent_liabilities",
+      }),
+      leg("equity", "equity", "cff", 40, 0, "move"),
+    ]);
+    expect(liabilities.issues).toEqual([
+      expect.objectContaining({ code: "other_noncurrent_review", severity: "error" }),
+    ]);
+    expect(liabilities.notices).toEqual([]);
   });
 
   it("keeps the other non-current review when the cash-flow class is overridden", () => {
