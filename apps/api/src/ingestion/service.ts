@@ -418,11 +418,11 @@ async function revalidate(
     const suggestion = suggestedReviewCashFlow(value.accountCode, value.label);
     const suggestionText =
       suggestion === "cfi"
-        ? " Suggested class: investing."
+        ? " Map it to a deposit or a loan given."
         : suggestion === "cff"
-          ? " Suggested class: financing."
+          ? " Map it to a borrowing."
           : suggestion === "cfo"
-            ? " Suggested class: operating."
+            ? " Map it to a long-term provision."
             : "";
     mappingExceptions.push({
       exceptionId: crypto.randomUUID(),

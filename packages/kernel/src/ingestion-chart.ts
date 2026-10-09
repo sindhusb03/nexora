@@ -397,8 +397,9 @@ export function isRevenueAccount(code: string | null): boolean {
  * Canonical codes must use an allowed report and cash-flow class.
  * Unknown codes are caller-defined and are not rewritten.
  * non_cash on other non-current assets and liabilities is a blocking
- * placeholder until someone confirms a class. A user cannot choose it.
- * Nothing else here assigns non_cash by default.
+ * placeholder. A class on these codes does not clear it. Map the line to a
+ * deposit, a loan given, a borrowing, or a long-term provision. A user
+ * cannot choose non_cash. Nothing else here assigns non_cash by default.
  */
 export function assertCanonicalClassification(input: {
   readonly code: string;
@@ -417,7 +418,7 @@ export function assertCanonicalClassification(input: {
   }
 }
 
-/** Current leftovers are operating. Non-current leftovers stay in review until a class is chosen. */
+/** Current leftovers are operating. Non-current leftovers stay in review until mapped to a concrete account. */
 export function unclassifiedCashFlow(term: "current" | "noncurrent"): "cfo" | "review" {
   return term === "current" ? "cfo" : "review";
 }
@@ -432,8 +433,9 @@ export function isReviewCashFlowPlaceholder(code: string): boolean {
 export type ReviewCashFlow = "cfo" | "cfi" | "cff";
 
 /**
- * Suggested class for a placeholder mapping. Investing for deposits and loans
- * given, financing for borrowings, operating for long-term provisions.
+ * Picks which concrete account to name for a placeholder label.
+ * "cfi" is a deposit or a loan given, "cff" a borrowing, "cfo" a long-term
+ * provision. The placeholder stays non_cash either way.
  */
 export function suggestedReviewCashFlow(code: string, label: string): ReviewCashFlow | null {
   if (!isReviewCashFlowPlaceholder(code)) return null;

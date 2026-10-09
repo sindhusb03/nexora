@@ -561,7 +561,9 @@ describe("linked model", () => {
     const result = buildLinkedModel(withPlaceholder);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.message).toMatch(/need a cash-flow class/);
+    expect(result.message).toMatch(
+      /Map other non-current accounts to a deposit, a loan given, a borrowing, or a long-term provision/,
+    );
   });
 
   it("refuses a single balance sheet instead of inventing an opening", () => {

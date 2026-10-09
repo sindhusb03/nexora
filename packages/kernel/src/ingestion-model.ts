@@ -151,7 +151,7 @@ export function buildLinkedModel(input: IngestionCheckInput): LinkedModelResult 
     return {
       ok: false,
       message:
-        "Other non-current accounts need a cash-flow class before a projection can be built.",
+        "Map other non-current accounts to a deposit, a loan given, a borrowing, or a long-term provision before a projection can be built.",
     };
   }
 

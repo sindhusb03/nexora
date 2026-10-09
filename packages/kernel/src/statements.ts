@@ -787,18 +787,18 @@ function leaseLiabilityRise(moves: Map<string, Move>): bigint {
 }
 
 /**
- * A rise with no right-of-use movement is a new lease unless this period's
- * lease interest, or a foreign-exchange remeasurement in the same journal,
- * explains it. Interest covers only the interest booked, not a larger rise.
+ * A rise with no right-of-use movement is a new lease unless the same journal
+ * books lease interest, or a foreign-exchange remeasurement, that explains it.
+ * Interest in another journal, including bank interest in the same month, does
+ * not cover the rise. Cover cannot exceed that journal's rise.
  */
 function excusedLeaseRise(lines: readonly ClassifiedLine[], moves: Map<string, Move>): bigint {
   const rise = leaseLiabilityRise(moves);
   if (rise <= 0n) return 0n;
-  const interest = expenseNet(moves, "interest_expense");
-  const interestCover = interest > 0n ? interest : 0n;
-  let fxCover = 0n;
+  let cover = 0n;
   for (const journal of groupJournals(lines).values()) {
     let journalRise = 0n;
+    let interest = 0n;
     let fxLoss = 0n;
     for (const line of journal) {
       if (
@@ -807,13 +807,18 @@ function excusedLeaseRise(lines: readonly ClassifiedLine[], moves: Map<string, M
       ) {
         journalRise += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
       }
+      if (line.accountCode === "interest_expense") {
+        const booked = parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
+        if (booked > 0n) interest += booked;
+      }
       if (!isExchangeGainLoss(line)) continue;
       const loss = parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
       if (loss > 0n) fxLoss += loss;
     }
-    if (journalRise > 0n && fxLoss > 0n) fxCover += fxLoss < journalRise ? fxLoss : journalRise;
+    if (journalRise <= 0n) continue;
+    const journalCover = interest + fxLoss;
+    cover += journalCover < journalRise ? journalCover : journalRise;
   }
-  const cover = interestCover + fxCover;
   return cover < rise ? cover : rise;
 }
 
@@ -1051,9 +1056,9 @@ function isReviewNoncurrent(line: ClassifiedLine): boolean {
 
 function reviewNoncurrentMessage(line: ClassifiedLine): string {
   if (line.accountCode === "other_noncurrent_liabilities" || line.report === "liability") {
-    return "Other non-current liabilities need a cash-flow class. Financing is the usual class when they are borrowings.";
+    return "Other non-current liabilities are not a cash-flow account. Map the line to a borrowing or a long-term provision.";
   }
-  return "Other non-current assets need a cash-flow class. Investing is the usual class when they are long-term assets.";
+  return "Other non-current assets are not a cash-flow account. Map the line to a deposit or a loan given.";
 }
 
 function chargeCredits(
@@ -1256,9 +1261,10 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
     amountMinor: string;
     message: string;
   }[] = [];
-  const disclosed = lines.filter((line) => line.journalKind !== "opening");
-  const movement = disclosed.filter((line) => line.period === "movement");
-  const deferred = closingDebit(disclosed, (line) => line.accountCode === "asset_sale_receivable");
+  const movement = lines.filter(
+    (line) => line.journalKind !== "opening" && line.period === "movement",
+  );
+  const deferred = closingDebit(movement, (line) => line.accountCode === "asset_sale_receivable");
   if (deferred > 0n) {
     items.push({
       type: "deferred_consideration",

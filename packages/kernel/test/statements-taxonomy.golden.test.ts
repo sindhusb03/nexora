@@ -712,7 +712,7 @@ describe("statement class taxonomy goldens", () => {
     expect(unmapped.notices.map((item) => item.code)).toEqual(["disposal_gain_unmapped"]);
   });
 
-  it("G37i discloses deferred consideration until the asset-sale receivable is collected", () => {
+  it("G37i discloses this period's credit sale and leaves a later month's note empty", () => {
     const sale = [
       leg("recv", "asset", "cfi", 300, 0, "sale", { accountCode: "asset_sale_receivable" }),
       leg("accum", "asset", "non_cash", 600, 0, "sale", {
@@ -737,6 +737,10 @@ describe("statement class taxonomy goldens", () => {
       },
     ]);
     expect(recorded.issues).toEqual([]);
+
+    const monthTwo = run(sale.map((line) => ({ ...line, period: "opening" as const })));
+    expect(monthTwo.nonCash.items).toEqual([]);
+    expect(monthTwo.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
 
     const collected = run([
       ...sale.map((line) => ({ ...line, period: "opening" as const })),
@@ -771,9 +775,7 @@ describe("statement class taxonomy goldens", () => {
       leg("recv", "asset", "cfi", 0, 120, "collect", { accountCode: "asset_sale_receivable" }),
     ]);
     expect(partial.cashFlow.cfiMinor).toBe("120");
-    expect(partial.nonCash.items).toEqual([
-      expect.objectContaining({ type: "deferred_consideration", amountMinor: "180" }),
-    ]);
+    expect(partial.nonCash.items).toEqual([]);
     const remainder = run([
       ...sale.map((line) => ({ ...line, period: "opening" as const })),
       leg("cash", "asset", "cash", 120, 0, "earlier", { period: "opening" }),
@@ -908,6 +910,17 @@ describe("statement class taxonomy goldens", () => {
     expect(passed.issues).toEqual([]);
     expect(passed.nonCash.leaseAdditionsMinor).toBe("0");
     expect(passed.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+
+    expect(() =>
+      run([
+        leg("interest", "expense", "cff", 10, 0, "bank", { accountCode: "interest_expense" }),
+        leg("cash", "asset", "cash", 0, 10, "bank"),
+        leg("fa", "asset", "cfi", 10, 0, "lease", { accountCode: "fixed_assets" }),
+        leg("liab", "liability", "cff", 0, 10, "lease", {
+          accountCode: "lease_liabilities_noncurrent",
+        }),
+      ]),
+    ).toThrow(/lease_additions_needed/);
 
     expect(() =>
       run([
@@ -1236,7 +1249,7 @@ describe("statement class taxonomy goldens", () => {
       }),
     ]);
     expect(parked.issues.map((item) => item.message).join(" ")).toMatch(
-      /Investing is the usual class/,
+      /Map the line to a deposit or a loan given/,
     );
     expect(parked.notices).toEqual([]);
 
@@ -1261,6 +1274,6 @@ describe("statement class taxonomy goldens", () => {
           accountCode: "other_noncurrent_liabilities",
         }),
       ]),
-    ).toThrow(/Financing is the usual class/);
+    ).toThrow(/Map the line to a borrowing or a long-term provision/);
   });
 });
