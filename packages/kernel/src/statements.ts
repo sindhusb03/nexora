@@ -1046,11 +1046,11 @@ function tradeReceivableDisposal(lines: readonly ClassifiedLine[]): boolean {
   return sold && trade;
 }
 
+/** Any class on these codes stays in review. The mapper must use a concrete account. */
 function isReviewNoncurrent(line: ClassifiedLine): boolean {
   return (
-    line.cashFlow === "non_cash" &&
-    (line.accountCode === "other_noncurrent_assets" ||
-      line.accountCode === "other_noncurrent_liabilities")
+    line.accountCode === "other_noncurrent_assets" ||
+    line.accountCode === "other_noncurrent_liabilities"
   );
 }
 

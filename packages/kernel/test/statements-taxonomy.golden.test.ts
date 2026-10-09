@@ -1276,4 +1276,17 @@ describe("statement class taxonomy goldens", () => {
       ]),
     ).toThrow(/Map the line to a borrowing or a long-term provision/);
   });
+
+  it("keeps the other non-current review when the cash-flow class is overridden", () => {
+    for (const cashFlow of ["cfi", "cff", "cfo"] as const) {
+      const overridden = run([
+        leg("other", "asset", cashFlow, 40, 0, "park", {
+          accountCode: "other_noncurrent_assets",
+        }),
+        leg("equity", "equity", "cff", 0, 40, "park"),
+      ]);
+      expect(overridden.issues.map((item) => item.code)).toEqual(["other_noncurrent_review"]);
+      expect(overridden.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+    }
+  });
 });
