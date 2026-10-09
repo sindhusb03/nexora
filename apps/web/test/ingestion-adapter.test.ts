@@ -3,13 +3,10 @@ import {
   EXCEPTION_TYPES,
   HEADER_VALUE_NOT_ACCEPTABLE_MESSAGE,
   exceptionSchema,
-  currencyScale,
   isBulkCandidate,
 } from "@nexora/contracts";
-import {
-  currencyScale as kernelCurrencyScale,
-  moneyFromDecimal,
-} from "../../../packages/kernel/src/index";
+import { lookupCurrencyScale } from "@nexora/currency";
+import { moneyFromDecimal } from "../../../packages/kernel/src/index";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getIngestionClient, resetIngestionClient } from "../app/review/client";
@@ -705,15 +702,16 @@ describe("http ingestion client", () => {
     }
     expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("/exceptions");
   });
-  it("converts corrected minor units with the kernel currency scale", async () => {
-    for (const currency of ["BHD", "JOD", "KWD", "OMR", "JPY", "KRW", "VND", "CLP", "USD", "EUR"]) {
-      expect(currencyScale(currency)).toBe(kernelCurrencyScale(currency));
-    }
-    for (const [currency, amount] of [
-      ["CLP", "-123.45"],
-      ["JPY", "-12345"],
-      ["KWD", "-12.345"],
-    ]) {
+  it("converts corrected minor units with the shared ISO currency scale", async () => {
+    for (const [currency, scale, amount] of [
+      ["CLP", 0, "-12345"],
+      ["JPY", 0, "-12345"],
+      ["KWD", 3, "-12.345"],
+      ["XAU", null, null],
+      ["us", null, null],
+    ] as const) {
+      if (scale !== null)
+        expect(lookupCurrencyScale(currency)).toEqual({ ok: true, code: currency, scale });
       const fetchMock = stub();
       fetchMock.mockImplementation(async (url: string) => {
         if (url.endsWith("/values")) return Response.json({ values: [{ ...wireValue, currency }] });
@@ -724,27 +722,37 @@ describe("http ingestion client", () => {
       });
       const http = createHttpIngestionClient("https://ingestion.test");
       expect((await http.getExceptions(jobId)).ok).toBe(true);
-      expect(
-        (
-          await http.resolve(
-            exceptionId,
-            {
-              action: "correct",
-              correctedMinor: "-12345",
-              accountCode: null,
-              note: "Correct source amount",
-              idempotencyKey: `scale-${currency}`,
-            },
-            "actor",
-            roles,
-            csrf,
-          )
-        ).ok,
-      ).toBe(true);
+      const result = await http.resolve(
+        exceptionId,
+        {
+          action: "correct",
+          correctedMinor: "-12345",
+          accountCode: null,
+          note: "Correct source amount",
+          idempotencyKey: `scale-${currency}`,
+        },
+        "actor",
+        roles,
+        csrf,
+      );
+      if (amount === null) {
+        expect(result).toMatchObject({
+          ok: false,
+          error: {
+            message:
+              currency === "us"
+                ? "This currency code isn't valid, so the amount can't be corrected here. Check the currency on the extracted value."
+                : "This currency has no minor units, so the amount can't be corrected here.",
+          },
+        });
+        expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/resolve"))).toBe(false);
+        continue;
+      }
+      expect(result.ok).toBe(true);
       const call = fetchMock.mock.calls.find(([url]) => url.endsWith("/resolve"))!;
       const body = JSON.parse(String(call[1]?.body));
       expect(body).toEqual({ action: "correct", note: "Correct source amount", amount });
-      expect(moneyFromDecimal(currency!, body.amount).minor).toBe("-12345");
+      expect(moneyFromDecimal(currency, body.amount).minor).toBe("-12345");
     }
   });
   it("does not send a resolve without a note", async () => {
