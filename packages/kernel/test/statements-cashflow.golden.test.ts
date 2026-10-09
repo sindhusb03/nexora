@@ -78,6 +78,10 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.3.
       cffMinor: "70",
       endingCashMinor: "70",
     });
+    expect(result.notices.map((item) => item.code)).toContain("possible_non_cash_exchange");
+    expect(result.notices.map((item) => item.message).join(" ")).not.toMatch(
+      /possible_non_cash_exchange/,
+    );
   });
 
   it("nets a mixed CFO journal and ignores noncash accruals", () => {
@@ -107,6 +111,9 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.3.
       cffMinor: "3",
       endingCashMinor: "95",
     });
+    expect(statements(lines).notices.map((item) => item.code)).toContain(
+      "possible_non_cash_exchange",
+    );
     expect(statements([...lines].reverse()).cashFlow).toEqual(statements(lines).cashFlow);
   });
 

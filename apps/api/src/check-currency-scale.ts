@@ -3,12 +3,11 @@ import { assertStoredCurrencyScales } from "@nexora/db";
 import { errorFields, jsonLogger } from "./observability.js";
 
 /**
- * Pre-merge check. Run as the schema owner before deploying the ISO 4217 scale:
+ * One-time cutover check. Run as the schema owner before relying on the
+ * ISO 4217 scale. It records the cutover and looks only at rows created
+ * before that instant. Migrations do not call it.
  *
  *   DATABASE_MIGRATION_URL=... pnpm --filter @nexora/api check:currency-scale
- *
- * Exits non-zero when an entity or journal uses a currency whose minor-unit
- * scale changed, or when the login cannot see every tenant.
  */
 const logger = jsonLogger();
 const url = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL;
@@ -20,8 +19,14 @@ if (!url) {
 }
 
 try {
-  await assertStoredCurrencyScales(url);
-  logger.info("currency_scale.ok", { message: "No stored currency uses a scale that changed." });
+  const record = await assertStoredCurrencyScales(url);
+  logger.info("currency_scale.ok", {
+    message: "No pre-cutover currency uses a scale that changed.",
+    cutoverAt: record.cutoverAt,
+    tableVersion: record.tableVersion,
+    result: record.result,
+    approver: record.approver,
+  });
 } catch (error) {
   logger.error("currency_scale.failed", {
     ...errorFields(error),

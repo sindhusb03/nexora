@@ -25,8 +25,12 @@ import {
   type StatementSet,
 } from "@nexora/kernel";
 
-import { classifyPostedActivity, openingSourceRef } from "./classify-activity.js";
-import type { ActorContext } from "./http.js";
+import {
+  classifyPostedActivity,
+  fiscalYearForStatements,
+  openingSourceRef,
+} from "./classify-activity.js";
+import { ExplainedKernelError, type ActorContext } from "./http.js";
 import {
   plainStatementMessage,
   presentStatementFindings,
@@ -340,6 +344,33 @@ async function closePeriod(store: LedgerStore, actor: ActorContext, periodId: st
   const tenant = await scope(store, actor, "period.close");
   const period = await requiredPeriod(store, tenant.tenantId, periodId);
   assertPeriodOpen(period.status);
+  let presented;
+  try {
+    const { statement } = await computeStatementsForPeriod(
+      store,
+      tenant.tenantId,
+      period.entityId,
+      periodId,
+    );
+    presented = presentStatement(statement, DEFAULT_STATEMENT_POLICY);
+  } catch (error) {
+    if (error instanceof KernelError) {
+      throw new ExplainedKernelError(
+        error.code,
+        plainStatementMessage(error.message),
+        "Fix the flagged accounts, then close the period.",
+      );
+    }
+    throw error;
+  }
+  if (!presented.final) {
+    const issue = presented.issues[0];
+    throw new ExplainedKernelError(
+      "FIN_STATEMENT_IMBALANCE",
+      issue?.message ?? "This period is not ready to close.",
+      issue?.action ?? "Fix the flagged accounts, then close the period.",
+    );
+  }
   const now = new Date().toISOString();
   const closed = await store.closePeriod({
     tenantId: tenant.tenantId,
@@ -503,6 +534,16 @@ async function reverseJournal(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   assertPeriodOpen(period.status);
+  if (input.sourceRef?.startsWith("opening:")) {
+    throw new KernelError(
+      "FIN_INVALID_JOURNAL_LINE",
+      "A reversal cannot be marked as an opening journal. It keeps the kind of the journal it reverses.",
+    );
+  }
+  const originalIsOpening = original.sourceRef?.startsWith("opening:") === true;
+  if (originalIsOpening) {
+    await assertOpeningPlacement(store, tenant.tenantId, original.entityId, period.periodId);
+  }
   const reversalLines = buildReversalLines(
     original.lines.map((line) => ({
       accountId: line.accountId,
@@ -532,7 +573,7 @@ async function reverseJournal(
       idempotencyKey: actor.idempotencyKey,
       payloadHash: balanced.payloadHash,
       reversesJournalId: original.journalId,
-      sourceRef: input.sourceRef ?? null,
+      sourceRef: originalIsOpening ? openingSourceRef(input.sourceRef) : (input.sourceRef ?? null),
       actorId: actor.actorId,
       correlationId: actor.correlationId,
       version: 1,
@@ -617,10 +658,9 @@ export async function loadClassifiedActivity(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   const activity = await store.listPostedActivity(tenantId, entity.entityId);
-  const lines = classifyPostedActivity(
-    activity.filter((line) => line.periodStart <= period.endDate),
-    period,
-  );
+  const visible = activity.filter((line) => line.periodStart <= period.endDate);
+  const lines = classifyPostedActivity(visible, period);
+  const fiscalYear = fiscalYearForStatements(entity, visible, period.endDate);
   return {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
@@ -628,6 +668,7 @@ export async function loadClassifiedActivity(
     periodEnd: period.endDate,
     lines,
     policy: DEFAULT_STATEMENT_POLICY,
+    ...(fiscalYear === undefined ? {} : { fiscalYear }),
   };
 }
 
@@ -913,6 +954,29 @@ function presentStatement(statement: StatementSet, policy: typeof DEFAULT_STATEM
       directEntries: amount(statement.retainedEarnings.directEntriesMinor),
       ending: amount(statement.retainedEarnings.endingMinor),
       close: statement.retainedEarnings.close,
+    },
+    beforeNexora:
+      statement.beforeNexora === null
+        ? null
+        : {
+            revenue: amount(statement.beforeNexora.revenueMinor),
+            expenses: amount(statement.beforeNexora.expensesMinor),
+            netIncome: amount(statement.beforeNexora.netIncomeMinor),
+            profitBeforeTax: amount(statement.beforeNexora.profitBeforeTaxMinor),
+            taxExpense: amount(statement.beforeNexora.taxExpenseMinor),
+          },
+    effectiveTax: {
+      profitBeforeTax: amount(statement.effectiveTax.profitBeforeTaxMinor),
+      taxExpense: amount(statement.effectiveTax.taxExpenseMinor),
+      effectiveTaxRate: statement.effectiveTax.effectiveTaxRate,
+    },
+    nonCash: {
+      leaseAdditions: amount(statement.nonCash.leaseAdditionsMinor),
+      items: statement.nonCash.items.map((item) => ({
+        type: item.type,
+        amount: amount(item.amountMinor),
+        message: item.message,
+      })),
     },
   };
 }

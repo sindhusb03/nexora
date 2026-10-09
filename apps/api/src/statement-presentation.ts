@@ -20,14 +20,16 @@ export interface PresentedPolicy {
 
 const ACTIONS: Record<StatementIssueCode, string> = {
   depreciation_split_needed:
-    "Split the combined depreciation line into PP&E depreciation, right-of-use depreciation, and amortisation.",
+    "Split the combined depreciation line into PP&E depreciation, right-of-use depreciation, and amortization.",
   lease_additions_needed:
     "Map right-of-use depreciation on its own account so new leases are not mistaken for payments.",
   disposal_gain_unmapped:
     "Map the gain or loss on disposal so the sale proceeds land in investing cash flow.",
+  possible_non_cash_exchange:
+    "Confirm the cash and non-cash parts, or split the exchange into its own journal.",
+  asset_sale_in_trade_receivable: "Map the sale proceeds to an asset-sale receivable.",
+  other_noncurrent_review: "Choose investing for long-term assets, or financing for borrowings.",
 };
-
-const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
 function presentFinding(finding: StatementFinding): PresentedFinding {
   return {
@@ -52,8 +54,21 @@ export function presentStatementPolicy(policy: StatementPolicy): PresentedPolicy
   return { label: statementPolicyLabel(leaseAccounting), leaseAccounting };
 }
 
+const PLAIN_SENTENCES = [
+  "We can't tell new leases apart from lease payments. Map right-of-use depreciation separately.",
+  "Depreciation is posted as one combined amount. Split it so asset sales are read correctly.",
+  "Cash in this journal needs a cash-flow class. Set the class on the account the cash settles.",
+  "This journal moves cash without an offsetting account.",
+  "Deferred tax is never settled with cash. Post the tax entry without a cash line.",
+  "The cash flow does not roll forward to the ending cash balance. Review the cash-flow class on each account that moved.",
+  "Other non-current assets need a cash-flow class. Investing is the usual class when they are long-term assets.",
+  "Other non-current liabilities need a cash-flow class. Financing is the usual class when they are borrowings.",
+  "We couldn't build this statement. Check the flagged accounts.",
+];
+
 /** User-facing text for a statement failure. Never a raw code or a journal id. */
 export function plainStatementMessage(message: string): string {
+  if (PLAIN_SENTENCES.includes(message)) return message;
   const parts: string[] = [];
   if (message.includes("lease_additions_needed")) {
     parts.push(
@@ -76,7 +91,24 @@ export function plainStatementMessage(message: string): string {
   if (message.includes("Deferred tax is never cash-settled")) {
     parts.push("Deferred tax is never settled with cash. Post the tax entry without a cash line.");
   }
+  if (
+    message.includes("does not roll forward") ||
+    message.includes("Cash flow does not roll forward")
+  ) {
+    parts.push(
+      "The cash flow does not roll forward to the ending cash balance. Review the cash-flow class on each account that moved.",
+    );
+  }
+  if (message.includes("Other non-current assets need a cash-flow class")) {
+    parts.push(
+      "Other non-current assets need a cash-flow class. Investing is the usual class when they are long-term assets.",
+    );
+  }
+  if (message.includes("Other non-current liabilities need a cash-flow class")) {
+    parts.push(
+      "Other non-current liabilities need a cash-flow class. Financing is the usual class when they are borrowings.",
+    );
+  }
   if (parts.length > 0) return parts.join(" ");
-  const stripped = message.replace(UUID, "").replace(/\s+/g, " ").trim();
-  return stripped.length > 0 ? stripped : "The statement could not be built.";
+  return "We couldn't build this statement. Check the flagged accounts.";
 }

@@ -14,7 +14,14 @@ import type { OidcProviderConfig } from "./auth/oidc.js";
 import { registerAuthRoutes } from "./auth/routes.js";
 import { requireIdentity } from "./auth/session.js";
 import { ConfigError, type AuthConfig, type HttpConfig } from "./config.js";
-import { ApiError, readActor, statusFor, type AppContext, type AppEnv } from "./http.js";
+import {
+  ApiError,
+  ExplainedKernelError,
+  readActor,
+  statusFor,
+  type AppContext,
+  type AppEnv,
+} from "./http.js";
 import { registerFileImportRoutes } from "./imports/file-import.js";
 import { reviewMappingProposer, stubMappingProposer } from "./ingestion/proposer.js";
 import { registerIngestionRoutes } from "./ingestion/routes.js";
@@ -195,7 +202,16 @@ export function createApp(options: AppOptions) {
       );
     }
     if (isKernelError(error)) {
-      return c.json({ error: { code: error.code, message: error.message } }, statusFor(error.code));
+      return c.json(
+        {
+          error: {
+            code: error.code,
+            message: error.message,
+            ...(error instanceof ExplainedKernelError ? { action: error.action } : {}),
+          },
+        },
+        statusFor(error.code),
+      );
     }
     if (error instanceof SyntaxError) {
       return c.json(

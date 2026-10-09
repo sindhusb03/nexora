@@ -1,3 +1,5 @@
+import Decimal from "decimal.js";
+
 import { KernelError } from "./errors.js";
 import { hashMaterial } from "./hash.js";
 import { assertCurrency, parseMinor } from "./money.js";
@@ -7,7 +9,15 @@ export type ReportClass = "asset" | "liability" | "equity" | "revenue" | "expens
 export type CashFlowClass = "cash" | "cfo" | "cfi" | "cff" | "non_cash" | "distribution";
 export type LeaseAccounting = "ifrs16" | "asc842_finance" | "asc842_operating";
 export type StatementIssueCode =
-  "depreciation_split_needed" | "lease_additions_needed" | "disposal_gain_unmapped";
+  | "depreciation_split_needed"
+  | "lease_additions_needed"
+  | "disposal_gain_unmapped"
+  | "possible_non_cash_exchange"
+  | "asset_sale_in_trade_receivable"
+  | "other_noncurrent_review";
+
+export type NonCashItemType =
+  "deferred_consideration" | "asset_acquired_with_debt" | "capex_on_credit";
 
 export interface StatementPolicy {
   readonly leaseAccounting?: LeaseAccounting;
@@ -42,6 +52,18 @@ export interface ClassifiedLine {
   readonly period: "opening" | "movement";
 }
 
+/**
+ * Fiscal year already stored on the entity. A mid-year opening keeps this year's
+ * income in one before-Nexora bucket. A start on the year boundary folds it into
+ * prior retained earnings. Omitted means every opening income line is prior.
+ */
+export interface StatementFiscalYear {
+  readonly openingDate: string;
+  readonly statementDate: string;
+  readonly yearEndMonth: number;
+  readonly yearEndDay: number;
+}
+
 export interface StatementFinding {
   readonly code: StatementIssueCode;
   readonly severity: "error" | "notice";
@@ -57,6 +79,23 @@ export interface StatementSet {
     readonly revenueMinor: string;
     readonly expensesMinor: string;
     readonly netIncomeMinor: string;
+  };
+  /**
+   * Opening income dated inside the current fiscal year. One bucket, never
+   * spread across months, and never a cash flow. Null when the opening is on
+   * a year boundary or there is no current-year opening income.
+   */
+  readonly beforeNexora: {
+    readonly revenueMinor: string;
+    readonly expensesMinor: string;
+    readonly netIncomeMinor: string;
+    readonly profitBeforeTaxMinor: string;
+    readonly taxExpenseMinor: string;
+  } | null;
+  readonly effectiveTax: {
+    readonly profitBeforeTaxMinor: string;
+    readonly taxExpenseMinor: string;
+    readonly effectiveTaxRate: string | null;
   };
   readonly balanceSheet: {
     readonly assetsMinor: string;
@@ -80,6 +119,11 @@ export interface StatementSet {
   };
   readonly nonCash: {
     readonly leaseAdditionsMinor: string;
+    readonly items: readonly {
+      readonly type: NonCashItemType;
+      readonly amountMinor: string;
+      readonly message: string;
+    }[];
   };
   readonly issues: readonly StatementFinding[];
   readonly notices: readonly StatementFinding[];
@@ -124,6 +168,13 @@ const DA_CODES = new Set([
   "impairment",
 ]);
 
+const OCI_CODES = new Set([
+  "oci_reserves",
+  "translation_reserve",
+  "revaluation_reserve",
+  "hedge_reserve",
+]);
+
 const ACCUM_CODES = [
   "accumulated_depreciation",
   "accumulated_amortisation",
@@ -135,8 +186,9 @@ const GROSS_CODES = ["fixed_assets", "intangible_assets", "rou_assets"] as const
 /**
  * Derives the three statements and the retained-earnings roll-forward.
  * The income close into retained earnings is a presentation derivation.
- * Source lines are not mutated. The income statement is the movement period.
- * Opening revenue and expense roll into retained earnings; they are not current income.
+ * Source lines are not mutated. The income statement is the movement period,
+ * plus one before-Nexora bucket when the opening date is mid fiscal year.
+ * Opening revenue and expense otherwise roll into retained earnings.
  *
  * Debit-positive convention: closing = opening + debit - credit.
  * With complete journal IDs, each cash journal is classified by the full
@@ -148,6 +200,7 @@ export function buildStatements(input: {
   readonly retainedEarningsAccountId: string;
   readonly lines: readonly ClassifiedLine[];
   readonly policy?: StatementPolicy;
+  readonly fiscalYear?: StatementFiscalYear;
 }): StatementSet {
   const currency = assertCurrency(input.currency);
   if (input.retainedEarningsAccountId.length === 0) {
@@ -209,13 +262,18 @@ export function buildStatements(input: {
   let balanceCheck = 0n;
   let revenue = 0n;
   let expenses = 0n;
+  let taxExpense = 0n;
   let priorEarnings = 0n;
+  let beforeRevenue = 0n;
+  let beforeExpenses = 0n;
+  let beforeTax = 0n;
   let assets = 0n;
   let liabilities = 0n;
   let otherEquity = 0n;
   let beginningCash = 0n;
   let endingCash = 0n;
   let distributions = 0n;
+  const carryOpeningIncome = carriesCurrentYearOpening(input.fiscalYear);
   const movementLines = input.lines.filter((line) => linePeriod(line) === "movement");
   const journalCashFlow = movementLines.every((line) => line.journalId !== undefined);
   const flows: Flows = { cfo: 0n, cfi: 0n, cff: 0n };
@@ -224,12 +282,32 @@ export function buildStatements(input: {
     const closing = position.opening + position.movementDebit - position.movementCredit;
     balanceCheck += closing;
 
+    const code = codeByAccount.get(accountId);
     if (position.report === "revenue") {
-      revenue += position.movementCredit - position.movementDebit;
-      priorEarnings -= position.opening;
+      const movement = position.movementCredit - position.movementDebit;
+      const opening = -position.opening;
+      revenue += movement;
+      if (carryOpeningIncome) {
+        revenue += opening;
+        beforeRevenue += opening;
+      } else {
+        priorEarnings += opening;
+      }
     } else if (position.report === "expense") {
-      expenses += position.movementDebit - position.movementCredit;
-      priorEarnings -= position.opening;
+      const movement = position.movementDebit - position.movementCredit;
+      const opening = position.opening;
+      expenses += movement;
+      if (code === "tax_expense") taxExpense += movement;
+      if (carryOpeningIncome) {
+        expenses += opening;
+        beforeExpenses += opening;
+        if (code === "tax_expense") {
+          taxExpense += opening;
+          beforeTax += opening;
+        }
+      } else {
+        priorEarnings -= opening;
+      }
     } else if (position.report === "asset") {
       assets += closing;
     } else if (position.report === "liability") {
@@ -263,8 +341,8 @@ export function buildStatements(input: {
 
   const moves = codeMoves(movementLines);
   applyDisposals(flows, movementLines, journals, !journalCashFlow);
-  applyDeferredTax(flows, movementLines);
-  const lease = leaseAdditions(moves, movementLines);
+  applyDeferredTax(flows, journals, journalCashFlow, movementLines);
+  const lease = leaseAdditions(moves);
   const findings = collectFindings(movementLines, journals, moves, lease.error);
 
   if (lease.error) {
@@ -284,7 +362,6 @@ export function buildStatements(input: {
     input.policy?.leaseAccounting ?? "ifrs16",
     movementLines,
   );
-  reclassifyInvestingCollections(flows, input.lines, journals);
   if (balanceCheck !== 0n) {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", "Classified lines are not in balance");
   }
@@ -307,7 +384,9 @@ export function buildStatements(input: {
     );
     throw new KernelError(
       "FIN_STATEMENT_IMBALANCE",
-      blocked ? "depreciation_split_needed" : "Cash flow does not roll forward",
+      blocked
+        ? "depreciation_split_needed"
+        : "The cash flow does not roll forward to the ending cash balance.",
     );
   }
 
@@ -321,6 +400,16 @@ export function buildStatements(input: {
       currency,
       retainedEarningsAccountId: input.retainedEarningsAccountId,
       ...policyMaterial(input.policy),
+      ...(input.fiscalYear === undefined
+        ? {}
+        : {
+            fiscalYear: {
+              openingDate: input.fiscalYear.openingDate,
+              statementDate: input.fiscalYear.statementDate,
+              yearEndMonth: String(input.fiscalYear.yearEndMonth),
+              yearEndDay: String(input.fiscalYear.yearEndDay),
+            },
+          }),
       lines: input.lines.map((line) => ({
         ...(line.journalId === undefined ? {} : { journalId: line.journalId }),
         accountId: line.accountId,
@@ -340,6 +429,8 @@ export function buildStatements(input: {
       expensesMinor: expenses.toString(),
       netIncomeMinor: netIncome.toString(),
     },
+    beforeNexora: beforeNexoraResult(beforeRevenue, beforeExpenses, beforeTax),
+    effectiveTax: effectiveTaxResult(netIncome, taxExpense),
     balanceSheet: {
       assetsMinor: assets.toString(),
       liabilitiesMinor: liabilities.toString(),
@@ -360,7 +451,10 @@ export function buildStatements(input: {
       endingMinor: endingRetained.toString(),
       close: "derived",
     },
-    nonCash: { leaseAdditionsMinor: lease.additions.toString() },
+    nonCash: {
+      leaseAdditionsMinor: lease.additions.toString(),
+      items: nonCashItems(input.lines),
+    },
     issues,
     notices,
   };
@@ -384,6 +478,10 @@ function isSpecial(line: ClassifiedLine): boolean {
 
 function isDa(line: ClassifiedLine): boolean {
   return line.accountCode !== undefined && DA_CODES.has(line.accountCode);
+}
+
+function isOci(line: ClassifiedLine): boolean {
+  return line.accountCode !== undefined && OCI_CODES.has(line.accountCode);
 }
 
 function addFlow(flows: Flows, cashFlow: CashFlowClass, amount: bigint): void {
@@ -445,30 +543,24 @@ function classifyJournal(
       `Journal ${journalId} cash movement has no counterpart`,
     );
   }
-  if (
-    lines.some(
-      (line) =>
-        (line.accountCode === "deferred_tax_asset" ||
-          line.accountCode === "deferred_tax_liability") &&
-        effect(line) !== 0n,
-    )
-  ) {
+  if (deferredTaxIsSoleCashCounter(lines)) {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", "Deferred tax is never cash-settled");
   }
 
   let otherNonCash = 0n;
   for (const line of lines) {
     if (line.cashFlow === "cash" || isSpecial(line) || isDa(line)) continue;
-    if (line.cashFlow === "non_cash") {
+    if (line.cashFlow === "non_cash" || isOci(line) || isReviewNoncurrent(line)) {
       otherNonCash += effect(line);
       continue;
     }
     addFlow(flows, sectionFor(line, policy), effect(line));
   }
   if (otherNonCash !== 0n) {
+    const review = lines.find((line) => isReviewNoncurrent(line) && effect(line) !== 0n);
     throw new KernelError(
       "FIN_STATEMENT_IMBALANCE",
-      `Journal ${journalId}: Cash classification needed`,
+      review ? reviewNoncurrentMessage(review) : `Journal ${journalId}: Cash classification needed`,
     );
   }
 }
@@ -504,26 +596,37 @@ function applyDisposals(
   journals: Map<string, ClassifiedLine[]>,
   legacy: boolean,
 ): void {
-  flows.cfi += residual(lines, journals, "accumulated_depreciation", [
+  // Journal path: accumulated depreciation and gain or loss are classified
+  // only inside cash journals. A non-cash disposal contributes nothing.
+  // The residual method stays on the line-level path, where journal ids are incomplete.
+  const scoped = legacy ? lines : cashJournalLines(lines, journals);
+  flows.cfi += residual(scoped, journals, "accumulated_depreciation", [
     "depreciation_ppe",
     "depreciation",
     "impairment",
   ]);
-  flows.cfi += residual(lines, journals, "accumulated_amortisation", [
+  flows.cfi += residual(scoped, journals, "accumulated_amortisation", [
     "amortisation",
     "depreciation",
     "impairment",
   ]);
-  for (const line of lines) {
+  for (const line of scoped) {
     if (line.accountCode !== "gain_loss_on_disposal") continue;
-    if (line.journalId !== undefined) {
-      const journal = journals.get(line.journalId);
-      if (journal && isCreditDisposal(journal)) continue;
-    }
     flows.cfi += effect(line);
   }
   flows.cfi -= impairmentCredits(lines, journals, "fixed_assets", legacy);
   flows.cfi -= impairmentCredits(lines, journals, "intangible_assets", legacy);
+}
+
+function cashJournalLines(
+  lines: readonly ClassifiedLine[],
+  journals: Map<string, ClassifiedLine[]>,
+): ClassifiedLine[] {
+  return lines.filter((line) => {
+    if (line.journalId === undefined) return false;
+    const journal = journals.get(line.journalId);
+    return journal !== undefined && cashDeltaOf(journal) !== 0n;
+  });
 }
 
 function residual(
@@ -595,96 +698,65 @@ function cashDeltaOf(lines: readonly ClassifiedLine[]): bigint {
   );
 }
 
-/** Receivable created by a non-cash sale of a fixed or intangible asset. */
-function isCreditDisposal(lines: readonly ClassifiedLine[]): boolean {
-  if (cashDeltaOf(lines) !== 0n) return false;
-  const sold = lines.some(
-    (line) =>
-      (line.accountCode === "fixed_assets" || line.accountCode === "intangible_assets") &&
-      parseMinor(line.creditMinor) > 0n,
-  );
-  const receivable = lines.some(
-    (line) =>
-      line.report === "asset" && line.cashFlow === "cfo" && parseMinor(line.debitMinor) > 0n,
-  );
-  return sold && receivable;
+function isDeferredTax(line: ClassifiedLine): boolean {
+  return line.accountCode === "deferred_tax_asset" || line.accountCode === "deferred_tax_liability";
+}
+
+/** A deferred-tax leg is an error only when it is the sole counter to cash. */
+function deferredTaxIsSoleCashCounter(lines: readonly ClassifiedLine[]): boolean {
+  const moved = lines.some((line) => isDeferredTax(line) && effect(line) !== 0n);
+  if (!moved || cashDeltaOf(lines) === 0n) return false;
+  const hasExpense = lines.some((line) => line.report === "expense");
+  const hasEquityOrOci = lines.some((line) => line.report === "equity" || isOci(line));
+  return !hasExpense && !hasEquityOrOci;
+}
+
+function applyDeferredTax(
+  flows: Flows,
+  journals: Map<string, ClassifiedLine[]>,
+  journalCashFlow: boolean,
+  lines: readonly ClassifiedLine[],
+): void {
+  const groups = journalCashFlow ? journals.values() : [lines];
+  for (const journal of groups) {
+    if (!deferredTaxAdjustsOperating(journal)) continue;
+    for (const line of journal) {
+      if (isDeferredTax(line)) flows.cfo += effect(line);
+    }
+  }
 }
 
 /**
- * Proceeds of a credit sale are investing when the receivable is collected,
- * not when the non-cash sale is recorded.
+ * Deferred tax booked through OCI or equity nets with that reserve and stays
+ * out of the cash flow. A tax-expense counterpart is the operating add-back.
  */
-function reclassifyInvestingCollections(
-  flows: Flows,
-  lines: readonly ClassifiedLine[],
-  movementJournals: Map<string, ClassifiedLine[]>,
-): void {
-  const pool = new Map<string, bigint>();
-  for (const journal of groupJournals(lines).values()) {
-    if (!isCreditDisposal(journal)) continue;
-    for (const line of journal) {
-      if (line.report !== "asset" || line.cashFlow !== "cfo") continue;
-      const debit = parseMinor(line.debitMinor);
-      if (debit <= 0n) continue;
-      pool.set(line.accountId, (pool.get(line.accountId) ?? 0n) + debit);
-    }
-  }
-  if (pool.size === 0) return;
-  for (const line of lines) {
-    if (linePeriod(line) !== "opening" || line.report !== "asset" || line.cashFlow !== "cfo") {
-      continue;
-    }
-    const credit = parseMinor(line.creditMinor);
-    const open = pool.get(line.accountId) ?? 0n;
-    if (credit <= 0n || open <= 0n) continue;
-    pool.set(line.accountId, open > credit ? open - credit : 0n);
-  }
-  for (const journal of movementJournals.values()) {
-    if (cashDeltaOf(journal) === 0n) continue;
-    for (const line of journal) {
-      if (line.report !== "asset" || line.cashFlow !== "cfo") continue;
-      const credit = parseMinor(line.creditMinor);
-      const open = pool.get(line.accountId) ?? 0n;
-      if (credit <= 0n || open <= 0n) continue;
-      const take = open < credit ? open : credit;
-      pool.set(line.accountId, open - take);
-      flows.cfo -= take;
-      flows.cfi += take;
-    }
-  }
+function deferredTaxAdjustsOperating(lines: readonly ClassifiedLine[]): boolean {
+  if (!lines.some(isDeferredTax)) return false;
+  const hasExpense = lines.some((line) => line.report === "expense");
+  const hasEquityOrOci = lines.some((line) => line.report === "equity" || isOci(line));
+  if (hasEquityOrOci && !hasExpense) return false;
+  return true;
 }
 
-function applyDeferredTax(flows: Flows, lines: readonly ClassifiedLine[]): void {
-  for (const line of lines) {
-    if (
-      line.accountCode === "deferred_tax_asset" ||
-      line.accountCode === "deferred_tax_liability"
-    ) {
-      flows.cfo += effect(line);
-    }
-  }
-}
-
-function leaseAdditions(
-  moves: Map<string, Move>,
-  lines: readonly ClassifiedLine[],
-): { additions: bigint; error: boolean } {
+function leaseAdditions(moves: Map<string, Move>): { additions: bigint; error: boolean } {
   const rou = moveOf(moves, "rou_assets");
   const accum = moveOf(moves, "rou_accumulated_depreciation");
   const current = moveOf(moves, "lease_liabilities_current");
   const noncurrent = moveOf(moves, "lease_liabilities_noncurrent");
   const rouMoved = rou.debit !== 0n || rou.credit !== 0n;
+  const accumMoved = accum.debit !== 0n || accum.credit !== 0n;
   const liabMoved = current.debit + current.credit + noncurrent.debit + noncurrent.credit !== 0n;
-  if (!rouMoved && !liabMoved) return { additions: 0n, error: false };
+  if (!rouMoved && !liabMoved && !accumMoved) return { additions: 0n, error: false };
 
-  const grossMapped =
-    lines.some((line) => line.accountCode === "rou_assets") &&
-    lines.some((line) => line.accountCode === "rou_accumulated_depreciation");
   const depRou = expenseNet(moves, "depreciation_rou");
   const combined = expenseNet(moves, "depreciation");
   const inseparable = combined !== 0n && depRou === 0n;
-  if (!lines.some((line) => line.accountCode === "rou_assets")) {
-    return { additions: 0n, error: true };
+  // A zero-amount line is not movement, so it does not count as mapped.
+  const grossMapped = rouMoved && accumMoved;
+  if (!rouMoved) {
+    const accumDelta = accum.credit - accum.debit;
+    if (accumDelta < 0n && inseparable) return { additions: 0n, error: true };
+    return { additions: 0n, error: false };
   }
   if (grossMapped) {
     const accumDelta = accum.credit - accum.debit;
@@ -752,7 +824,7 @@ function collectFindings(
   if (combined) {
     const label =
       lines.find((line) => line.accountCode === "depreciation" && line.sourceLabel)?.sourceLabel ??
-      "Depreciation & amortisation";
+      "Depreciation & amortization";
     const accum = ACCUM_CODES.filter((code) => mapped(lines, code));
     const charge = chargeCredits(lines, journals, accum, DA_CODES);
     const summed = accum.reduce(
@@ -805,7 +877,81 @@ function collectFindings(
         "An asset was sold but no gain or loss on disposal is mapped. Investing cash may be understated.",
     });
   }
+
+  for (const journal of journals.values()) {
+    if (hasInvestingFinancingExchange(journal)) {
+      findings.push({
+        code: "possible_non_cash_exchange",
+        severity: "notice",
+        sourceLabel: null,
+        message:
+          "This journal may mix a cash payment with a non-cash exchange. Review the investing and financing lines before you rely on the cash flow.",
+      });
+    }
+    if (tradeReceivableDisposal(journal)) {
+      findings.push({
+        code: "asset_sale_in_trade_receivable",
+        severity: "notice",
+        sourceLabel: null,
+        message:
+          "This asset sale was recorded in trade receivables. Use an asset-sale receivable so customer collections stay in operating cash flow.",
+      });
+    }
+  }
+
+  for (const line of lines) {
+    if (!isReviewNoncurrent(line)) continue;
+    if (parseMinor(line.debitMinor) === 0n && parseMinor(line.creditMinor) === 0n) continue;
+    findings.push({
+      code: "other_noncurrent_review",
+      severity: "notice",
+      sourceLabel: line.sourceLabel ?? null,
+      message: reviewNoncurrentMessage(line),
+    });
+  }
   return findings;
+}
+
+function hasInvestingFinancingExchange(lines: readonly ClassifiedLine[]): boolean {
+  if (cashDeltaOf(lines) === 0n) return false;
+  let debit = false;
+  let credit = false;
+  for (const line of lines) {
+    if (line.cashFlow !== "cfi" && line.cashFlow !== "cff" && line.cashFlow !== "distribution") {
+      continue;
+    }
+    if (parseMinor(line.debitMinor) > 0n) debit = true;
+    if (parseMinor(line.creditMinor) > 0n) credit = true;
+  }
+  return debit && credit;
+}
+
+function tradeReceivableDisposal(lines: readonly ClassifiedLine[]): boolean {
+  if (cashDeltaOf(lines) !== 0n) return false;
+  const sold = lines.some(
+    (line) =>
+      (line.accountCode === "fixed_assets" || line.accountCode === "intangible_assets") &&
+      parseMinor(line.creditMinor) > 0n,
+  );
+  const trade = lines.some(
+    (line) => line.accountCode === "accounts_receivable" && parseMinor(line.debitMinor) > 0n,
+  );
+  return sold && trade;
+}
+
+function isReviewNoncurrent(line: ClassifiedLine): boolean {
+  return (
+    line.cashFlow === "non_cash" &&
+    (line.accountCode === "other_noncurrent_assets" ||
+      line.accountCode === "other_noncurrent_liabilities")
+  );
+}
+
+function reviewNoncurrentMessage(line: ClassifiedLine): string {
+  if (line.accountCode === "other_noncurrent_liabilities" || line.report === "liability") {
+    return "Other non-current liabilities need a cash-flow class. Financing is the usual class when they are borrowings.";
+  }
+  return "Other non-current assets need a cash-flow class. Investing is the usual class when they are long-term assets.";
 }
 
 function chargeCredits(
@@ -834,6 +980,165 @@ function chargeCredits(
 
 function absBig(value: bigint): bigint {
   return value < 0n ? -value : value;
+}
+
+function carriesCurrentYearOpening(fiscal: StatementFiscalYear | undefined): boolean {
+  if (!fiscal) return false;
+  if (!sameFiscalYear(fiscal.openingDate, fiscal.statementDate, fiscal)) return false;
+  const start = fiscalYearStart(fiscal.openingDate, fiscal.yearEndMonth, fiscal.yearEndDay);
+  const end = fiscalYearEnd(fiscal.openingDate, fiscal.yearEndMonth, fiscal.yearEndDay);
+  if (fiscal.openingDate === start || fiscal.openingDate === end) return false;
+  return fiscal.openingDate > start && fiscal.openingDate < end;
+}
+
+function sameFiscalYear(left: string, right: string, fiscal: StatementFiscalYear): boolean {
+  return (
+    fiscalEndingYear(left, fiscal.yearEndMonth, fiscal.yearEndDay) ===
+    fiscalEndingYear(right, fiscal.yearEndMonth, fiscal.yearEndDay)
+  );
+}
+
+function fiscalEndingYear(date: string, month: number, day: number): number {
+  const [year, dateMonth, dateDay] = dateParts(date);
+  const afterEnd = dateMonth > month || (dateMonth === month && dateDay > day);
+  return afterEnd ? year + 1 : year;
+}
+
+function fiscalYearEnd(date: string, month: number, day: number): string {
+  const endYear = fiscalEndingYear(date, month, day);
+  return isoDate(endYear, month, day);
+}
+
+function fiscalYearStart(date: string, month: number, day: number): string {
+  const end = fiscalYearEnd(date, month, day);
+  const [year, endMonth, endDay] = dateParts(end);
+  const start = new Date(Date.UTC(year - 1, endMonth - 1, endDay));
+  start.setUTCDate(start.getUTCDate() + 1);
+  return start.toISOString().slice(0, 10);
+}
+
+function dateParts(date: string): [number, number, number] {
+  const [year, month, day] = date.split("-").map((part) => Number(part));
+  return [year ?? 0, month ?? 0, day ?? 0];
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.toISOString().slice(0, 10);
+}
+
+function beforeNexoraResult(
+  revenue: bigint,
+  expenses: bigint,
+  tax: bigint,
+): StatementSet["beforeNexora"] {
+  if (revenue === 0n && expenses === 0n) return null;
+  const net = revenue - expenses;
+  return {
+    revenueMinor: revenue.toString(),
+    expensesMinor: expenses.toString(),
+    netIncomeMinor: net.toString(),
+    profitBeforeTaxMinor: (net + tax).toString(),
+    taxExpenseMinor: tax.toString(),
+  };
+}
+
+function effectiveTaxResult(netIncome: bigint, tax: bigint): StatementSet["effectiveTax"] {
+  const profitBeforeTax = netIncome + tax;
+  return {
+    profitBeforeTaxMinor: profitBeforeTax.toString(),
+    taxExpenseMinor: tax.toString(),
+    effectiveTaxRate: effectiveRate(tax, profitBeforeTax),
+  };
+}
+
+function effectiveRate(tax: bigint, profitBeforeTax: bigint): string | null {
+  if (profitBeforeTax === 0n) return null;
+  return new Decimal(tax.toString())
+    .div(new Decimal(profitBeforeTax.toString()))
+    .toFixed(6, Decimal.ROUND_HALF_EVEN);
+}
+
+function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]["items"] {
+  const items: {
+    type: NonCashItemType;
+    amountMinor: string;
+    message: string;
+  }[] = [];
+  const deferred = closingDebit(lines, (line) => line.accountCode === "asset_sale_receivable");
+  if (deferred > 0n) {
+    items.push({
+      type: "deferred_consideration",
+      amountMinor: deferred.toString(),
+      message: "PP&E disposed of for deferred consideration",
+    });
+  }
+  const financed = financedAccounts(lines);
+  const debt = closingCredit(lines, (line) => financed.debt.has(line.accountId));
+  if (debt > 0n) {
+    items.push({
+      type: "asset_acquired_with_debt",
+      amountMinor: debt.toString(),
+      message: "Assets acquired with debt",
+    });
+  }
+  const capex = closingCredit(lines, (line) => financed.capex.has(line.accountId));
+  if (capex > 0n) {
+    items.push({
+      type: "capex_on_credit",
+      amountMinor: capex.toString(),
+      message: "Capital expenditure purchased on credit",
+    });
+  }
+  return items;
+}
+
+function financedAccounts(lines: readonly ClassifiedLine[]): {
+  debt: Set<string>;
+  capex: Set<string>;
+} {
+  const debt = new Set<string>();
+  const capex = new Set<string>();
+  for (const journal of groupJournals(lines).values()) {
+    const bought = journal.some(
+      (line) =>
+        (line.accountCode === "fixed_assets" ||
+          line.accountCode === "intangible_assets" ||
+          line.accountCode === "capital_advances") &&
+        parseMinor(line.debitMinor) > 0n,
+    );
+    if (!bought) continue;
+    for (const line of journal) {
+      if (parseMinor(line.creditMinor) === 0n) continue;
+      if (line.accountCode === "capex_payables") capex.add(line.accountId);
+      else if (line.report === "liability" && line.cashFlow === "cff") debt.add(line.accountId);
+    }
+  }
+  return { debt, capex };
+}
+
+function closingDebit(
+  lines: readonly ClassifiedLine[],
+  match: (line: ClassifiedLine) => boolean,
+): bigint {
+  let net = 0n;
+  for (const line of lines) {
+    if (!match(line)) continue;
+    net += parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
+  }
+  return net > 0n ? net : 0n;
+}
+
+function closingCredit(
+  lines: readonly ClassifiedLine[],
+  match: (line: ClassifiedLine) => boolean,
+): bigint {
+  let net = 0n;
+  for (const line of lines) {
+    if (!match(line)) continue;
+    net += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
+  }
+  return net > 0n ? net : 0n;
 }
 
 function policyMaterial(policy: StatementPolicy | undefined): { policy?: StatementPolicy } {

@@ -1,4 +1,4 @@
-import type { KernelErrorCode } from "@nexora/kernel";
+import { KernelError, type KernelErrorCode } from "@nexora/kernel";
 import type { Context } from "hono";
 
 /** Who is calling. Produced only by the identity middleware from a verified session (or dev headers when enabled). */
@@ -31,6 +31,18 @@ export interface ActorContext {
 }
 
 export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 501 | 503;
+
+/** A kernel refusal that also tells the user the one change that would clear it. */
+export class ExplainedKernelError extends KernelError {
+  override readonly name = "ExplainedKernelError";
+  constructor(
+    code: KernelErrorCode,
+    message: string,
+    readonly action: string,
+  ) {
+    super(code, message);
+  }
+}
 
 /** Failures outside the kernel's vocabulary: authentication, CSRF, limits. */
 export class ApiError extends Error {

@@ -48,6 +48,8 @@ function storeWithPostedCurrency(currency: string): LedgerStore {
   const line: PostedActivityLine = {
     journalId: "journal-eur",
     accountId: "cash",
+    accountCode: "cash",
+    sourceRef: null,
     report: "asset",
     cashFlow: "cash",
     currency,

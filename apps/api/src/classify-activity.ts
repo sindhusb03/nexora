@@ -1,5 +1,5 @@
 import type { PostedActivityLine } from "@nexora/db";
-import { KernelError, type ClassifiedLine } from "@nexora/kernel";
+import { KernelError, type ClassifiedLine, type StatementFiscalYear } from "@nexora/kernel";
 
 /**
  * Stored form of journalKind "opening". Written only when the post asks for
@@ -16,6 +16,29 @@ export function displaySourceRef(sourceRef: string | null): string | null {
   if (!sourceRef?.startsWith(OPENING_PREFIX)) return sourceRef;
   const label = sourceRef.slice(OPENING_PREFIX.length);
   return label.length > 0 ? label : null;
+}
+
+/**
+ * Mid-year opening income uses the fiscal year-end already stored on the entity.
+ * A missing year-end leaves opening income in prior retained earnings.
+ */
+export function fiscalYearForStatements(
+  entity: { readonly fiscalYearEndMonth: number | null; readonly fiscalYearEndDay: number | null },
+  activity: readonly { readonly sourceRef: string | null; readonly periodStart: string }[],
+  statementDate: string,
+): StatementFiscalYear | undefined {
+  if (entity.fiscalYearEndMonth === null || entity.fiscalYearEndDay === null) return undefined;
+  const openingDate = activity
+    .filter((line) => line.sourceRef?.startsWith(OPENING_PREFIX))
+    .map((line) => line.periodStart)
+    .sort()[0];
+  if (!openingDate) return undefined;
+  return {
+    openingDate,
+    statementDate,
+    yearEndMonth: entity.fiscalYearEndMonth,
+    yearEndDay: entity.fiscalYearEndDay,
+  };
 }
 
 export function openingSourceRef(label: string | null | undefined): string {

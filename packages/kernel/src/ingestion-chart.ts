@@ -22,6 +22,13 @@ const ACCOUNTS: readonly CanonicalAccount[] = [
     cashFlow: "cfo",
     contra: false,
   },
+  {
+    code: "asset_sale_receivable",
+    name: "Asset-sale receivable",
+    report: "asset",
+    cashFlow: "cfi",
+    contra: false,
+  },
   { code: "inventory", name: "Inventory", report: "asset", cashFlow: "cfo", contra: false },
   {
     code: "prepaid_expenses",
@@ -291,7 +298,7 @@ const ACCOUNTS: readonly CanonicalAccount[] = [
   },
   {
     code: "accumulated_amortisation",
-    name: "Accumulated amortisation",
+    name: "Accumulated amortization",
     report: "asset",
     cashFlow: "cfi",
     contra: true,
@@ -312,7 +319,7 @@ const ACCOUNTS: readonly CanonicalAccount[] = [
   },
   {
     code: "amortisation",
-    name: "Amortisation",
+    name: "Amortization",
     report: "expense",
     cashFlow: "non_cash",
     contra: false,
@@ -342,14 +349,14 @@ const ACCOUNTS: readonly CanonicalAccount[] = [
     code: "other_noncurrent_assets",
     name: "Other non-current assets",
     report: "asset",
-    cashFlow: "cfi",
+    cashFlow: "non_cash",
     contra: false,
   },
   {
     code: "other_noncurrent_liabilities",
     name: "Other non-current liabilities",
     report: "liability",
-    cashFlow: "cfi",
+    cashFlow: "non_cash",
     contra: false,
   },
 ];
@@ -358,8 +365,8 @@ const EXTRA_CASH_FLOWS: Readonly<Record<string, readonly CashFlowClass[]>> = {
   security_deposits_paid: ["cfo", "cfi"],
   lease_liabilities_current: ["cfo", "cff"],
   lease_liabilities_noncurrent: ["cfo", "cff"],
-  other_noncurrent_assets: ["cfo", "cfi", "cff"],
-  other_noncurrent_liabilities: ["cfo", "cfi", "cff"],
+  other_noncurrent_assets: ["cfo", "cfi", "cff", "non_cash"],
+  other_noncurrent_liabilities: ["cfo", "cfi", "cff", "non_cash"],
 };
 
 const EXTRA_REPORTS: Readonly<Record<string, readonly ReportClass[]>> = {

@@ -33,5 +33,7 @@ export { createLedgerStore, isUniqueViolation } from "./store.js";
 export {
   assertCurrencyScaleVisible,
   assertStoredCurrencyScales,
-  STORED_CURRENCY_SQL,
+  PRE_CUTOVER_CURRENCY_SQL,
 } from "./currency-scale-check.js";
+export { CURRENCY_SCALE_CUTOVER } from "./currency-scale-cutover.js";
+export type { CurrencyScaleCutoverResult } from "./currency-scale-cutover.js";

@@ -21,7 +21,11 @@ import type { LedgerStore } from "@nexora/db";
 import type { Hono } from "hono";
 import { z } from "zod";
 
-import { classifyPostedActivity, displaySourceRef } from "../classify-activity.js";
+import {
+  classifyPostedActivity,
+  displaySourceRef,
+  fiscalYearForStatements,
+} from "../classify-activity.js";
 import {
   plainStatementMessage,
   presentStatementFindings,
@@ -385,14 +389,14 @@ async function snapshot(
   const unavailablePeriods: { periodId: string; reason: string }[] = [];
   const series = activityPeriods.flatMap((period) => {
     try {
+      const visible = activity.filter((line) => line.periodStart <= period.endDate);
+      const fiscalYear = fiscalYearForStatements(entity, visible, period.endDate);
       const statement = buildStatements({
         currency: entity.functionalCurrency,
         retainedEarningsAccountId: entity.retainedEarningsAccountId ?? "",
-        lines: classifyPostedActivity(
-          activity.filter((line) => line.periodStart <= period.endDate),
-          period,
-        ),
+        lines: classifyPostedActivity(visible, period),
         policy: DEFAULT_STATEMENT_POLICY,
+        ...(fiscalYear === undefined ? {} : { fiscalYear }),
       });
       return [{ period, statement }];
     } catch (error) {

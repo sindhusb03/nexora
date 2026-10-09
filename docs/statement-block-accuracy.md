@@ -28,7 +28,7 @@ The 20 layouts cover 31 account values and six document-level refusals. Tests co
 | wrong-side           | CSV    | 0                    | 0            | Correctly held     |
 | **Overall**          |        | **31/31**            | **0**        | **6/6 traps held** |
 
-Gross/depreciation/net and T-format side and group equations use `statementAmountsEqual` in the financial kernel, with exact Decimal arithmetic and no tolerance. Gross and amortisation columns never become account values. Reconciled group totals retain a total role; balancing profit transfers are excluded. Explicitly titled blocks keep independent periods, source text, statement types and source columns. Text-PDF values retain their geometric location even when printed amounts repeat.
+Gross/depreciation/net and T-format side and group equations use `statementAmountsEqual` in the financial kernel, with exact Decimal arithmetic and no tolerance. Gross and amortization columns never become account values. Reconciled group totals retain a total role; balancing profit transfers are excluded. Explicitly titled blocks keep independent periods, source text, statement types and source columns. Text-PDF values retain their geometric location even when printed amounts repeat.
 
 Risk class: R3. Untitled competing blocks, ambiguous component columns, missing totals in a T-format, conflicting side mappings and failed equations are held for review. The fixtures measure this authored set only; they are not a claim about unseen-document accuracy. No dependencies, schema, UI, authentication or posting-path changes were needed.
 

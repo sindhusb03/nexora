@@ -77,13 +77,18 @@ describe("statement class taxonomy goldens", () => {
     expect(canonicalAccount("capex_payables")?.cashFlow).toBe("cfi");
     expect(canonicalAccount("depreciation_rou")?.cashFlow).toBe("non_cash");
     expect(canonicalAccount("oci_reserves")?.cashFlow).toBe("non_cash");
+    expect(canonicalAccount("asset_sale_receivable")?.cashFlow).toBe("cfi");
+    expect(canonicalAccount("other_current_assets")?.cashFlow).toBe("cfo");
+    expect(canonicalAccount("other_noncurrent_assets")?.cashFlow).toBe("non_cash");
+    expect(canonicalAccount("other_noncurrent_liabilities")?.cashFlow).toBe("non_cash");
+    expect(canonicalAccount("amortisation")?.name).toBe("Amortization");
     expect(unclassifiedCashFlow("current")).toBe("cfo");
     expect(unclassifiedCashFlow("noncurrent")).toBe("review");
     expect(() =>
       assertCanonicalClassification({
         code: "other_noncurrent_assets",
         report: "asset",
-        cashFlow: "non_cash",
+        cashFlow: "cash",
       }),
     ).toThrow(KernelError);
     expect(() =>
@@ -575,7 +580,7 @@ describe("statement class taxonomy goldens", () => {
 
   it("keeps a credit sale out of cash flow until the receivable is collected", () => {
     const sale = [
-      leg("ar", "asset", "cfo", 300, 0, "sale", { accountCode: "accounts_receivable" }),
+      leg("ar", "asset", "cfi", 300, 0, "sale", { accountCode: "asset_sale_receivable" }),
       leg("fa", "asset", "cfi", 0, 200, "sale", { accountCode: "fixed_assets" }),
       leg("gain", "revenue", "cfi", 0, 100, "sale", { accountCode: "gain_loss_on_disposal" }),
     ];
@@ -589,11 +594,18 @@ describe("statement class taxonomy goldens", () => {
     });
     expect(recorded.incomeStatement.netIncomeMinor).toBe("100");
     expect(recorded.balanceSheet.assetsMinor).toBe(recorded.balanceSheet.equityMinor);
+    expect(recorded.nonCash.items).toEqual([
+      expect.objectContaining({
+        type: "deferred_consideration",
+        amountMinor: "300",
+        message: "PP&E disposed of for deferred consideration",
+      }),
+    ]);
 
     const collected = run([
       ...sale,
       leg("cash", "asset", "cash", 300, 0, "collect"),
-      leg("ar", "asset", "cfo", 0, 300, "collect", { accountCode: "accounts_receivable" }),
+      leg("ar", "asset", "cfi", 0, 300, "collect", { accountCode: "asset_sale_receivable" }),
       leg("trade", "asset", "cfo", 40, 0, "accrual"),
       leg("revenue", "revenue", "cfo", 0, 40, "accrual"),
       leg("cash", "asset", "cash", 40, 0, "trade-collect"),
@@ -607,11 +619,12 @@ describe("statement class taxonomy goldens", () => {
       endingCashMinor: "340",
     });
     expect(collected.incomeStatement.netIncomeMinor).toBe("140");
+    expect(collected.nonCash.items).toEqual([]);
 
     const later = run([
       ...sale.map((line) => ({ ...line, period: "opening" as const })),
       leg("cash", "asset", "cash", 300, 0, "collect"),
-      leg("ar", "asset", "cfo", 0, 300, "collect", { accountCode: "accounts_receivable" }),
+      leg("ar", "asset", "cfi", 0, 300, "collect", { accountCode: "asset_sale_receivable" }),
     ]);
     expect(later.cashFlow).toMatchObject({
       cfoMinor: "0",
@@ -620,5 +633,351 @@ describe("statement class taxonomy goldens", () => {
     });
     expect(later.incomeStatement.netIncomeMinor).toBe("0");
     expect(later.balanceSheet.assetsMinor).toBe(later.balanceSheet.equityMinor);
+
+    const trade = run([
+      leg("ar", "asset", "cfo", 300, 0, "sale", { accountCode: "accounts_receivable" }),
+      leg("fa", "asset", "cfi", 0, 200, "sale", { accountCode: "fixed_assets" }),
+      leg("gain", "revenue", "cfi", 0, 100, "sale", { accountCode: "gain_loss_on_disposal" }),
+      leg("cash", "asset", "cash", 300, 0, "collect"),
+      leg("ar", "asset", "cfo", 0, 300, "collect", { accountCode: "accounts_receivable" }),
+    ]);
+    expect(trade.cashFlow).toMatchObject({ cfoMinor: "300", cfiMinor: "0" });
+    expect(trade.notices.map((item) => item.code)).toContain("asset_sale_in_trade_receivable");
+  });
+
+  it("G37h scraps an asset with accumulated depreciation and no proceeds", () => {
+    const scrap = run([
+      leg("accum", "asset", "non_cash", 600, 0, "scrap", {
+        accountCode: "accumulated_depreciation",
+      }),
+      leg("loss", "expense", "cfi", 200, 0, "scrap", { accountCode: "gain_loss_on_disposal" }),
+      leg("fa", "asset", "cfi", 0, 800, "scrap", { accountCode: "fixed_assets" }),
+    ]);
+    expect(scrap.incomeStatement.netIncomeMinor).toBe("-200");
+    expect(scrap.cashFlow).toEqual({
+      beginningCashMinor: "0",
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "0",
+    });
+    expect(scrap.nonCash.items).toEqual([]);
+    expect(scrap.issues).toEqual([]);
+    expect(scrap.notices).toEqual([]);
+
+    const unmapped = run([
+      leg("accum", "asset", "non_cash", 600, 0, "scrap", {
+        accountCode: "accumulated_depreciation",
+      }),
+      leg("opex", "expense", "cfo", 200, 0, "scrap"),
+      leg("fa", "asset", "cfi", 0, 800, "scrap", { accountCode: "fixed_assets" }),
+    ]);
+    expect(unmapped.incomeStatement.netIncomeMinor).toBe("-200");
+    expect(unmapped.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+    expect(unmapped.nonCash.items).toEqual([]);
+    expect(unmapped.issues).toEqual([]);
+    expect(unmapped.notices.map((item) => item.code)).toEqual(["disposal_gain_unmapped"]);
+  });
+
+  it("G37i discloses deferred consideration until the asset-sale receivable is collected", () => {
+    const sale = [
+      leg("recv", "asset", "cfi", 300, 0, "sale", { accountCode: "asset_sale_receivable" }),
+      leg("accum", "asset", "non_cash", 600, 0, "sale", {
+        accountCode: "accumulated_depreciation",
+      }),
+      leg("fa", "asset", "cfi", 0, 800, "sale", { accountCode: "fixed_assets" }),
+      leg("gain", "revenue", "cfi", 0, 100, "sale", { accountCode: "gain_loss_on_disposal" }),
+    ];
+    const recorded = run(sale);
+    expect(recorded.incomeStatement.netIncomeMinor).toBe("100");
+    expect(recorded.cashFlow).toMatchObject({
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "0",
+    });
+    expect(recorded.nonCash.items).toEqual([
+      {
+        type: "deferred_consideration",
+        amountMinor: "300",
+        message: "PP&E disposed of for deferred consideration",
+      },
+    ]);
+    expect(recorded.issues).toEqual([]);
+
+    const collected = run([
+      ...sale.map((line) => ({ ...line, period: "opening" as const })),
+      leg("cash", "asset", "cash", 300, 0, "collect"),
+      leg("recv", "asset", "cfi", 0, 300, "collect", { accountCode: "asset_sale_receivable" }),
+    ]);
+    expect(collected.incomeStatement.netIncomeMinor).toBe("0");
+    expect(collected.cashFlow).toMatchObject({
+      cfoMinor: "0",
+      cfiMinor: "300",
+      cffMinor: "0",
+      endingCashMinor: "300",
+    });
+    expect(collected.nonCash.items).toEqual([]);
+
+    const samePeriod = run([
+      ...sale,
+      leg("cash", "asset", "cash", 300, 0, "collect"),
+      leg("recv", "asset", "cfi", 0, 300, "collect", { accountCode: "asset_sale_receivable" }),
+    ]);
+    expect(samePeriod.incomeStatement.netIncomeMinor).toBe("100");
+    expect(samePeriod.cashFlow).toMatchObject({
+      cfoMinor: "0",
+      cfiMinor: "300",
+      endingCashMinor: "300",
+    });
+    expect(samePeriod.nonCash.items).toEqual([]);
+
+    const partial = run([
+      ...sale.map((line) => ({ ...line, period: "opening" as const })),
+      leg("cash", "asset", "cash", 120, 0, "collect"),
+      leg("recv", "asset", "cfi", 0, 120, "collect", { accountCode: "asset_sale_receivable" }),
+    ]);
+    expect(partial.cashFlow.cfiMinor).toBe("120");
+    expect(partial.nonCash.items).toEqual([
+      expect.objectContaining({ type: "deferred_consideration", amountMinor: "180" }),
+    ]);
+    const remainder = run([
+      ...sale.map((line) => ({ ...line, period: "opening" as const })),
+      leg("cash", "asset", "cash", 120, 0, "earlier", { period: "opening" }),
+      leg("recv", "asset", "cfi", 0, 120, "earlier", {
+        accountCode: "asset_sale_receivable",
+        period: "opening",
+      }),
+      leg("cash", "asset", "cash", 180, 0, "rest"),
+      leg("recv", "asset", "cfi", 0, 180, "rest", { accountCode: "asset_sale_receivable" }),
+    ]);
+    expect(remainder.cashFlow).toMatchObject({
+      beginningCashMinor: "120",
+      cfiMinor: "180",
+      cfoMinor: "0",
+      endingCashMinor: "300",
+    });
+    expect(remainder.nonCash.items).toEqual([]);
+  });
+
+  it("discloses assets bought with debt and capital expenditure on credit", () => {
+    const loan = run([
+      leg("fa", "asset", "cfi", 500, 0, "loan", { accountCode: "fixed_assets" }),
+      leg("debt", "liability", "cff", 0, 500, "loan"),
+    ]);
+    expect(loan.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "0" });
+    expect(loan.nonCash.items).toEqual([
+      expect.objectContaining({ type: "asset_acquired_with_debt", amountMinor: "500" }),
+    ]);
+
+    const capex = run([
+      leg("fa", "asset", "cfi", 400, 0, "capex", { accountCode: "fixed_assets" }),
+      leg("pay", "liability", "cfi", 0, 400, "capex", { accountCode: "capex_payables" }),
+    ]);
+    expect(capex.nonCash.items).toEqual([
+      expect.objectContaining({ type: "capex_on_credit", amountMinor: "400" }),
+    ]);
+    const paid = run([
+      leg("fa", "asset", "cfi", 400, 0, "capex", { accountCode: "fixed_assets" }),
+      leg("pay", "liability", "cfi", 0, 400, "capex", { accountCode: "capex_payables" }),
+      leg("pay", "liability", "cfi", 400, 0, "pay", { accountCode: "capex_payables" }),
+      leg("cash", "asset", "cash", 0, 400, "pay"),
+    ]);
+    expect(paid.cashFlow.cfiMinor).toBe("-400");
+    expect(paid.nonCash.items).toEqual([]);
+  });
+
+  it("G38e does not treat a steady lease month as a new lease", () => {
+    const steady = run(
+      [
+        leg("rou-dep", "expense", "non_cash", 200, 0, "dep", { accountCode: "depreciation_rou" }),
+        leg("rou-accum", "asset", "non_cash", 0, 200, "dep", {
+          accountCode: "rou_accumulated_depreciation",
+        }),
+        leg("interest", "expense", "cff", 60, 0, "pay", { accountCode: "interest_expense" }),
+        leg("liab", "liability", "cff", 190, 0, "pay", {
+          accountCode: "lease_liabilities_noncurrent",
+        }),
+        leg("cash", "asset", "cash", 0, 250, "pay"),
+      ],
+      { leaseAccounting: "ifrs16", interestPaid: "cfo" },
+    );
+    expect(steady.nonCash.leaseAdditionsMinor).toBe("0");
+    expect(steady.cashFlow).toMatchObject({ cfoMinor: "-60", cfiMinor: "0", cffMinor: "-190" });
+    expect(steady.issues).toEqual([]);
+    expect(steady.notices).toEqual([]);
+
+    const netOnly = run(
+      [
+        leg("rou-dep", "expense", "non_cash", 200, 0, "dep", { accountCode: "depreciation_rou" }),
+        leg("rou", "asset", "non_cash", 0, 200, "dep", { accountCode: "rou_assets" }),
+        leg("interest", "expense", "cff", 60, 0, "pay", { accountCode: "interest_expense" }),
+        leg("liab", "liability", "cff", 190, 0, "pay", {
+          accountCode: "lease_liabilities_noncurrent",
+        }),
+        leg("cash", "asset", "cash", 0, 250, "pay"),
+      ],
+      { leaseAccounting: "ifrs16", interestPaid: "cfo" },
+    );
+    expect(netOnly.nonCash.leaseAdditionsMinor).toBe("0");
+    expect(netOnly.issues).toEqual([]);
+    expect(netOnly.cashFlow).toMatchObject({ cfoMinor: "-60", cffMinor: "-190" });
+  });
+
+  it("keeps a mid-year opening apart from prior retained earnings", () => {
+    const lines = [
+      leg("cash", "asset", "cash", 1000, 0, "open", { journalKind: "opening" }),
+      leg("revenue", "revenue", "cfo", 0, 500, "open", {
+        journalKind: "opening",
+        accountCode: "revenue",
+      }),
+      leg("opex", "expense", "cfo", 200, 0, "open", { journalKind: "opening" }),
+      leg("tax", "expense", "cfo", 60, 0, "open", {
+        journalKind: "opening",
+        accountCode: "tax_expense",
+      }),
+      leg("re", "equity", "non_cash", 0, 760, "open", { journalKind: "opening" }),
+    ];
+    const midYear = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines,
+      fiscalYear: {
+        openingDate: "2025-07-01",
+        statementDate: "2025-07-31",
+        yearEndMonth: 12,
+        yearEndDay: 31,
+      },
+    });
+    expect(midYear.beforeNexora).toEqual({
+      revenueMinor: "500",
+      expensesMinor: "260",
+      netIncomeMinor: "240",
+      profitBeforeTaxMinor: "300",
+      taxExpenseMinor: "60",
+    });
+    expect(midYear.incomeStatement).toEqual({
+      revenueMinor: "500",
+      expensesMinor: "260",
+      netIncomeMinor: "240",
+    });
+    expect(midYear.retainedEarnings).toMatchObject({
+      openingMinor: "760",
+      netIncomeMinor: "240",
+      endingMinor: "1000",
+    });
+    expect(midYear.effectiveTax.effectiveTaxRate).toBe("0.200000");
+    expect(midYear.cashFlow).toMatchObject({
+      beginningCashMinor: "1000",
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "1000",
+    });
+    expect(midYear.balanceSheet.assetsMinor).toBe(midYear.balanceSheet.equityMinor);
+
+    const withLater = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines: [
+        ...lines,
+        leg("cash", "asset", "cash", 100, 0, "later"),
+        leg("revenue", "revenue", "cfo", 0, 100, "later", { accountCode: "revenue" }),
+      ],
+      fiscalYear: {
+        openingDate: "2025-07-01",
+        statementDate: "2025-10-31",
+        yearEndMonth: 12,
+        yearEndDay: 31,
+      },
+    });
+    expect(withLater.incomeStatement).toMatchObject({ revenueMinor: "600", netIncomeMinor: "340" });
+    expect(withLater.beforeNexora?.netIncomeMinor).toBe("240");
+    expect(withLater.retainedEarnings.openingMinor).toBe("760");
+    expect(withLater.effectiveTax).toMatchObject({
+      profitBeforeTaxMinor: "400",
+      taxExpenseMinor: "60",
+      effectiveTaxRate: "0.150000",
+    });
+    expect(withLater.cashFlow).toMatchObject({ cfoMinor: "100", beginningCashMinor: "1000" });
+
+    const yearStart = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines,
+      fiscalYear: {
+        openingDate: "2025-01-01",
+        statementDate: "2025-01-31",
+        yearEndMonth: 12,
+        yearEndDay: 31,
+      },
+    });
+    expect(yearStart.beforeNexora).toBeNull();
+    expect(yearStart.incomeStatement.netIncomeMinor).toBe("0");
+    expect(yearStart.retainedEarnings.openingMinor).toBe("1000");
+    expect(yearStart.cashFlow.cfoMinor).toBe("0");
+  });
+
+  it("treats deferred tax and OCI in a movement journal as non-cash", () => {
+    const combined = run([
+      leg("cash", "asset", "cash", 80, 0, "month"),
+      leg("tax", "expense", "cfo", 40, 0, "month", { accountCode: "tax_expense" }),
+      leg("revenue", "revenue", "cfo", 0, 100, "month"),
+      leg("dtl", "liability", "non_cash", 0, 20, "month", {
+        accountCode: "deferred_tax_liability",
+      }),
+    ]);
+    expect(combined.cashFlow).toMatchObject({
+      cfoMinor: "80",
+      cfiMinor: "0",
+      endingCashMinor: "80",
+    });
+    expect(combined.incomeStatement.netIncomeMinor).toBe("60");
+
+    const throughOci = run([
+      leg("oci", "equity", "non_cash", 10, 0, "oci", { accountCode: "oci_reserves" }),
+      leg("dtl", "liability", "non_cash", 0, 10, "oci", { accountCode: "deferred_tax_liability" }),
+    ]);
+    expect(throughOci.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+
+    const revaluation = run([
+      leg("fa", "asset", "cfi", 50, 0, "reval", { accountCode: "fixed_assets" }),
+      leg("reserve", "equity", "non_cash", 0, 50, "reval", { accountCode: "revaluation_reserve" }),
+    ]);
+    expect(revaluation.cashFlow).toMatchObject({ cfiMinor: "0", cfoMinor: "0" });
+
+    expect(() =>
+      run([
+        leg("cash", "asset", "cash", 10, 0, "bad"),
+        leg("reserve", "equity", "non_cash", 0, 10, "bad", { accountCode: "hedge_reserve" }),
+      ]),
+    ).toThrow(/Cash classification needed/);
+  });
+
+  it("sends other non-current accounts to review and keeps current leftovers in operating", () => {
+    const current = run([
+      leg("cash", "asset", "cash", 40, 0, "wc"),
+      leg("other", "asset", "cfo", 0, 40, "wc", { accountCode: "other_current_assets" }),
+    ]);
+    expect(current.cashFlow.cfoMinor).toBe("40");
+    expect(current.notices.map((item) => item.code)).not.toContain("other_noncurrent_review");
+
+    const parked = run([
+      leg("other", "asset", "non_cash", 40, 0, "park", { accountCode: "other_noncurrent_assets" }),
+      leg("equity", "equity", "cff", 0, 40, "park"),
+    ]);
+    expect(parked.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "0" });
+    expect(parked.notices.map((item) => item.message).join(" ")).toMatch(
+      /Investing is the usual class/,
+    );
+
+    expect(() =>
+      run([
+        leg("cash", "asset", "cash", 25, 0, "draw"),
+        leg("other", "liability", "non_cash", 0, 25, "draw", {
+          accountCode: "other_noncurrent_liabilities",
+        }),
+      ]),
+    ).toThrow(/Financing is the usual class/);
   });
 });

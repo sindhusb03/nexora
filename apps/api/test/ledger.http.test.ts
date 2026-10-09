@@ -606,7 +606,19 @@ describe("financial kernel API", () => {
     expect(body.issues[0]?.message).toMatch(/Split it so asset sales are read correctly/);
     expect(body.issues[0]?.message).not.toBe("depreciation_split_needed");
     expect(body.issues[0]?.action).toMatch(/Split the combined depreciation line/);
+    expect(body.issues[0]?.action).toMatch(/amortization/);
     expect(body.notices).toEqual([]);
+
+    const notFinal = await call(app, "POST", `/v1/periods/${current}/close`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+    });
+    expect(notFinal.status).toBe(422);
+    const notFinalBody = await readJson<{ error: { message: string; action: string } }>(notFinal);
+    expect(notFinalBody.error.message).toMatch(/Split it so asset sales are read correctly/);
+    expect(notFinalBody.error.action).toMatch(/Split the combined depreciation line/);
+    expect(notFinalBody.error.message).not.toMatch(/[a-z]+_[a-z]+/);
 
     const mystery = await account(
       app,
@@ -641,6 +653,113 @@ describe("financial kernel API", () => {
     expect(failure.error.message).not.toMatch(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
     );
+
+    const blocked = await call(app, "POST", `/v1/periods/${current}/close`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+    });
+    expect(blocked.status).toBe(422);
+    const blockedBody = await readJson<{ error: { message: string; action: string } }>(blocked);
+    expect(blockedBody.error.message).toBe(
+      "Cash in this journal needs a cash-flow class. Set the class on the account the cash settles.",
+    );
+    expect(blockedBody.error.action).toMatch(/Fix the flagged accounts/);
+    expect(blockedBody.error.message).not.toMatch(/[a-z]+_[a-z]+/);
+  });
+
+  it("refuses an opening reference on a reversal and keeps an opening reversal in kind", async () => {
+    const provision = await call(app, "POST", "/v1/tenants", {
+      actor: "platform-admin",
+      region: "us-east-1",
+      body: { name: "Reversal books", homeRegion: "us-east-1", ownerActorId: "owner-1" },
+    });
+    const tenantId = (await readJson<{ tenantId: string }>(provision)).tenantId;
+    const entityId = (
+      await readJson<{ entityId: string }>(
+        await call(app, "POST", "/v1/entities", {
+          actor: "owner-1",
+          tenant: tenantId,
+          region: "us-east-1",
+          body: { legalName: "Reversal Co", functionalCurrency: "USD" },
+        }),
+      )
+    ).entityId;
+    const cash = await account(app, tenantId, entityId, "1000", "Cash", "asset", "cash");
+    const revenue = await account(app, tenantId, entityId, "4000", "Revenue", "revenue", "cfo");
+    const re = await account(
+      app,
+      tenantId,
+      entityId,
+      "3000",
+      "Retained earnings",
+      "equity",
+      "non_cash",
+      true,
+    );
+    const first = await period(app, tenantId, entityId, "2025-01-01", "2025-01-31");
+    const later = await period(app, tenantId, entityId, "2025-02-01", "2025-02-28");
+    const opened = await journal(
+      app,
+      tenantId,
+      entityId,
+      first,
+      "open-rev",
+      [
+        [cash, "10.00", "0.00"],
+        [re, "0.00", "10.00"],
+      ],
+      "owner-1",
+      { journalKind: "opening" },
+    );
+    expect(opened.status).toBe(201);
+    const openingId = (await readJson<{ journalId: string }>(opened)).journalId;
+    const ordinary = await journal(app, tenantId, entityId, first, "ordinary", [
+      [cash, "2.00", "0.00"],
+      [revenue, "0.00", "2.00"],
+    ]);
+    expect(ordinary.status).toBe(201);
+    const ordinaryId = (await readJson<{ journalId: string }>(ordinary)).journalId;
+
+    const forged = await call(app, "POST", `/v1/journals/${ordinaryId}/reverse`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      idempotency: "rev-forged",
+      expectedVersion: "1",
+      body: { periodId: later, sourceRef: "opening:forged" },
+    });
+    expect(forged.status).toBe(422);
+    const forgedBody = await readJson<{ error: { code: string; message: string } }>(forged);
+    expect(forgedBody.error.code).toBe("FIN_INVALID_JOURNAL_LINE");
+    expect(forgedBody.error.message).toMatch(/cannot be marked as an opening journal/i);
+    expect(forgedBody.error.message).not.toMatch(/opening:/);
+
+    const lateOpeningReversal = await call(app, "POST", `/v1/journals/${openingId}/reverse`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      idempotency: "rev-late-open",
+      expectedVersion: "1",
+      body: { periodId: later },
+    });
+    expect(lateOpeningReversal.status).toBe(422);
+
+    const samePeriod = await call(app, "POST", `/v1/journals/${openingId}/reverse`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+      idempotency: "rev-open-ok",
+      expectedVersion: "1",
+      body: { periodId: first },
+    });
+    expect(samePeriod.status).toBe(201);
+    const still = await call(app, "GET", `/v1/entities/${entityId}/periods/${first}/statements`, {
+      actor: "owner-1",
+      tenant: tenantId,
+      region: "us-east-1",
+    });
+    expect(still.status).toBe(200);
   });
 });
 
