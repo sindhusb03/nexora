@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import { SuggestedBadge } from "../books/ui";
 import type { KernelRecord } from "./api";
@@ -31,73 +31,6 @@ export function WorkbenchHead({
       </div>
       {children ?? null}
     </header>
-  );
-}
-
-export function GroupPanel({
-  disabled,
-  entityId,
-  run,
-}: {
-  disabled: boolean;
-  entityId: string;
-  run: RunCommand;
-}) {
-  const [groupId, setGroupId] = useState("");
-  return (
-    <section className="panel panel-narrow">
-      <WorkbenchHead
-        title="Group and FX"
-        note="CTA is an explicit equity line. The entity books stay in their functional currency."
-      />
-      <div className="card">
-        <div className="row-actions">
-          <Button
-            type="button"
-            disabled={disabled}
-            onClick={async () => {
-              const data = await run(undefined, "/v1/consolidation-groups", {
-                name: "Group",
-                reportingCurrency: "EUR",
-              });
-              if (data && typeof data.consolidationGroupId === "string")
-                setGroupId(data.consolidationGroupId);
-            }}
-          >
-            Create EUR group
-          </Button>
-          <Button type="button" variant="outline" disabled data-testid="translate-group">
-            Translate
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={disabled || entityId.length === 0}
-            onClick={() =>
-              void run(undefined, "/v1/ownership", {
-                asOf: "2024-12-31",
-                parentEntityId: entityId,
-                childEntityId: entityId,
-                effectiveFrom: "2024-01-01",
-                effectiveTo: null,
-                percent: "0.60",
-                subsidiaryEquityMinor: "-100000",
-              })
-            }
-          >
-            Attribute NCI
-          </Button>
-        </div>
-        <p
-          className="muted small"
-          data-testid="translate-deferred"
-          style={{ margin: "0.6rem 0 0" }}
-        >
-          Group <code>{groupId || "not created"}</code>. Translation is coming with the group
-          screen.
-        </p>
-      </div>
-    </section>
   );
 }
 

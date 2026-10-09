@@ -60,13 +60,13 @@ import {
   type ValuationRun,
   type VersionRef,
 } from "./api";
+import { GroupScreen } from "./group-screen";
 import { BoardPanel, PublishPanel, ValuationPanel } from "./main-path";
 import {
   AssistantPanel,
   BasisPanel,
   CapitalPanel,
   DealPanel,
-  GroupPanel,
   ImportPanel,
   ModelPanel,
   type RunCommand,
@@ -667,7 +667,9 @@ function ProgramWorkspace({
             />
           ) : null}
 
-          {tab === "group" ? <GroupPanel disabled={busy} entityId={entityId} run={run} /> : null}
+          {tab === "group" ? (
+            <GroupScreen disabled={busy} session={session} entities={entities.resource} />
+          ) : null}
           {tab === "model" ? <ModelPanel disabled={busy} run={run} /> : null}
           {tab === "capital" ? (
             <CapitalPanel disabled={busy || entityId.length === 0} entityId={entityId} run={run} />
