@@ -14,8 +14,28 @@ import {
   type ReactNode,
 } from "react";
 
-import { fetchAuthConfig, fetchSession, listCompanies, login, selectTenant } from "../studio/api";
+import {
+  fetchAuthConfig,
+  fetchWorkspace,
+  fetchSession,
+  listCompanies,
+  login,
+  selectTenant,
+} from "../studio/api";
+
 import type { CompanyCard, SessionView } from "../studio/types";
+
+const EntityContext = createContext<{ entityId: string | null; error: string | null }>({
+  entityId: null,
+  error: null,
+});
+const mockMode =
+  process.env.NEXT_PUBLIC_INGESTION_MODE === "mock" ||
+  process.env.NEXT_PUBLIC_INGESTION_MODE === "demo";
+
+export function useReviewEntity() {
+  return useContext(EntityContext);
+}
 
 const SessionContext = createContext<SessionView | null>(null);
 const AsOfContext = createContext<{
@@ -47,6 +67,10 @@ export function ReviewShell({
 }) {
   const pathname = usePathname();
   const [session, setSession] = useState<SessionView | null | undefined>(undefined);
+  const [entity, setEntity] = useState<{ entityId: string | null; error: string | null }>({
+    entityId: null,
+    error: null,
+  });
   const [asOf, setAsOf] = useState("—");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -103,6 +127,34 @@ export function ReviewShell({
     };
   }, [session, companyAttempt]);
 
+  useEffect(() => {
+    setEntity({ entityId: null, error: null });
+    if (!session?.tenantId || mockMode) return;
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => fetchWorkspace(session.csrfToken))
+      .then((workspace) => {
+        if (cancelled) return;
+        const entityId = workspace.context.entityId;
+        setEntity({
+          entityId: entityId || null,
+          error: entityId
+            ? null
+            : "This company has no entity available for upload. Open Studio to configure it.",
+        });
+      })
+      .catch((caught) => {
+        if (!cancelled)
+          setEntity({
+            entityId: null,
+            error: `Cannot load the company entity: ${caught instanceof Error ? caught.message : "Open Studio to configure it."}`,
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.tenantId, session?.csrfToken]);
+
   async function onCompany(tenantId: string) {
     if (!session || companyBusy) return;
     setCompanyBusy(true);
@@ -154,7 +206,7 @@ export function ReviewShell({
         <form className="nx-signin" onSubmit={(event) => void onSignIn(event)}>
           <p className="nx-kicker">Nexora</p>
           <h1>Sign in to review extraction exceptions.</h1>
-          <p>Resolutions stay proposals until the kernel accepts them.</p>
+          <p>Review extracted values and record resolutions.</p>
           <label>
             Actor
             <Input name="actorId" defaultValue="sindhu" autoComplete="username" />
@@ -228,51 +280,61 @@ export function ReviewShell({
 
   return (
     <SessionContext.Provider value={session}>
-      <AsOfContext.Provider value={{ asOf, setAsOf }}>
-        <div className="nx review-shell">
-          <aside className="nx-nav">
-            <Link href="/studio" className="nx-brand">
-              <span className="nx-mark">N</span>
-              <span className="nx-nav-label">Nexora</span>
-            </Link>
-            <nav aria-label="Exception review">
-              <Link
-                href="/review"
-                className={uploadOn ? "is-on" : ""}
-                aria-current={uploadOn ? "page" : undefined}
-              >
-                <Upload size={16} aria-hidden="true" />
-                <span className="nx-nav-label">Upload</span>
+      <EntityContext.Provider value={entity}>
+        <AsOfContext.Provider value={{ asOf, setAsOf }}>
+          <div className="nx review-shell">
+            <aside className="nx-nav">
+              <Link href="/studio" className="nx-brand">
+                <span className="nx-mark">N</span>
+                <span className="nx-nav-label">Nexora</span>
               </Link>
-              {jobId ? (
+              <nav aria-label="Exception review">
                 <Link
-                  href={`/review/jobs/${jobId}`}
-                  className={queueOn ? "is-on" : ""}
-                  aria-current={queueOn ? "page" : undefined}
+                  href="/review"
+                  className={uploadOn ? "is-on" : ""}
+                  aria-current={uploadOn ? "page" : undefined}
                 >
-                  <ListChecks size={16} aria-hidden="true" />
-                  <span className="nx-nav-label">Exceptions</span>
+                  <Upload size={16} aria-hidden="true" />
+                  <span className="nx-nav-label">Upload</span>
                 </Link>
-              ) : null}
-            </nav>
-            <Link href="/studio">Back to studio</Link>
-          </aside>
-          <div className="nx-main">
-            <header className="nx-top">
-              <span>Actor {session.actorId}</span>
-              <span>Basis: unposted extraction</span>
-              <span data-testid="review-as-of">As of {asOf}</span>
-            </header>
-            <div className="nx-content">
-              <p className="review-banner" role="note">
-                <strong>Proposal.</strong> Accept, correct, remap, and not-applicable are sent as
-                resolutions. This screen does not post to the ledger or calculate a model.
-              </p>
-              {children}
+                {jobId ? (
+                  <Link
+                    href={`/review/jobs/${jobId}`}
+                    className={queueOn ? "is-on" : ""}
+                    aria-current={queueOn ? "page" : undefined}
+                  >
+                    <ListChecks size={16} aria-hidden="true" />
+                    <span className="nx-nav-label">Exceptions</span>
+                  </Link>
+                ) : null}
+              </nav>
+              <Link href="/studio">Back to studio</Link>
+            </aside>
+            <div className="nx-main">
+              <header className="nx-top">
+                <span>Actor {session.actorId}</span>
+                <span>Basis: extraction review</span>
+                <span data-testid="review-as-of">As of {asOf}</span>
+              </header>
+              <div className="nx-content">
+                <p className="review-banner" role="note">
+                  {mockMode ? (
+                    <>
+                      <strong>Proposal.</strong> Demo resolutions do not post to the ledger.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Review.</strong> Resolutions are applied by the ingestion engine. The
+                      engine may post after validation.
+                    </>
+                  )}
+                </p>
+                {children}
+              </div>
             </div>
           </div>
-        </div>
-      </AsOfContext.Provider>
+        </AsOfContext.Provider>
+      </EntityContext.Provider>
     </SessionContext.Provider>
   );
 }

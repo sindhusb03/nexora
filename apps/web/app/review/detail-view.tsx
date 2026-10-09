@@ -14,7 +14,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AcceptButton } from "./accept-action";
-import { getIngestionClient } from "./client";
+import { getIngestionClient, isMockIngestion } from "./client";
 import {
   formatConfidence,
   formatMinor,
@@ -31,6 +31,8 @@ import { useReviewAsOf, useReviewSession } from "./shell";
 
 type Action = "accept" | "correct" | "remap" | "not_applicable";
 
+const apiAccountCode = /^[a-z][a-z0-9_]{0,63}$/;
+
 export function DetailView({
   jobId,
   exceptionId,
@@ -38,6 +40,7 @@ export function DetailView({
   readonly jobId: string;
   readonly exceptionId: string;
 }) {
+  const mockMode = isMockIngestion();
   const session = useReviewSession();
   const { setAsOf } = useReviewAsOf();
   const canResolve = canResolveIngestion(session.roles);
@@ -105,12 +108,21 @@ export function DetailView({
     heading?.focus();
   }, [exceptionId]);
 
-  const accounts = chart.filter((item) => item.entityName === document?.entityName);
+  const accounts = chart.filter(
+    (item) =>
+      item.entityName === document?.entityName && (mockMode || apiAccountCode.test(item.code)),
+  );
+  const remapReady = mockMode
+    ? accountCode.length > 0
+    : apiAccountCode.test(accountCode) && accounts.some((item) => item.code === accountCode);
   const provenance = exception?.provenance[0];
+  const noteReady = mockMode || note.trim().length > 0;
 
   async function submit() {
     if (!canResolve || !exception || !action || exception.status !== "open") return;
     if (action === "accept" && headerValueNotAcceptable(exception)) return;
+    if (action === "remap" && !remapReady) return;
+    if (!noteReady) return;
     setBusy(true);
     setError(null);
     const result = await getIngestionClient().resolve(
@@ -144,7 +156,7 @@ export function DetailView({
     (action === "accept" && !acceptBlocked) ||
     action === "not_applicable" ||
     (action === "correct" && correctReady) ||
-    (action === "remap" && accountCode.length > 0);
+    (action === "remap" && remapReady);
 
   return (
     <section className="nx-stack" data-testid="screen-detail" aria-labelledby="exception-title">
@@ -208,7 +220,7 @@ export function DetailView({
                 <p>
                   Proposed {exception.resolution.action}:{" "}
                   <strong className="num">{exception.resolution.after ?? "—"}</strong>
-                  <span className="small muted"> Not posted.</span>
+                  {mockMode ? <span className="small muted"> Not posted.</span> : null}
                 </p>
               ) : null}
               <p className="small">Raw text: {provenance.rawText}</p>
@@ -275,7 +287,7 @@ export function DetailView({
               </Button>
             </div>
           ) : (
-            <p>This exception already has a proposal. It cannot be changed here.</p>
+            <p>This exception already has a resolution.</p>
           )}
           {canResolve && action && exception.status === "open" ? (
             <form
@@ -326,11 +338,28 @@ export function DetailView({
                   data-testid="resolution-note"
                   maxLength={500}
                   value={note}
+                  aria-required={!mockMode}
+                  aria-describedby={!noteReady ? "resolution-note-help" : undefined}
                   onChange={(event) => setNote(event.target.value)}
                 />
+                {!noteReady ? (
+                  <span id="resolution-note-help" className="small muted">
+                    Add a reviewer note before confirming.
+                  </span>
+                ) : null}
               </label>
-              <Button type="submit" data-testid="confirm-resolution" disabled={!canSubmit || busy}>
-                {busy ? "Saving proposal" : "Save proposal"}
+              <Button
+                type="submit"
+                data-testid="confirm-resolution"
+                disabled={!canSubmit || !noteReady || busy}
+              >
+                {mockMode
+                  ? busy
+                    ? "Saving proposal"
+                    : "Save proposal"
+                  : busy
+                    ? "Saving resolution"
+                    : "Save resolution"}
               </Button>
               <Button
                 type="button"

@@ -9,7 +9,7 @@ import type {
 } from "@nexora/contracts";
 
 /**
- * Typed ingestion client. The HTTP implementation talks to `/v1/ingestion/*`.
+ * Typed ingestion client. The HTTP implementation talks to `/ingestion/*`.
  * The mock implementation serves the India and US fixture pack.
  * `client.ts` is the only place that chooses between them.
  *
