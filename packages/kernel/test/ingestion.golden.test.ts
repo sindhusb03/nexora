@@ -517,6 +517,64 @@ describe("chart mapping", () => {
 
 describe("linked model", () => {
   it.each([
+    [12, 31, "2024-07-01"],
+    [3, 31, "2025-01-01"],
+  ])("blocks opening income spanning the %s/%s fiscal year-end", (month, day, start) => {
+    const amounts = [
+      ...["2025-06-30", "2025-12-31"].flatMap((periodEnd, index) =>
+        ["cash", "retained_earnings"].map((accountCode) =>
+          line({
+            valueId: `${accountCode}-${periodEnd}`,
+            accountCode,
+            periodEnd,
+            minor: index === 0 ? "1000" : "1500",
+          }),
+        ),
+      ),
+      line({
+        valueId: "opening-revenue",
+        statement: "income_statement",
+        accountCode: "revenue",
+        periodEnd: "2025-06-30",
+        periodStart: start,
+        minor: "500",
+      }),
+      line({
+        valueId: "later-revenue",
+        statement: "income_statement",
+        accountCode: "revenue",
+        periodEnd: "2025-12-31",
+        periodStart: "2025-07-01",
+        minor: "500",
+      }),
+    ];
+    expect(
+      buildLinkedModel({ ...balancedPackage(), amounts, banks: [], fiscalYearEnd: { month, day } }),
+    ).toEqual({
+      ok: false,
+      message: "Upload an income statement that starts after your balance sheet date.",
+    });
+  });
+
+  it("starts a balance-sheet-only movement the day after the opening date", () => {
+    const amounts = ["2025-06-30", "2025-12-31"].flatMap((periodEnd, index) =>
+      ["cash", "accounts_payable"].map((accountCode) =>
+        line({
+          valueId: `${accountCode}-${periodEnd}`,
+          accountCode,
+          periodEnd,
+          periodStart: "2025-01-01",
+          minor: index === 0 ? "1000" : "1500",
+        }),
+      ),
+    );
+    const result = buildLinkedModel({ ...balancedPackage(), amounts, banks: [] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.model.journals[1]?.periodStart).toBe("2025-07-01");
+  });
+
+  it.each([
     ["2025-06-30", "2025-12-31", "560", "240"],
     ["2024-12-31", "2025-06-30", "800", "0"],
   ])(

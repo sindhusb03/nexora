@@ -571,6 +571,7 @@ async function postLinkedModel(
           new Intl.DateTimeFormat("en-GB", {
             day: "numeric",
             month: "short",
+            year: "numeric",
             timeZone: "UTC",
           }).format(new Date(`${date}T00:00:00Z`));
         return {
@@ -578,7 +579,15 @@ async function postLinkedModel(
           message: `This income statement starts on ${displayDate(overlappingIncome.periodStart)}, before your opening balances on ${displayDate(openingDate)}. Upload figures from ${displayDate(nextDay.toISOString().slice(0, 10))} onwards, or replace your opening balances.`,
         };
       }
-      const conflict = fiscalYearConflict(snapshot, checkInput.amounts);
+      // Opening income is validated against the entity's fiscal year by the
+      // linked model; its end date is the opening balance date, not a year-end.
+      const conflict = fiscalYearConflict(
+        snapshot,
+        checkInput.amounts.filter(
+          (amount) =>
+            !(amount.statement === "income_statement" && amount.periodEnd === openingDate),
+        ),
+      );
       if (conflict) return { action: "block" as const, message: conflict };
       const postedBalances = cumulativeLedgerBalances({
         periods: snapshot.periods.map((period) => ({
@@ -698,7 +707,6 @@ async function postLinkedModel(
         commitJournals.push({
           journalId: crypto.randomUUID(),
           periodId,
-          journalKind,
           idempotencyKey: `ingestion:${entityId}:${canonicalHash}:${journal.kind}:${journal.periodEnd}`,
           payloadHash: balanced.payloadHash,
           sourceRef:

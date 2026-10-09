@@ -171,6 +171,80 @@ describe("ingestion opening journals", () => {
         row.values.every((value) => value.periodId === closingPeriod!.periodId),
       ),
     ).toBe(true);
+    const selectedOpening = await call(
+      app,
+      "GET",
+      `/v1/workspace?entityId=${entityId}&periodId=${opening[0]!.periodId}`,
+      options,
+    );
+    expect(selectedOpening.status).toBe(200);
+    expect(await selectedOpening.json()).toMatchObject({
+      context: { periodId: null },
+      latest: { revenueMinor: null, endingCashMinor: null },
+      statements: { periods: [] },
+      series: [],
+    });
+  });
+
+  it("serves an opening-only workspace with no period figures", async () => {
+    const { tenantId, entityId } = await company("Opening only");
+    const options = { actor: "owner-1", tenant: tenantId, region: "us-east-1" };
+    const accountIds: string[] = [];
+    for (const [code, report, cashFlow, retainedEarnings] of [
+      ["cash", "asset", "cash", false],
+      ["retained_earnings", "equity", "non_cash", true],
+    ] as const) {
+      const response = await call(app, "POST", "/v1/accounts", {
+        ...options,
+        body: { entityId, code, name: code, report, cashFlow, retainedEarnings },
+      });
+      expect(response.status).toBe(201);
+      accountIds.push(((await response.json()) as { accountId: string }).accountId);
+    }
+    const period = await call(app, "POST", "/v1/periods", {
+      ...options,
+      body: { entityId, startDate: "2025-06-30", endDate: "2025-06-30" },
+    });
+    expect(period.status).toBe(201);
+    const { periodId } = (await period.json()) as { periodId: string };
+    const uploaded = await call(app, "POST", "/v1/journals", {
+      ...options,
+      idempotency: "opening-only",
+      body: {
+        entityId,
+        periodId,
+        currency: "USD",
+        journalKind: "opening",
+        lines: [
+          { accountId: accountIds[0], debit: "1000.00", credit: "0" },
+          { accountId: accountIds[1], debit: "0", credit: "1000.00" },
+        ],
+      },
+    });
+    expect(uploaded.status).toBe(201);
+    for (const query of ["", `&periodId=${periodId}`]) {
+      const response = await call(
+        app,
+        "GET",
+        `/v1/workspace?entityId=${entityId}${query}`,
+        options,
+      );
+      expect(response.status).toBe(200);
+      const view = (await response.json()) as {
+        context: { periodId: string | null };
+        latest: { revenueMinor: string | null; endingCashMinor: string | null };
+        statements: { periods: unknown[]; rows: { values: unknown[] }[] };
+        series: unknown[];
+        kpis: { minor: string | null }[];
+      };
+      expect(view.context.periodId).toBeNull();
+      expect(view.latest.revenueMinor).toBeNull();
+      expect(view.latest.endingCashMinor).toBeNull();
+      expect(view.statements.periods).toEqual([]);
+      expect(view.statements.rows.every((row) => row.values.length === 0)).toBe(true);
+      expect(view.series).toEqual([]);
+      expect(view.kpis.every((kpi) => kpi.minor === null)).toBe(true);
+    }
   });
 
   it("posts only balance-sheet lines at year-end and no before Nexora income in 2025", async () => {
@@ -225,6 +299,31 @@ describe("ingestion opening journals", () => {
     );
   });
 
+  it("blocks an upload whose opening income spans the previous fiscal year-end", async () => {
+    const { tenantId, entityId } = await company("Prior-year opening income");
+    const source = confirmedDocument();
+    const document = {
+      ...source,
+      cells: source.cells.map((cell) =>
+        cell.statementType === "income_statement" && cell.periodEnd === "2025-06-30"
+          ? { ...cell, periodStart: "2024-07-01", spanMonths: 12 }
+          : cell,
+      ),
+    };
+    const job = await upload(tenantId, entityId, "prior-year-income", workbook(), document);
+    expect(job.status).toBe("needs_review");
+    expect(await store.listJournals(tenantId, entityId, null)).toEqual([]);
+    expect(await store.listPeriods(tenantId, entityId)).toEqual([]);
+    expect(await store.listIngestionExceptions(tenantId, job.jobId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: "error",
+          message: "Upload an income statement that starts after your balance sheet date.",
+        }),
+      ]),
+    );
+  });
+
   it("blocks later income that starts on or before the opening date", async () => {
     const { tenantId, entityId } = await company("Overlapping income");
     const source = confirmedDocument();
@@ -243,7 +342,7 @@ describe("ingestion opening journals", () => {
       expect.arrayContaining([
         expect.objectContaining({
           message:
-            "This income statement starts on 1 Jan, before your opening balances on 30 Jun. Upload figures from 1 Jul onwards, or replace your opening balances.",
+            "This income statement starts on 1 Jan 2025, before your opening balances on 30 Jun 2025. Upload figures from 1 Jul 2025 onwards, or replace your opening balances.",
         }),
       ]),
     );
