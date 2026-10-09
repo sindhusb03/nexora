@@ -34,7 +34,7 @@ describe("ingestion opening journals", () => {
 
   afterAll(() => vi.restoreAllMocks());
 
-  async function company(name: string, withYearEnd = true) {
+  async function company(name: string, withYearEnd = true, fiscalYearEndMonth = 12) {
     const tenant = await call(app, "POST", "/v1/tenants", {
       actor: "platform-admin",
       region: "us-east-1",
@@ -48,7 +48,7 @@ describe("ingestion opening journals", () => {
       body: {
         legalName: name,
         functionalCurrency: "USD",
-        ...(withYearEnd ? { fiscalYearEndMonth: 12, fiscalYearEndDay: 31 } : {}),
+        ...(withYearEnd ? { fiscalYearEndMonth, fiscalYearEndDay: 31 } : {}),
       },
     });
     const { entityId } = (await response.json()) as { entityId: string };
@@ -299,30 +299,36 @@ describe("ingestion opening journals", () => {
     );
   });
 
-  it("blocks an upload whose opening income spans the previous fiscal year-end", async () => {
-    const { tenantId, entityId } = await company("Prior-year opening income");
-    const source = confirmedDocument();
-    const document = {
-      ...source,
-      cells: source.cells.map((cell) =>
-        cell.statementType === "income_statement" && cell.periodEnd === "2025-06-30"
-          ? { ...cell, periodStart: "2024-07-01", spanMonths: 12 }
-          : cell,
-      ),
-    };
-    const job = await upload(tenantId, entityId, "prior-year-income", workbook(), document);
-    expect(job.status).toBe("needs_review");
-    expect(await store.listJournals(tenantId, entityId, null)).toEqual([]);
-    expect(await store.listPeriods(tenantId, entityId)).toEqual([]);
-    expect(await store.listIngestionExceptions(tenantId, job.jobId)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: "error",
-          message: "Upload an income statement that starts after your balance sheet date.",
-        }),
-      ]),
-    );
-  });
+  it.each([
+    [12, "1 Jan 2025"],
+    [3, "1 Apr 2025"],
+  ])(
+    "blocks opening income spanning the previous fiscal year-end (month %s)",
+    async (month, date) => {
+      const { tenantId, entityId } = await company("Prior-year opening income", true, month);
+      const source = confirmedDocument();
+      const document = {
+        ...source,
+        cells: source.cells.map((cell) =>
+          cell.statementType === "income_statement" && cell.periodEnd === "2025-06-30"
+            ? { ...cell, periodStart: "2024-07-01", spanMonths: 12 }
+            : cell,
+        ),
+      };
+      const job = await upload(tenantId, entityId, "prior-year-income", workbook(), document);
+      expect(job.status).toBe("needs_review");
+      expect(await store.listJournals(tenantId, entityId, null)).toEqual([]);
+      expect(await store.listPeriods(tenantId, entityId)).toEqual([]);
+      expect(await store.listIngestionExceptions(tenantId, job.jobId)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            severity: "error",
+            message: `This income statement starts before your financial year began on ${date}. Upload year-to-date figures from ${date}, or set your year-end.`,
+          }),
+        ]),
+      );
+    },
+  );
 
   it("blocks later income that starts on or before the opening date", async () => {
     const { tenantId, entityId } = await company("Overlapping income");

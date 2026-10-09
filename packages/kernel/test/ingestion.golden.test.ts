@@ -517,9 +517,9 @@ describe("chart mapping", () => {
 
 describe("linked model", () => {
   it.each([
-    [12, 31, "2024-07-01"],
-    [3, 31, "2025-01-01"],
-  ])("blocks opening income spanning the %s/%s fiscal year-end", (month, day, start) => {
+    [12, 31, "2024-07-01", "1 Jan 2025"],
+    [3, 31, "2025-01-01", "1 Apr 2025"],
+  ])("blocks opening income spanning the %s/%s fiscal year-end", (month, day, start, date) => {
     const amounts = [
       ...["2025-06-30", "2025-12-31"].flatMap((periodEnd, index) =>
         ["cash", "retained_earnings"].map((accountCode) =>
@@ -552,7 +552,7 @@ describe("linked model", () => {
       buildLinkedModel({ ...balancedPackage(), amounts, banks: [], fiscalYearEnd: { month, day } }),
     ).toEqual({
       ok: false,
-      message: "Upload an income statement that starts after your balance sheet date.",
+      message: `This income statement starts before your financial year began on ${date}. Upload year-to-date figures from ${date}, or set your year-end.`,
     });
   });
 

@@ -130,9 +130,24 @@ export function buildLinkedModel(input: IngestionCheckInput): LinkedModelResult 
       if (
         openingIncome.some((amount) => amount.periodStart && amount.periodStart < fiscalYearStart)
       ) {
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        const formattedDate = `${Number(fiscalYearStart.slice(8, 10))} ${monthNames[Number(fiscalYearStart.slice(5, 7)) - 1]} ${fiscalYearStart.slice(0, 4)}`;
         return {
           ok: false,
-          message: "Upload an income statement that starts after your balance sheet date.",
+          message: `This income statement starts before your financial year began on ${formattedDate}. Upload year-to-date figures from ${formattedDate}, or set your year-end.`,
         };
       }
     }
