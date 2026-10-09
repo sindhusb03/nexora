@@ -30,13 +30,13 @@ export default defineConfig({
     },
     {
       command: "pnpm --filter @nexora/web dev",
-      env: { ...process.env, NEXT_PUBLIC_INGESTION_MODE: httpReview ? "http" : "mock" },
       url: "http://127.0.0.1:4317",
       reuseExistingServer: reuse,
       timeout: 180_000,
       cwd: "../..",
       env: {
         ...process.env,
+        NEXT_PUBLIC_INGESTION_MODE: httpReview ? "http" : "mock",
         NEXT_PUBLIC_API_URL: "http://127.0.0.1:8787",
       },
     },
