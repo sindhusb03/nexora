@@ -30,3 +30,11 @@ export type { RlsSessionContext } from "./session-context.js";
 export { schema } from "./schema.js";
 export { ingestionSchema } from "./ingestion-schema.js";
 export { createLedgerStore, isUniqueViolation } from "./store.js";
+export {
+  assertCurrencyScaleVisible,
+  assertStoredCurrencyScales,
+  PRE_CUTOVER_CURRENCY_SQL,
+  STORED_CURRENCY_SQL,
+} from "./currency-scale-check.js";
+export { CURRENCY_SCALE_TABLE_VERSION } from "./currency-scale-cutover.js";
+export type { CurrencyScaleCutoverResult } from "./currency-scale-cutover.js";

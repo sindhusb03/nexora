@@ -1,7 +1,12 @@
 import { buildCashForecast, type CashForecast } from "./cash-weeks.js";
 import { forecastDrivers, type ForecastResult } from "./forecast.js";
 import { hashMaterial } from "./hash.js";
-import { canonicalAccount, isExpenseAccount, isRevenueAccount } from "./ingestion-chart.js";
+import {
+  canonicalAccount,
+  isExpenseAccount,
+  isReviewCashFlowPlaceholder,
+  isRevenueAccount,
+} from "./ingestion-chart.js";
 import type { ReportClass } from "./statements.js";
 import {
   INGESTION_FORMULA_VERSION,
@@ -136,6 +141,18 @@ export function buildLinkedModel(input: IngestionCheckInput): LinkedModelResult 
       lines,
     });
     previous = current;
+  }
+
+  if (
+    journals.some((journal) =>
+      journal.lines.some((line) => isReviewCashFlowPlaceholder(line.accountCode)),
+    )
+  ) {
+    return {
+      ok: false,
+      message:
+        "Map other non-current accounts to a deposit, a loan given, a borrowing, or a long-term provision before a projection can be built.",
+    };
   }
 
   const classified = classifiedLines(journals, input.currency);

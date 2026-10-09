@@ -5,6 +5,7 @@ import {
   buildCashForecast,
   buildQoeBridge,
   buildStatements,
+  DEFAULT_STATEMENT_POLICY,
   currencyScale,
   explainVariance,
   forecastScenario,
@@ -14,13 +15,22 @@ import {
   KernelError,
   money,
   subtractMoney,
-  type ClassifiedLine,
   type Role,
 } from "@nexora/kernel";
-import type { LedgerStore, PostedActivityLine } from "@nexora/db";
+import type { LedgerStore } from "@nexora/db";
 import type { Hono } from "hono";
 import { z } from "zod";
 
+import {
+  classifyPostedActivity,
+  displaySourceRef,
+  fiscalYearForStatements,
+} from "../classify-activity.js";
+import {
+  plainStatementMessage,
+  presentStatementFindings,
+  presentStatementPolicy,
+} from "../statement-presentation.js";
 import { answerCopilot, isAgent } from "../copilot/answer.js";
 import { cashWeekInputs, PLAN_BUDGET, PLANNING_DRIVERS } from "../demo/books.js";
 import { ApiError, readActor, type ActorContext, type AppEnv } from "../http.js";
@@ -379,10 +389,14 @@ async function snapshot(
   const unavailablePeriods: { periodId: string; reason: string }[] = [];
   const series = activityPeriods.flatMap((period) => {
     try {
+      const visible = activity.filter((line) => line.periodStart <= period.endDate);
+      const fiscalYear = fiscalYearForStatements(entity, visible, period.endDate);
       const statement = buildStatements({
         currency: entity.functionalCurrency,
         retainedEarningsAccountId: entity.retainedEarningsAccountId ?? "",
-        lines: classify(activity, period.periodId, period.startDate),
+        lines: classifyPostedActivity(visible, period),
+        policy: DEFAULT_STATEMENT_POLICY,
+        ...(fiscalYear === undefined ? {} : { fiscalYear }),
       });
       return [{ period, statement }];
     } catch (error) {
@@ -392,9 +406,16 @@ async function snapshot(
         !(error instanceof KernelError) ||
         error.code !== "FIN_STATEMENT_IMBALANCE" ||
         period.periodId === selectedPeriod.periodId
-      )
+      ) {
+        if (error instanceof KernelError && error.code === "FIN_STATEMENT_IMBALANCE") {
+          throw new KernelError(error.code, plainStatementMessage(error.message));
+        }
         throw error;
-      unavailablePeriods.push({ periodId: period.periodId, reason: error.message });
+      }
+      unavailablePeriods.push({
+        periodId: period.periodId,
+        reason: plainStatementMessage(error.message),
+      });
       return [];
     }
   });
@@ -609,18 +630,25 @@ async function snapshot(
     ],
     statements: {
       unavailablePeriods,
-      periods: series.map((item) => ({
-        periodId: item.period.periodId,
-        label: item.period.endDate.slice(0, 7),
-        inputHash: item.statement.inputHash,
-        engineVersion: item.statement.engineVersion,
-      })),
+      periods: series.map((item) => {
+        const findings = presentStatementFindings(item.statement);
+        return {
+          periodId: item.period.periodId,
+          label: item.period.endDate.slice(0, 7),
+          inputHash: item.statement.inputHash,
+          engineVersion: item.statement.engineVersion,
+          policy: presentStatementPolicy(DEFAULT_STATEMENT_POLICY),
+          final: item.statement.issues.length === 0,
+          issues: findings.issues,
+          notices: findings.notices,
+        };
+      }),
       rows: statementRows(series, currency),
     },
     journals: journals.map((journal) => ({
       journalId: journal.journalId,
       periodId: journal.periodId,
-      sourceRef: journal.sourceRef,
+      sourceRef: displaySourceRef(journal.sourceRef),
       payloadHash: journal.payloadHash,
       lines: journal.lines.map((line) => ({
         account: accountName.get(line.accountId) ?? line.accountId,
@@ -929,24 +957,6 @@ function statementRows(
       ...present(read(item.statement), currency),
     })),
   }));
-}
-
-function classify(
-  activity: readonly PostedActivityLine[],
-  periodId: string,
-  periodStart: string,
-): ClassifiedLine[] {
-  return activity
-    .filter((line) => line.periodId === periodId || line.periodEnd < periodStart)
-    .map((line) => ({
-      accountId: line.accountId,
-      report: line.report,
-      cashFlow: line.cashFlow,
-      debitMinor: line.debitMinor,
-      creditMinor: line.creditMinor,
-      currency: line.currency,
-      period: line.periodId === periodId ? "movement" : "opening",
-    }));
 }
 
 function asMinor(value: string): string {

@@ -38,7 +38,7 @@ describe("driver forecast", () => {
         ebitdaMinor: "28400",
       },
     ]);
-    expect(result.engineVersion).toBe("fe-kernel-0.2.1");
+    expect(result.engineVersion).toBe("fe-kernel-0.3.0");
     expect(result.inputHash).toHaveLength(64);
 
     const compared = forecastScenario(

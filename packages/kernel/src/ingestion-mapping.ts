@@ -1,4 +1,8 @@
-import { canonicalAccount } from "./ingestion-chart.js";
+import {
+  canonicalAccount,
+  suggestedReviewCashFlow,
+  type ReviewCashFlow,
+} from "./ingestion-chart.js";
 import { MAPPING_AUTO_ACCEPT_CONFIDENCE, type AmountRole } from "./ingestion-types.js";
 import { AnalyticalDecimal } from "./money.js";
 import { LOCALIZED_LABELS } from "./ingestion-localized-labels.js";
@@ -17,6 +21,7 @@ export interface MappingHit {
   readonly method: MappingMethod;
   readonly role: AmountRole;
   readonly contra: boolean;
+  readonly suggestedCashFlow?: ReviewCashFlow;
 }
 
 const TOTALS = new Set([
@@ -278,6 +283,10 @@ function mapNormalized(normalized: string): MappingHit | null {
   if (normalized.length === 0) return null;
   const role = statementRole(normalized);
   if (role === "heading") return null;
+  const placeholder = otherNoncurrentReview(normalized);
+  if (placeholder) {
+    return hit(placeholder.code, REVIEW_CONFIDENCE, "regex", role, false, placeholder.suggested);
+  }
   const localized = localizedSynonyms.get(normalized);
   if (localized) return hit(localized, "0.98", "synonym", role);
   if (normalized === "borrowings" || normalized === "term loan")
@@ -301,6 +310,34 @@ function mapNormalized(normalized: string): MappingHit | null {
     if (changed) return hit(override.code, REVIEW_CONFIDENCE, "regex", role, override.contra);
   }
   return naive;
+}
+
+function otherNoncurrentReview(
+  normalized: string,
+): { code: string; suggested: ReviewCashFlow } | null {
+  if (
+    /\b(long term deposits?|deposits? given|loans? given|loans? to others)\b/.test(normalized) ||
+    /\bother non current assets?\b/.test(normalized)
+  ) {
+    return { code: "other_noncurrent_assets", suggested: "cfi" };
+  }
+  if (
+    /\blong term provisions?\b/.test(normalized) ||
+    /\bnon current deferred revenue\b/.test(normalized) ||
+    /\b(long term|non current) employee benefits?\b/.test(normalized)
+  ) {
+    return { code: "other_noncurrent_liabilities", suggested: "cfo" };
+  }
+  if (
+    /\bother non current borrowings?\b/.test(normalized) ||
+    /\bother borrowings\b/.test(normalized)
+  ) {
+    return { code: "other_noncurrent_liabilities", suggested: "cff" };
+  }
+  if (/\bother non current liabilities\b/.test(normalized)) {
+    return { code: "other_noncurrent_liabilities", suggested: "cff" };
+  }
+  return null;
 }
 
 function familyMap(normalized: string): { code: string; contra: boolean } | null {
@@ -375,13 +412,16 @@ function hit(
   method: MappingMethod,
   role: AmountRole,
   contra = false,
+  suggestedCashFlow?: ReviewCashFlow,
 ): MappingHit {
   const account = canonicalAccount(accountCode);
+  const suggested = suggestedCashFlow ?? suggestedReviewCashFlow(accountCode, "") ?? undefined;
   return {
     accountCode,
     confidence,
     method,
     role,
     contra: contra || account?.contra === true,
+    ...(suggested === undefined ? {} : { suggestedCashFlow: suggested }),
   };
 }

@@ -54,6 +54,7 @@ export const journalSchema = z.object({
   periodId: uuid,
   currency: z.string().regex(/^[A-Z]{3}$/),
   sourceRef: z.string().trim().min(1).max(200).nullish(),
+  journalKind: z.enum(["opening", "standard"]).optional(),
   lines: z
     .array(
       z.object({

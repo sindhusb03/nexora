@@ -4,7 +4,7 @@ import { call, sessions, TEST_ACTORS, testApp, type TestApp } from "./harness.js
 
 /**
  * Golden fixture `two_entity_fx`.
- * Formula: current-rate-by-report-class-v1. Engine: fe-kernel-0.2.1.
+ * Formula: current-rate-by-report-class-v1. Engine: fe-kernel-0.3.0.
  * Amounts are integer minor units. Balance-sheet accounts are cumulative through
  * the period end. Income is current-period movement. Prior income rolls into retained earnings.
  *
@@ -19,7 +19,7 @@ import { call, sessions, TEST_ACTORS, testApp, type TestApp } from "./harness.js
  * Group EUR CTA -10,001,225. Elimination clears AR 900 against AP 900. The total is zero.
  */
 
-const ENGINE_VERSION = "fe-kernel-0.2.1";
+const ENGINE_VERSION = "fe-kernel-0.3.0";
 const FORMULA_VERSION = "current-rate-by-report-class-v1";
 
 describe("posted-ledger group consolidation", () => {

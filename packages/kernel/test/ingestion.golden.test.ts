@@ -474,6 +474,23 @@ describe("chart mapping", () => {
     });
     expect(mapLineLabel("Net Income")?.role).toBe("total");
     expect(mapLineLabel("Unmapped consulting fee")).toBeNull();
+    expect(mapLineLabel("Long-term deposits")).toMatchObject({
+      accountCode: "other_noncurrent_assets",
+      suggestedCashFlow: "cfi",
+    });
+    expect(mappingIsAutoAcceptable(mapLineLabel("Loans given")?.confidence ?? "0")).toBe(false);
+    expect(mapLineLabel("Loans given")?.suggestedCashFlow).toBe("cfi");
+    expect(mapLineLabel("Other borrowings")).toMatchObject({
+      accountCode: "other_noncurrent_liabilities",
+      suggestedCashFlow: "cff",
+    });
+    expect(mapLineLabel("Long-term provisions")).toMatchObject({
+      accountCode: "other_noncurrent_liabilities",
+      suggestedCashFlow: "cfo",
+    });
+    expect(mappingIsAutoAcceptable(mapLineLabel("Long-term provisions")?.confidence ?? "0")).toBe(
+      false,
+    );
     expect(mapLineLabel("Cost of Sales")).toMatchObject({ accountCode: "cogs" });
     expect(mappingIsAutoAcceptable(mapLineLabel("Cost of Sales")?.confidence ?? "0")).toBe(true);
     expect(mappingIsAutoAcceptable(mapLineLabel("Cost of goods sold")?.confidence ?? "0")).toBe(
@@ -530,6 +547,23 @@ describe("linked model", () => {
     const again = buildLinkedModel(balancedPackage());
     expect(again.ok && again.model.inputHash).toBe(result.model.inputHash);
     expect(again.ok && again.model.outputHash).toBe(result.model.outputHash);
+  });
+
+  it("leaves other non-current accounts unresolved instead of treating them as non-cash", () => {
+    const input = balancedPackage();
+    const withPlaceholder = {
+      ...input,
+      amounts: input.amounts.map((amount) => {
+        if (amount.accountCode !== "fixed_assets") return amount;
+        return { ...amount, accountCode: "other_noncurrent_assets", label: "Long-term deposits" };
+      }),
+    };
+    const result = buildLinkedModel(withPlaceholder);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toMatch(
+      /Map other non-current accounts to a deposit, a loan given, a borrowing, or a long-term provision/,
+    );
   });
 
   it("refuses a single balance sheet instead of inventing an opening", () => {

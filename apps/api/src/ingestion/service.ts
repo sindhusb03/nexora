@@ -17,6 +17,7 @@ import {
   authorize,
   buildLinkedModel,
   canonicalAccount,
+  suggestedReviewCashFlow,
   cumulativeLedgerBalances,
   currencyScale,
   formatMinor,
@@ -414,12 +415,21 @@ async function revalidate(
     if (value.statementType === "bank" || value.role !== "line" || value.mappingAccepted) continue;
     if (!value.mappingMethod || !value.accountCode) continue;
     if (suppressed.has(exceptionKey("mapping_low_confidence", [value.valueId]))) continue;
+    const suggestion = suggestedReviewCashFlow(value.accountCode, value.label);
+    const suggestionText =
+      suggestion === "cfi"
+        ? " Map it to a deposit or a loan given."
+        : suggestion === "cff"
+          ? " Map it to a borrowing."
+          : suggestion === "cfo"
+            ? " Map it to a long-term provision."
+            : "";
     mappingExceptions.push({
       exceptionId: crypto.randomUUID(),
       documentId: value.documentId,
       type: "mapping_low_confidence",
       severity: "error",
-      message: `${value.label} mapped to ${value.accountCode} at confidence ${value.mappingConfidence ?? "0"}, below ${MAPPING_AUTO_ACCEPT_CONFIDENCE}`,
+      message: `${value.label} mapped to ${value.accountCode} at confidence ${value.mappingConfidence ?? "0"}, below ${MAPPING_AUTO_ACCEPT_CONFIDENCE}.${suggestionText}`,
       expected: MAPPING_AUTO_ACCEPT_CONFIDENCE,
       actual: value.mappingConfidence,
       diff: null,

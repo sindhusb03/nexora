@@ -64,8 +64,17 @@ export { projectScenario } from "./scenario.js";
 export { valueDcfSensitivity } from "./sensitivity.js";
 export type { DcfShock } from "./sensitivity.js";
 export { stateHash } from "./state-hash.js";
-export { canonicalAccount, listCanonicalAccounts } from "./ingestion-chart.js";
+export {
+  assertCanonicalClassification,
+  canonicalAccount,
+  isReviewCashFlowPlaceholder,
+  listCanonicalAccounts,
+  suggestedReviewCashFlow,
+  unclassifiedCashFlow,
+} from "./ingestion-chart.js";
+export type { ReviewCashFlow } from "./ingestion-chart.js";
 export type { CanonicalAccount } from "./ingestion-chart.js";
+export { allocateExact, allocateSplit } from "./allocate.js";
 export { runIngestionChecks } from "./ingestion-checks.js";
 export { statementAmountsEqual } from "./statement-equation.js";
 export {
@@ -103,8 +112,19 @@ export type {
   IngestionSeverity,
   IngestionStatement,
 } from "./ingestion-types.js";
-export { buildStatements } from "./statements.js";
-export type { CashFlowClass, ClassifiedLine, ReportClass, StatementSet } from "./statements.js";
+export { buildStatements, DEFAULT_STATEMENT_POLICY, statementPolicyLabel } from "./statements.js";
+export type {
+  CashFlowClass,
+  ClassifiedLine,
+  LeaseAccounting,
+  NonCashItemType,
+  ReportClass,
+  StatementFinding,
+  StatementFiscalYear,
+  StatementIssueCode,
+  StatementPolicy,
+  StatementSet,
+} from "./statements.js";
 export { translateTrialBalance } from "./translation.js";
 export type { RateType, TranslatedTrialBalance, TrialBalanceLine } from "./translation.js";
 export {

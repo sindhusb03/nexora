@@ -1,4 +1,4 @@
-import { migratePostgres, MigrationError } from "@nexora/db";
+import { migratePostgres } from "@nexora/db";
 
 import { errorFields, jsonLogger } from "./observability.js";
 
@@ -29,7 +29,7 @@ try {
 } catch (error) {
   logger.error("migrate.failed", {
     ...errorFields(error),
-    message: error instanceof MigrationError ? error.message : null,
+    message: error instanceof Error ? error.message : null,
   });
   process.exit(1);
 }

@@ -1,13 +1,9 @@
-import type {
-  AccountRecord,
-  AuditWrite,
-  JournalRecord,
-  LedgerStore,
-  PostedActivityLine,
-} from "@nexora/db";
+import type { AccountRecord, AuditWrite, JournalRecord, LedgerStore } from "@nexora/db";
 import { isUniqueViolation } from "@nexora/db";
 import {
+  DEFAULT_STATEMENT_POLICY,
   KernelError,
+  assertCanonicalClassification,
   assertExpectedVersion,
   assertNoPeriodOverlap,
   assertPeriodOpen,
@@ -25,12 +21,22 @@ import {
   validateJournal,
   valueDcf,
   type Action,
-  type ClassifiedLine,
   type Role,
   type StatementSet,
 } from "@nexora/kernel";
 
-import type { ActorContext } from "./http.js";
+import {
+  classifyPostedActivity,
+  fiscalYearForStatements,
+  openingSourceRef,
+} from "./classify-activity.js";
+import { ExplainedKernelError, type ActorContext } from "./http.js";
+import {
+  closeRefusal,
+  plainStatementMessage,
+  presentStatementFindings,
+  presentStatementPolicy,
+} from "./statement-presentation.js";
 
 export function createLedgerService(store: LedgerStore, platformAdminActorIds: readonly string[]) {
   return {
@@ -77,6 +83,7 @@ export function createLedgerService(store: LedgerStore, platformAdminActorIds: r
         periodId: string;
         currency: string;
         sourceRef?: string | null;
+        journalKind?: "opening" | "standard" | undefined;
         lines: readonly { accountId: string; debit: string; credit: string }[];
       },
     ) => postJournal(store, actor, input),
@@ -254,6 +261,11 @@ async function createAccount(
       "Retained earnings must be an equity account",
     );
   }
+  assertCanonicalClassification({
+    code: input.code,
+    report: input.report,
+    cashFlow: input.cashFlow,
+  });
   const now = new Date().toISOString();
   const accountId = crypto.randomUUID();
   const created = await store.createAccount({
@@ -333,6 +345,30 @@ async function closePeriod(store: LedgerStore, actor: ActorContext, periodId: st
   const tenant = await scope(store, actor, "period.close");
   const period = await requiredPeriod(store, tenant.tenantId, periodId);
   assertPeriodOpen(period.status);
+  let presented;
+  try {
+    const { statement } = await computeStatementsForPeriod(
+      store,
+      tenant.tenantId,
+      period.entityId,
+      periodId,
+    );
+    presented = presentStatement(statement, DEFAULT_STATEMENT_POLICY);
+  } catch (error) {
+    if (error instanceof KernelError) {
+      const refusal = closeRefusal(error.message);
+      throw new ExplainedKernelError(error.code, refusal.message, refusal.action);
+    }
+    throw error;
+  }
+  if (!presented.final) {
+    const issue = presented.issues[0];
+    throw new ExplainedKernelError(
+      "FIN_STATEMENT_IMBALANCE",
+      issue?.message ?? "This period is not ready to close.",
+      issue?.action ?? "Fix the flagged accounts, then close the period.",
+    );
+  }
   const now = new Date().toISOString();
   const closed = await store.closePeriod({
     tenantId: tenant.tenantId,
@@ -350,6 +386,7 @@ async function postJournal(
     periodId: string;
     currency: string;
     sourceRef?: string | null;
+    journalKind?: "opening" | "standard" | undefined;
     lines: readonly { accountId: string; debit: string; credit: string }[];
   },
 ) {
@@ -369,6 +406,15 @@ async function postJournal(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   assertPeriodOpen(period.status);
+  if (input.journalKind !== "opening" && input.sourceRef?.startsWith("opening:")) {
+    throw new KernelError(
+      "FIN_INVALID_JOURNAL_LINE",
+      "Only an opening journal can use a reference that starts with opening:.",
+    );
+  }
+  if (input.journalKind === "opening") {
+    await assertOpeningPlacement(store, tenant.tenantId, entity.entityId, period.periodId);
+  }
   const accounts = await accountsById(store, tenant.tenantId, entity.entityId);
   const balanced = validateJournal({
     currency: input.currency,
@@ -417,7 +463,10 @@ async function postJournal(
         idempotencyKey: actor.idempotencyKey,
         payloadHash: balanced.payloadHash,
         reversesJournalId: null,
-        sourceRef: input.sourceRef ?? null,
+        sourceRef:
+          input.journalKind === "opening"
+            ? openingSourceRef(input.sourceRef)
+            : (input.sourceRef ?? null),
         actorId: actor.actorId,
         correlationId: actor.correlationId,
         version: 1,
@@ -483,6 +532,16 @@ async function reverseJournal(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   assertPeriodOpen(period.status);
+  if (input.sourceRef?.startsWith("opening:")) {
+    throw new KernelError(
+      "FIN_INVALID_JOURNAL_LINE",
+      "A reversal cannot be marked as an opening journal. It keeps the kind of the journal it reverses.",
+    );
+  }
+  const originalIsOpening = original.sourceRef?.startsWith("opening:") === true;
+  if (originalIsOpening) {
+    await assertOpeningPlacement(store, tenant.tenantId, original.entityId, period.periodId);
+  }
   const reversalLines = buildReversalLines(
     original.lines.map((line) => ({
       accountId: line.accountId,
@@ -512,7 +571,7 @@ async function reverseJournal(
       idempotencyKey: actor.idempotencyKey,
       payloadHash: balanced.payloadHash,
       reversesJournalId: original.journalId,
-      sourceRef: input.sourceRef ?? null,
+      sourceRef: originalIsOpening ? openingSourceRef(input.sourceRef) : (input.sourceRef ?? null),
       actorId: actor.actorId,
       correlationId: actor.correlationId,
       version: 1,
@@ -575,7 +634,7 @@ async function statements(
     entityId,
     periodId,
   );
-  return presentStatement(statement);
+  return presentStatement(statement, DEFAULT_STATEMENT_POLICY);
 }
 
 /**
@@ -597,34 +656,17 @@ export async function loadClassifiedActivity(
     throw new KernelError("FIN_NOT_FOUND", "Period does not belong to the entity");
   }
   const activity = await store.listPostedActivity(tenantId, entity.entityId);
-  const lines: ClassifiedLine[] = activity
-    .filter((line) => line.periodStart <= period.endDate)
-    .map((line) => ({
-      journalId: line.journalId,
-      accountId: line.accountId,
-      report: line.report,
-      cashFlow: line.cashFlow,
-      debitMinor: line.debitMinor,
-      creditMinor: line.creditMinor,
-      currency: line.currency,
-      period: classifyPeriod(line, period.startDate, period.periodId),
-    }));
-  lines.sort((left, right) => {
-    const periodOrder = left.period.localeCompare(right.period);
-    return (
-      periodOrder ||
-      left.accountId.localeCompare(right.accountId) ||
-      (left.journalId ?? "").localeCompare(right.journalId ?? "") ||
-      left.debitMinor.localeCompare(right.debitMinor) ||
-      left.creditMinor.localeCompare(right.creditMinor)
-    );
-  });
+  const visible = activity.filter((line) => line.periodStart <= period.endDate);
+  const lines = classifyPostedActivity(visible, period);
+  const fiscalYear = fiscalYearForStatements(entity, visible, period.endDate);
   return {
     currency: entity.functionalCurrency,
     retainedEarningsAccountId: entity.retainedEarningsAccountId,
     periodStart: period.startDate,
     periodEnd: period.endDate,
     lines,
+    policy: DEFAULT_STATEMENT_POLICY,
+    ...(fiscalYear === undefined ? {} : { fiscalYear }),
   };
 }
 
@@ -636,7 +678,39 @@ export async function computeStatementsForPeriod(
   periodId: string,
 ) {
   const inputs = await loadClassifiedActivity(store, tenantId, entityId, periodId);
-  return { statement: buildStatements(inputs), inputs };
+  try {
+    return { statement: buildStatements(inputs), inputs };
+  } catch (error) {
+    if (error instanceof KernelError && error.code === "FIN_STATEMENT_IMBALANCE") {
+      throw new KernelError(error.code, plainStatementMessage(error.message));
+    }
+    throw error;
+  }
+}
+
+/**
+ * An opening journal is the entity's first period, or it is posted before any
+ * standard journal. The stored opening: prefix is not a free-text signal.
+ */
+async function assertOpeningPlacement(
+  store: LedgerStore,
+  tenantId: string,
+  entityId: string,
+  periodId: string,
+) {
+  const periods = await store.listPeriods(tenantId, entityId);
+  const earliest = [...periods].sort(
+    (left, right) =>
+      left.startDate.localeCompare(right.startDate) || left.periodId.localeCompare(right.periodId),
+  )[0];
+  if (earliest?.periodId === periodId) return;
+  const journals = await store.listJournals(tenantId, entityId, null);
+  const hasStandard = journals.some((journal) => !journal.sourceRef?.startsWith("opening:"));
+  if (!hasStandard) return;
+  throw new KernelError(
+    "FIN_INVALID_JOURNAL_LINE",
+    "Opening journals are accepted only in the first period, or before any other activity is posted.",
+  );
 }
 
 async function calculateDcf(
@@ -731,23 +805,6 @@ async function listAudit(store: LedgerStore, actor: ActorContext) {
       aggregateId: event.aggregateId,
     })),
   };
-}
-
-function classifyPeriod(
-  line: PostedActivityLine,
-  periodStart: string,
-  periodId: string,
-): ClassifiedLine["period"] {
-  if (line.periodId === periodId) {
-    return "movement";
-  }
-  if (line.periodEnd < periodStart) {
-    return "opening";
-  }
-  throw new KernelError(
-    "FIN_OVERLAPPING_PERIOD",
-    "Posted activity falls outside the statement period",
-  );
 }
 
 async function scope(store: LedgerStore, actor: ActorContext, action: Action) {
@@ -855,17 +912,22 @@ function presentJournal(journal: JournalRecord, replayed: boolean) {
   };
 }
 
-function presentStatement(statement: StatementSet) {
+function presentStatement(statement: StatementSet, policy: typeof DEFAULT_STATEMENT_POLICY) {
   const scale = currencyScale(statement.currency);
   const amount = (minor: string) => ({
     minor,
     amount: formatMinor(minor, scale),
     currency: statement.currency,
   });
+  const findings = presentStatementFindings(statement);
   return {
     engineVersion: statement.engineVersion,
     inputHash: statement.inputHash,
     currency: statement.currency,
+    policy: presentStatementPolicy(policy),
+    final: statement.issues.length === 0,
+    issues: findings.issues,
+    notices: findings.notices,
     incomeStatement: {
       revenue: amount(statement.incomeStatement.revenueMinor),
       expenses: amount(statement.incomeStatement.expensesMinor),
@@ -885,10 +947,42 @@ function presentStatement(statement: StatementSet) {
     },
     retainedEarnings: {
       opening: amount(statement.retainedEarnings.openingMinor),
+      beforeNexora: amount(statement.retainedEarnings.beforeNexoraMinor),
       netIncome: amount(statement.retainedEarnings.netIncomeMinor),
       distributions: amount(statement.retainedEarnings.distributionsMinor),
+      directEntries: amount(statement.retainedEarnings.directEntriesMinor),
       ending: amount(statement.retainedEarnings.endingMinor),
       close: statement.retainedEarnings.close,
+    },
+    beforeNexora:
+      statement.beforeNexora === null
+        ? null
+        : {
+            revenue: amount(statement.beforeNexora.revenueMinor),
+            expenses: amount(statement.beforeNexora.expensesMinor),
+            netIncome: amount(statement.beforeNexora.netIncomeMinor),
+            profitBeforeTax: amount(statement.beforeNexora.profitBeforeTaxMinor),
+            taxExpense: amount(statement.beforeNexora.taxExpenseMinor),
+          },
+    yearToDate: {
+      revenue: amount(statement.yearToDate.revenueMinor),
+      expenses: amount(statement.yearToDate.expensesMinor),
+      netIncome: amount(statement.yearToDate.netIncomeMinor),
+      profitBeforeTax: amount(statement.yearToDate.profitBeforeTaxMinor),
+      taxExpense: amount(statement.yearToDate.taxExpenseMinor),
+    },
+    effectiveTax: {
+      profitBeforeTax: amount(statement.effectiveTax.profitBeforeTaxMinor),
+      taxExpense: amount(statement.effectiveTax.taxExpenseMinor),
+      effectiveTaxRate: statement.effectiveTax.effectiveTaxRate,
+    },
+    nonCash: {
+      leaseAdditions: amount(statement.nonCash.leaseAdditionsMinor),
+      items: statement.nonCash.items.map((item) => ({
+        type: item.type,
+        amount: amount(item.amountMinor),
+        message: item.message,
+      })),
     },
   };
 }

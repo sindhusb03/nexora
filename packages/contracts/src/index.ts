@@ -77,3 +77,4 @@ export {
   type IngestionJobResponse,
   type ResolveExceptionInput,
 } from "./ingestion-api";
+export { lookupCurrencyScale, type CurrencyScaleLookup } from "@nexora/currency";

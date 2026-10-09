@@ -477,6 +477,8 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
           .select({
             journalId: journalEntry.journalId,
             accountId: journalLine.accountId,
+            accountCode: account.code,
+            sourceRef: journalEntry.sourceRef,
             report: account.report,
             cashFlow: account.cashFlow,
             currency: journalEntry.currency,
@@ -501,6 +503,8 @@ export function createLedgerStore(db: AppDatabase): LedgerStore {
         return rows.map((row) => ({
           journalId: row.journalId,
           accountId: row.accountId,
+          accountCode: row.accountCode,
+          sourceRef: row.sourceRef,
           report: asReport(row.report),
           cashFlow: asCashFlow(row.cashFlow),
           currency: row.currency.trim(),
