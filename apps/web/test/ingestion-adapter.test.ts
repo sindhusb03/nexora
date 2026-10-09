@@ -708,6 +708,7 @@ describe("http ingestion client", () => {
       ["JPY", 0, "-12345"],
       ["KWD", 3, "-12.345"],
       ["XAU", null, null],
+      ["us", null, null],
     ] as const) {
       if (scale !== null)
         expect(lookupCurrencyScale(currency)).toEqual({ ok: true, code: currency, scale });
@@ -738,7 +739,10 @@ describe("http ingestion client", () => {
         expect(result).toMatchObject({
           ok: false,
           error: {
-            message: "This currency has no minor units, so the amount can't be corrected here.",
+            message:
+              currency === "us"
+                ? "This currency code isn't valid, so the amount can't be corrected here. Check the currency on the extracted value."
+                : "This currency has no minor units, so the amount can't be corrected here.",
           },
         });
         expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/resolve"))).toBe(false);

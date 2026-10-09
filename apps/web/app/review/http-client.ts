@@ -287,7 +287,9 @@ export function createHttpIngestionClient(baseUrl: string): IngestionClient {
         const currency = lookupCurrencyScale(linked.currency);
         if (!currency.ok)
           return invalid(
-            "This currency has no minor units, so the amount can't be corrected here.",
+            currency.reason === "invalid"
+              ? "This currency code isn't valid, so the amount can't be corrected here. Check the currency on the extracted value."
+              : "This currency has no minor units, so the amount can't be corrected here.",
           );
         const digits = currency.scale;
         const scaleDigits: Record<string, number> = {
