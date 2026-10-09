@@ -300,7 +300,10 @@ export function createProgramStore(db: AppDatabase) {
     getConsolidationGroup(tenantId: string, id: string) {
       return tenantTx(db, tenantId, async (tx) => {
         const [row] = await tx
-          .select({ id: consolidationGroup.consolidationGroupId })
+          .select({
+            id: consolidationGroup.consolidationGroupId,
+            reportingCurrency: consolidationGroup.reportingCurrency,
+          })
           .from(consolidationGroup)
           .where(
             and(
@@ -309,7 +312,7 @@ export function createProgramStore(db: AppDatabase) {
             ),
           )
           .limit(1);
-        return row ?? null;
+        return row ? { id: row.id, reportingCurrency: row.reportingCurrency.trim() } : null;
       });
     },
     insertElimination(input: EliminationWrite) {

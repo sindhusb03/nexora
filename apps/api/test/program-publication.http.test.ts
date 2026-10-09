@@ -399,22 +399,20 @@ describe("kernel-derived financial state and atomic publication", () => {
       rate: "1",
       rounding: "half_even",
     };
-    const translated = await request("POST", `/v1/consolidation-groups/${groupId}/translate`, {
-      sourceCurrency: "USD",
+    const scope = {
       ctaAccountId: "cta",
-      lines: [
-        { accountId: "cash", rateType: "closing", debitPositiveMinor: "100" },
-        { accountId: "equity", rateType: "historical", debitPositiveMinor: "-100" },
-      ],
-      rates: { closing: rate, historical: rate, average: rate },
-    });
+      entities: [{ entityId, periodId }],
+      rates: [{ sourceCurrency: "USD", closing: rate, historical: rate, average: rate }],
+    };
+    const translated = await request(
+      "POST",
+      `/v1/consolidation-groups/${groupId}/translate`,
+      scope,
+    );
     expect(translated.status).toBe(404);
     const eliminated = await request("POST", `/v1/consolidation-groups/${groupId}/eliminate`, {
+      ...scope,
       evidenceId: "ic",
-      balances: [
-        { accountId: "ar", debitPositiveMinor: "10" },
-        { accountId: "ap", debitPositiveMinor: "-10" },
-      ],
       eliminations: [
         { accountId: "ar", debitMinor: "0", creditMinor: "10", evidenceId: "ic" },
         { accountId: "ap", debitMinor: "10", creditMinor: "0", evidenceId: "ic" },

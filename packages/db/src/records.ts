@@ -444,7 +444,10 @@ export interface LedgerStore extends IdentityStore, IngestionStore {
   insertOwnershipEdge(input: OwnershipWrite): Promise<void>;
   listOwnershipEdges(tenantId: string): Promise<readonly OwnershipRow[]>;
   insertConsolidationGroup(input: NamedWrite): Promise<{ readonly id: string }>;
-  getConsolidationGroup(tenantId: string, id: string): Promise<{ readonly id: string } | null>;
+  getConsolidationGroup(
+    tenantId: string,
+    id: string,
+  ): Promise<{ readonly id: string; readonly reportingCurrency: string } | null>;
   insertElimination(input: EliminationWrite): Promise<void>;
   insertModel(input: {
     tenantId: string;

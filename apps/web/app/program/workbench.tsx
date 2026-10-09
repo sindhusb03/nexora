@@ -66,29 +66,7 @@ export function GroupPanel({
           >
             Create EUR group
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={disabled || groupId.length === 0}
-            onClick={() => {
-              const rate = (value: string) => ({
-                rateSetId: "rates-2024",
-                base: "USD",
-                quote: "EUR",
-                rate: value,
-                rounding: "half_even",
-              });
-              void run(undefined, `/v1/consolidation-groups/${groupId}/translate`, {
-                sourceCurrency: "USD",
-                ctaAccountId: "cta",
-                lines: [
-                  { accountId: "cash", rateType: "closing", debitPositiveMinor: "10000" },
-                  { accountId: "equity", rateType: "historical", debitPositiveMinor: "-10000" },
-                ],
-                rates: { closing: rate("0.90"), historical: rate("0.80"), average: rate("0.85") },
-              });
-            }}
-          >
+          <Button type="button" variant="outline" disabled data-testid="translate-group">
             Translate
           </Button>
           <Button
@@ -110,9 +88,13 @@ export function GroupPanel({
             Attribute NCI
           </Button>
         </div>
-        <p className="muted small" style={{ margin: "0.6rem 0 0" }}>
-          Group <code>{groupId || "not created"}</code>. CTA, parent equity, and NCI appear in the
-          inspector exactly as returned.
+        <p
+          className="muted small"
+          data-testid="translate-deferred"
+          style={{ margin: "0.6rem 0 0" }}
+        >
+          Group <code>{groupId || "not created"}</code>. Translation is coming with the group
+          screen.
         </p>
       </div>
     </section>
