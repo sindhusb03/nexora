@@ -25,6 +25,7 @@ import {
   classifyPostedActivity,
   displaySourceRef,
   fiscalYearForStatements,
+  isOpeningPeriod,
 } from "../classify-activity.js";
 import {
   plainStatementMessage,
@@ -176,6 +177,14 @@ export function registerWorkspaceRoutes(app: Hono<AppEnv>, deps: WorkspaceDeps):
     const body = copilotSchema.parse(await c.req.json());
     const agent = isAgent(body.agent) ? body.agent : "general";
     const view = await snapshot(deps, actor);
+    if (
+      view.latest.revenueMinor === null ||
+      view.latest.expensesMinor === null ||
+      view.latest.netIncomeMinor === null ||
+      view.latest.endingCashMinor === null
+    ) {
+      throw new KernelError("FIN_NOT_FOUND", "Upload figures after your opening balances first.");
+    }
     const documents = await deps.store.listWorkspaceRecords(actor.tenantId ?? "", "document");
     const answer = await answerCopilot({
       message: body.message,
@@ -381,11 +390,23 @@ async function snapshot(
   const accountName = new Map(
     accounts.map((account) => [account.accountId, `${account.code} ${account.name}`]),
   );
+  const statementPeriods = periods.filter((period) => !isOpeningPeriod(period, activity));
   const selectedPeriod = selection.periodId
-    ? periods.find((period) => period.periodId === selection.periodId)
-    : periods.filter((period) => period.startDate <= new Date().toISOString().slice(0, 10)).at(-1);
-  if (!selectedPeriod) throw new KernelError("FIN_NOT_FOUND", "Period not found");
-  const activityPeriods = periods.filter((period) => period.startDate <= selectedPeriod.startDate);
+    ? statementPeriods.find((period) => period.periodId === selection.periodId)
+    : statementPeriods
+        .filter((period) => period.startDate <= new Date().toISOString().slice(0, 10))
+        .at(-1);
+  const selectedOpening = selection.periodId
+    ? periods.find(
+        (period) => period.periodId === selection.periodId && isOpeningPeriod(period, activity),
+      )
+    : undefined;
+  if (!selectedPeriod && !selectedOpening && (selection.periodId || statementPeriods.length > 0)) {
+    throw new KernelError("FIN_NOT_FOUND", "Period not found");
+  }
+  const activityPeriods = statementPeriods.filter(
+    (period) => selectedPeriod !== undefined && period.startDate <= selectedPeriod.startDate,
+  );
   const unavailablePeriods: { periodId: string; reason: string }[] = [];
   const series = activityPeriods.flatMap((period) => {
     try {
@@ -405,7 +426,7 @@ async function snapshot(
       if (
         !(error instanceof KernelError) ||
         error.code !== "FIN_STATEMENT_IMBALANCE" ||
-        period.periodId === selectedPeriod.periodId
+        period.periodId === selectedPeriod?.periodId
       ) {
         if (error instanceof KernelError && error.code === "FIN_STATEMENT_IMBALANCE") {
           throw new KernelError(error.code, plainStatementMessage(error.message));
@@ -420,7 +441,7 @@ async function snapshot(
     }
   });
   const latest = series.at(-1);
-  if (!latest) throw new KernelError("FIN_NOT_FOUND", "No statement periods");
+
   const currency = entity.functionalCurrency;
   const proposals = await deps.store.listWorkspaceRecords(tenantId, "proposal");
   const driversRecord =
@@ -428,7 +449,7 @@ async function snapshot(
       ? (await deps.store.listWorkspaceRecords(tenantId, "drivers"))[0]
       : undefined;
   const demo =
-    deps.demoMode === true
+    deps.demoMode === true && latest
       ? (() => {
           const drivers = {
             revenueMinor:
@@ -516,7 +537,7 @@ async function snapshot(
       (item) =>
         item.status === "imported" &&
         item.payload.entityId === entity.entityId &&
-        item.payload.periodId === latest.period.periodId &&
+        item.payload.periodId === latest?.period.periodId &&
         item.payload.currency === currency &&
         /^-?\d+$/.test(text(item.payload.closingBalanceMinor)),
     )
@@ -526,7 +547,7 @@ async function snapshot(
     )[0];
   const bankCashMinor = bank ? text(bank.payload.closingBalanceMinor) : null;
   const bankGap =
-    bankCashMinor === null
+    bankCashMinor === null || !latest
       ? null
       : subtractMoney(
           money(currency, latest.statement.cashFlow.endingCashMinor),
@@ -557,7 +578,7 @@ async function snapshot(
   const documents = await deps.store.listWorkspaceRecords(tenantId, "document");
   const canWrite = roles.includes("owner") || roles.includes("controller");
   return {
-    engineVersion: latest.statement.engineVersion,
+    engineVersion: latest?.statement.engineVersion ?? "",
     permissions: { roles, canWrite, auditLocked },
     context: {
       tenantId,
@@ -566,68 +587,70 @@ async function snapshot(
       entityId: entity.entityId,
       entityName: entity.legalName,
       currency,
-      periodId: latest.period.periodId,
-      periodLabel: latest.period.endDate,
+      periodId: latest?.period.periodId ?? null,
+      periodLabel: latest?.period.endDate ?? "",
       scenario: "Base",
     },
     latest: {
-      inputHash: latest.statement.inputHash,
-      revenueMinor: latest.statement.incomeStatement.revenueMinor,
-      expensesMinor: latest.statement.incomeStatement.expensesMinor,
-      netIncomeMinor: latest.statement.incomeStatement.netIncomeMinor,
-      endingCashMinor: latest.statement.cashFlow.endingCashMinor,
-      assetsMinor: latest.statement.balanceSheet.assetsMinor,
-      liabilitiesMinor: latest.statement.balanceSheet.liabilitiesMinor,
-      equityMinor: latest.statement.balanceSheet.equityMinor,
+      inputHash: latest?.statement.inputHash ?? "",
+      revenueMinor: latest?.statement.incomeStatement.revenueMinor ?? null,
+      expensesMinor: latest?.statement.incomeStatement.expensesMinor ?? null,
+      netIncomeMinor: latest?.statement.incomeStatement.netIncomeMinor ?? null,
+      endingCashMinor: latest?.statement.cashFlow.endingCashMinor ?? null,
+      assetsMinor: latest?.statement.balanceSheet.assetsMinor ?? null,
+      liabilitiesMinor: latest?.statement.balanceSheet.liabilitiesMinor ?? null,
+      equityMinor: latest?.statement.balanceSheet.equityMinor ?? null,
     },
-    kpis: [
-      kpi(
-        "revenue",
-        "Revenue",
-        latest.statement.incomeStatement.revenueMinor,
-        currency,
-        latest.statement.inputHash,
-        latest.statement.engineVersion,
-      ),
-      kpi(
-        "net",
-        "Net income",
-        latest.statement.incomeStatement.netIncomeMinor,
-        currency,
-        latest.statement.inputHash,
-        latest.statement.engineVersion,
-      ),
-      kpi(
-        "cash",
-        "Ending cash",
-        latest.statement.cashFlow.endingCashMinor,
-        currency,
-        latest.statement.inputHash,
-        latest.statement.engineVersion,
-      ),
-      ...(demo
-        ? [
-            kpi(
-              "normalized",
-              "Normalized earnings",
-              demo.qoe.normalized,
-              currency,
-              demo.qoe.inputHash,
-              demo.qoe.engineVersion,
-            ),
-          ]
-        : [
-            {
-              id: "normalized",
-              label: "Normalized earnings",
-              minor: null,
-              display: null,
-              currency,
-              lineage: null,
-              ...unavailable,
-            },
-          ]),
-    ],
+    kpis: latest
+      ? [
+          kpi(
+            "revenue",
+            "Revenue",
+            latest.statement.incomeStatement.revenueMinor,
+            currency,
+            latest.statement.inputHash,
+            latest.statement.engineVersion,
+          ),
+          kpi(
+            "net",
+            "Net income",
+            latest.statement.incomeStatement.netIncomeMinor,
+            currency,
+            latest.statement.inputHash,
+            latest.statement.engineVersion,
+          ),
+          kpi(
+            "cash",
+            "Ending cash",
+            latest.statement.cashFlow.endingCashMinor,
+            currency,
+            latest.statement.inputHash,
+            latest.statement.engineVersion,
+          ),
+          ...(demo
+            ? [
+                kpi(
+                  "normalized",
+                  "Normalized earnings",
+                  demo.qoe.normalized,
+                  currency,
+                  demo.qoe.inputHash,
+                  demo.qoe.engineVersion,
+                ),
+              ]
+            : [
+                {
+                  id: "normalized",
+                  label: "Normalized earnings",
+                  minor: null,
+                  display: null,
+                  currency,
+                  lineage: null,
+                  ...unavailable,
+                },
+              ]),
+        ]
+      : [],
     statements: {
       unavailablePeriods,
       periods: series.map((item) => {
@@ -693,59 +716,71 @@ async function snapshot(
         },
     board: {
       title: `${tenant.name} board pack`,
-      cutoff: latest.period.endDate,
-      stateHash: latest.statement.inputHash,
-      sections: [
-        {
-          heading: "Performance",
-          figures: [
-            figure(
-              "Revenue",
-              latest.statement.incomeStatement.revenueMinor,
-              currency,
-              latest.statement.inputHash,
-            ),
-            figure(
-              "Net income",
-              latest.statement.incomeStatement.netIncomeMinor,
-              currency,
-              latest.statement.inputHash,
-            ),
-          ],
-        },
-        {
-          heading: "Cash",
-          figures: [
-            figure(
-              "Ending cash",
-              latest.statement.cashFlow.endingCashMinor,
-              currency,
-              latest.statement.inputHash,
-            ),
-            ...(demo
-              ? [
-                  figure(
-                    "13-week ending",
-                    demo.cashBase.weeks.at(-1)?.endingMinor ?? "0",
-                    currency,
-                    demo.cashBase.inputHash,
-                  ),
-                ]
-              : []),
-          ],
-        },
-        {
-          heading: "Quality of earnings",
-          figures: [
-            ...(demo
-              ? [
-                  figure("Reported net income", demo.qoe.reported, currency, demo.qoe.inputHash),
-                  figure("Normalized earnings", demo.qoe.normalized, currency, demo.qoe.inputHash),
-                ]
-              : []),
-          ],
-        },
-      ],
+      cutoff: latest?.period.endDate ?? null,
+      stateHash: latest?.statement.inputHash ?? "",
+      sections: latest
+        ? [
+            {
+              heading: "Performance",
+              figures: [
+                figure(
+                  "Revenue",
+                  latest.statement.incomeStatement.revenueMinor,
+                  currency,
+                  latest.statement.inputHash,
+                ),
+                figure(
+                  "Net income",
+                  latest.statement.incomeStatement.netIncomeMinor,
+                  currency,
+                  latest.statement.inputHash,
+                ),
+              ],
+            },
+            {
+              heading: "Cash",
+              figures: [
+                figure(
+                  "Ending cash",
+                  latest.statement.cashFlow.endingCashMinor,
+                  currency,
+                  latest.statement.inputHash,
+                ),
+                ...(demo
+                  ? [
+                      figure(
+                        "13-week ending",
+                        demo.cashBase.weeks.at(-1)?.endingMinor ?? "0",
+                        currency,
+                        demo.cashBase.inputHash,
+                      ),
+                    ]
+                  : []),
+              ],
+            },
+            {
+              heading: "Quality of earnings",
+              figures: [
+                ...(demo
+                  ? [
+                      figure(
+                        "Reported net income",
+                        demo.qoe.reported,
+                        currency,
+                        demo.qoe.inputHash,
+                      ),
+                      figure(
+                        "Normalized earnings",
+                        demo.qoe.normalized,
+                        currency,
+                        demo.qoe.inputHash,
+                      ),
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : [],
     },
     onboarding: {
       steps: [
@@ -758,7 +793,7 @@ async function snapshot(
         },
       ],
       certificate: {
-        bookCash: present(latest.statement.cashFlow.endingCashMinor, currency),
+        bookCash: latest ? present(latest.statement.cashFlow.endingCashMinor, currency) : null,
         bankCash: bankCashMinor === null ? null : present(bankCashMinor, currency),
         bankCashMinor,
         difference: bankGap === null ? null : present(bankGap.minor, currency),
@@ -766,8 +801,8 @@ async function snapshot(
         status:
           bankGap === null ? "unavailable" : isZeroMoney(bankGap) ? "reconciled" : "unreconciled",
         sourceDocument: bank?.id ?? null,
-        engineVersion: latest.statement.engineVersion,
-        inputHash: latest.statement.inputHash,
+        engineVersion: latest?.statement.engineVersion ?? "",
+        inputHash: latest?.statement.inputHash ?? "",
       },
     },
     approvals: proposals.map((item) => ({

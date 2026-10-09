@@ -12,6 +12,19 @@ export function journalKindFromSource(sourceRef: string | null | undefined): "op
   return undefined;
 }
 
+/** Empty periods are not opening periods. */
+export function isOpeningPeriod(
+  period: { readonly periodId: string; readonly startDate: string; readonly endDate: string },
+  journals: readonly { readonly periodId: string; readonly sourceRef: string | null }[],
+): boolean {
+  const entries = journals.filter((journal) => journal.periodId === period.periodId);
+  return (
+    period.startDate.slice(0, 10) === period.endDate.slice(0, 10) &&
+    entries.length > 0 &&
+    entries.every((journal) => journalKindFromSource(journal.sourceRef) === "opening")
+  );
+}
+
 export function displaySourceRef(sourceRef: string | null): string | null {
   if (!sourceRef?.startsWith(OPENING_PREFIX)) return sourceRef;
   const label = sourceRef.slice(OPENING_PREFIX.length);
@@ -44,6 +57,25 @@ export function fiscalYearForStatements(
 export function openingSourceRef(label: string | null | undefined): string {
   const text = label?.replace(/^opening:/, "").trim();
   return `${OPENING_PREFIX}${text && text.length > 0 ? text : "Opening trial balance"}`;
+}
+
+export const OPENING_PLACEMENT_MESSAGE =
+  "This company already has entries posted before this balance sheet, so it can't be used as opening balances. Upload a balance sheet dated on or before your first posted entry.";
+
+/** The first period, or any period before a standard journal has been posted. */
+export function openingPlacementAllowed(
+  periods: readonly { readonly periodId: string; readonly startDate: string }[],
+  journals: readonly { readonly sourceRef: string | null }[],
+  periodId: string,
+): boolean {
+  const earliest = [...periods].sort(
+    (left, right) =>
+      left.startDate.localeCompare(right.startDate) || left.periodId.localeCompare(right.periodId),
+  )[0];
+  return (
+    earliest?.periodId === periodId ||
+    !journals.some((journal) => journalKindFromSource(journal.sourceRef) !== "opening")
+  );
 }
 
 /**

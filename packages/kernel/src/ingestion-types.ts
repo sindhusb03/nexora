@@ -1,5 +1,5 @@
 /** Formula version for ingestion checks and the linked-model builder. */
-export const INGESTION_FORMULA_VERSION = "ingestion-checks-0.3.0";
+export const INGESTION_FORMULA_VERSION = "ingestion-checks-0.4.0";
 
 /**
  * Mapping proposals at or above this confidence may be accepted without an exception.
@@ -95,6 +95,7 @@ export interface IngestionCoverage {
 }
 
 export interface IngestionCheckInput {
+  readonly fiscalYearEnd?: { readonly month: number; readonly day: number } | null;
   readonly currency: string;
   readonly toleranceMinor: string;
   readonly amounts: readonly IngestionAmount[];

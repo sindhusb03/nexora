@@ -34,6 +34,12 @@ import {
 
 import { createLedgerService } from "../service.js";
 import {
+  openingSourceRef,
+  isOpeningPeriod,
+  openingPlacementAllowed,
+  OPENING_PLACEMENT_MESSAGE,
+} from "../classify-activity.js";
+import {
   ParserError,
   normalizePeriod,
   selectDocumentParser,
@@ -507,7 +513,11 @@ function fiscalYearConflict(
     snapshot.fiscalYearEndMonth !== null && snapshot.fiscalYearEndDay !== null
       ? `${String(snapshot.fiscalYearEndMonth).padStart(2, "0")}-${String(snapshot.fiscalYearEndDay).padStart(2, "0")}`
       : null;
-  const existing = new Set(snapshot.periods.map((period) => period.endDate.slice(0, 10).slice(5)));
+  const existing = new Set(
+    snapshot.periods
+      .filter((period) => !isOpeningPeriod(period, snapshot.journals))
+      .map((period) => period.endDate.slice(0, 10).slice(5)),
+  );
   for (const amount of annual) {
     const monthDay = amount.periodEnd.slice(5, 10);
     if (org && monthDay !== org) {
@@ -536,7 +546,48 @@ async function postLinkedModel(
   const now = new Date().toISOString();
   try {
     const outcome = await store.runLockedIngestionPost(tenantId, entityId, async (snapshot) => {
-      const conflict = fiscalYearConflict(snapshot, checkInput.amounts);
+      const openingDate = checkInput.amounts
+        .filter(
+          (amount) =>
+            amount.statement === "balance_sheet" &&
+            amount.balanceKind === "closing" &&
+            amount.role === "line",
+        )
+        .map((amount) => amount.periodEnd)
+        .sort()[0];
+      const overlappingIncome = openingDate
+        ? checkInput.amounts.find(
+            (amount) =>
+              amount.statement === "income_statement" &&
+              amount.periodEnd > openingDate &&
+              amount.periodStart &&
+              amount.periodStart <= openingDate,
+          )
+        : undefined;
+      if (openingDate && overlappingIncome?.periodStart) {
+        const nextDay = new Date(`${openingDate}T00:00:00Z`);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        const displayDate = (date: string) =>
+          new Intl.DateTimeFormat("en-GB", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            timeZone: "UTC",
+          }).format(new Date(`${date}T00:00:00Z`));
+        return {
+          action: "block" as const,
+          message: `This income statement starts on ${displayDate(overlappingIncome.periodStart)}, before your opening balances on ${displayDate(openingDate)}. Upload figures from ${displayDate(nextDay.toISOString().slice(0, 10))} onwards, or replace your opening balances.`,
+        };
+      }
+      // Opening income is validated against the entity's fiscal year by the
+      // linked model; its end date is the opening balance date, not a year-end.
+      const conflict = fiscalYearConflict(
+        snapshot,
+        checkInput.amounts.filter(
+          (amount) =>
+            !(amount.statement === "income_statement" && amount.periodEnd === openingDate),
+        ),
+      );
       if (conflict) return { action: "block" as const, message: conflict };
       const postedBalances = cumulativeLedgerBalances({
         periods: snapshot.periods.map((period) => ({
@@ -558,7 +609,11 @@ async function postLinkedModel(
           })),
         })),
       });
-      const built = buildLinkedModel({ ...checkInput, postedBalances });
+      const built = buildLinkedModel({
+        ...checkInput,
+        postedBalances,
+        fiscalYearEnd: yearEndOf(snapshot),
+      });
       if (!built.ok) return { action: "block" as const, message: built.message };
       if (already && already.jobId !== jobId) {
         return {
@@ -617,6 +672,17 @@ async function postLinkedModel(
           periodIdFor.set(key, periodId);
           newPeriods.push({ periodId, startDate: journal.periodStart, endDate: journal.periodEnd });
         }
+        const journalKind = journal.kind === "opening" ? "opening" : "standard";
+        if (
+          journalKind === "opening" &&
+          !openingPlacementAllowed(
+            [...snapshot.periods, ...newPeriods],
+            snapshot.journals,
+            periodId,
+          )
+        ) {
+          return { action: "block" as const, message: OPENING_PLACEMENT_MESSAGE };
+        }
         const drafted = journal.lines.map((line) => {
           const accountId = byCode.get(line.accountCode);
           if (!accountId) {
@@ -643,7 +709,10 @@ async function postLinkedModel(
           periodId,
           idempotencyKey: `ingestion:${entityId}:${canonicalHash}:${journal.kind}:${journal.periodEnd}`,
           payloadHash: balanced.payloadHash,
-          sourceRef: `ingestion:${jobId}`,
+          sourceRef:
+            journalKind === "opening"
+              ? openingSourceRef(`ingestion:${jobId}`)
+              : `ingestion:${jobId}`,
           domainEventId: crypto.randomUUID(),
           lines: balanced.lines.map((line, index) => ({
             lineId: crypto.randomUUID(),

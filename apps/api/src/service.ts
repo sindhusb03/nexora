@@ -28,6 +28,8 @@ import {
 import {
   classifyPostedActivity,
   fiscalYearForStatements,
+  isOpeningPeriod,
+  openingPlacementAllowed,
   openingSourceRef,
 } from "./classify-activity.js";
 import { ExplainedKernelError, type ActorContext } from "./http.js";
@@ -331,12 +333,14 @@ async function listPeriods(store: LedgerStore, actor: ActorContext, entityId: st
   const tenant = await scope(store, actor, "statement.read");
   const entity = await requiredEntity(store, tenant.tenantId, entityId);
   const periods = await store.listPeriods(tenant.tenantId, entity.entityId);
+  const journals = await store.listJournals(tenant.tenantId, entity.entityId, null);
   return {
     periods: periods.map((period) => ({
       periodId: period.periodId,
       startDate: period.startDate,
       endDate: period.endDate,
       status: period.status,
+      ...(isOpeningPeriod(period, journals) ? { opening: true } : {}),
     })),
   };
 }
@@ -699,14 +703,8 @@ async function assertOpeningPlacement(
   periodId: string,
 ) {
   const periods = await store.listPeriods(tenantId, entityId);
-  const earliest = [...periods].sort(
-    (left, right) =>
-      left.startDate.localeCompare(right.startDate) || left.periodId.localeCompare(right.periodId),
-  )[0];
-  if (earliest?.periodId === periodId) return;
   const journals = await store.listJournals(tenantId, entityId, null);
-  const hasStandard = journals.some((journal) => !journal.sourceRef?.startsWith("opening:"));
-  if (!hasStandard) return;
+  if (openingPlacementAllowed(periods, journals, periodId)) return;
   throw new KernelError(
     "FIN_INVALID_JOURNAL_LINE",
     "Opening journals are accepted only in the first period, or before any other activity is posted.",
