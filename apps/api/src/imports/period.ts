@@ -422,7 +422,7 @@ export function isStatementPeriodLabel(text: string): boolean {
   return (
     statementPeriods(text).length > 0 ||
     localizedAmountHeader(text) ||
-    /^(?:FY\s*\d{2,4}(?:[-/]\d{2,4})?|\d{4}[-/]\d{2,4}|selected period|total|amount|balance|comparison|previous year|prior year|last year|N|N-1|Vorjahr|year to date\s*\(prior\))$/i.test(
+    /^(?:FY\s*\d{2,4}(?:[-/]\d{2,4})?|Neto\s+\d{4}|\d{4}[-/]\d{2,4}|selected period|total|amount|balance|comparison|previous year|prior year|last year|N|N-1|Vorjahr|year to date\s*\(prior\))$/i.test(
       normalizeDateText(text).trim(),
     ) ||
     /[A-Za-z]+\s*(?:to|through|bis|au|al|[-–—])\s*(?:\d{1,2}\s+)?[A-Za-z]+,?\s+\d{4}/i.test(
@@ -456,6 +456,22 @@ export function resolveStatementPeriods(
     );
   title = ordered(title);
   labels = labels.map(ordered);
+  const normalizedTitle = normalizeDateText(headText(title));
+  // An unspecified flow duration must not inherit an annual organization calendar.
+  if (
+    /\b(?:Erfolgsrechnung\s+per|Periodo\s+findo\s+em)\b/i.test(
+      normalizeDateText([title, ...labels].join("\n")),
+    )
+  )
+    return labels.map(() => null);
+  const asAtTitle = new RegExp(`\\bas (?:at|of)\\s+${DATE_TOKEN}`, "i").exec(normalizedTitle);
+  const netoEnd = asAtTitle ? normalizePeriod(asAtTitle[0], true) : null;
+  const latestNetoYear = Math.max(
+    ...labels.flatMap((label) => {
+      const neto = /^Neto\s+(\d{4})$/i.exec(label.trim());
+      return neto ? [Number(neto[1])] : [];
+    }),
+  );
   const titles = statementPeriods(title);
   const titleSpan = statementSpan(datedRangePhrase(title) ?? title);
   if (titleSpan !== null && titleSpan !== 12) return labels.map(() => null);
@@ -480,6 +496,14 @@ export function resolveStatementPeriods(
     ? { month: Number(explicit.periodEnd.slice(5, 7)), day: Number(explicit.periodEnd.slice(8)) }
     : (monthDay ?? sharedHeaderEnd ?? orgYearEnd);
   const own = labels.map((label) => {
+    const neto = /^Neto\s+(\d{4})$/i.exec(label.trim());
+    if (neto) {
+      if (!netoEnd || latestNetoYear !== Number(netoEnd.periodEnd.slice(0, 4))) return null;
+      return normalizePeriod(`FY ${neto[1]}`, true, false, {
+        month: Number(netoEnd.periodEnd.slice(5, 7)),
+        day: Number(netoEnd.periodEnd.slice(8)),
+      });
+    }
     const phrases = statementPeriods(label);
     return (
       normalizePeriod(label, titleSpan === 12 || /\bas (?:at|of)\b/i.test(title), false, yearEnd) ??
@@ -661,6 +685,12 @@ function normalizeDateText(text: string): string {
   return text
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC")
+    .replace(
+      /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g,
+      (_, y: string, m: string, d: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`,
+    )
+    .replace(/(\d{4}-\d{2}-\d{2})부터\s*(\d{4}-\d{2}-\d{2})까지/g, "$1 to $2")
     .replace(
       /令和\s*(元|\d{1,2})\s*年/g,
       (_, year: string) => `${2018 + (year === "元" ? 1 : Number(year))}年`,
@@ -679,6 +709,11 @@ function normalizeDateText(text: string): string {
       /\b(?:fiscal\s+year\s+ended|Geschaftsjahr\s+(?:zum|zum Ende des)|Jahr\s+zum|Exercice\s+clos\s+(?:le|au)|Ejercicio\s+(?:terminado|finalizado|cerrado)\s+(?:el|al)|Esercizio\s+(?:chiuso|terminato)\s+al|Boekjaar\s+(?:eindigend op|geeindigd op)|Exercicio\s+(?:encerrado|findo)\s+em)\s*/gi,
       "year ended ",
     )
+    .replace(
+      /\b(?:Erfolgsrechnung\s+per|Periodo\s+findo\s+em)\s+(?=(?:31\s+December\s+\d{4}|31[./-]12[./-]\d{4}|\d{4}-12-31)\b)/gi,
+      "year ended ",
+    )
+    .replace(/\bBalance\s+(?:de\s+)?situacion\s+al\s+/gi, "as at ")
     .replace(/\b(?:Bilanz\s+zum)\s+(?=\d{1,2}\s)/gi, "as at ")
     .replace(/\b(?:Bilan\s+au|Balance\s+al)\s+/gi, "as at ")
     .replace(/(^|\n)\s*(?:zum|au|al)\s+(?=\d{1,2}[\s./-]|\d{4}-\d{2}-\d{2})/gi, "$1as at ")

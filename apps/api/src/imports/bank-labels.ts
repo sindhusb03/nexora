@@ -2,6 +2,23 @@
 export function bankLabel(value: string): string {
   const text = value.normalize("NFKC").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
   const labels: Readonly<Record<string, string>> = {
+    datum: "Date",
+    buchungsdatum: "Posting date",
+    abschlussdatum: "Note",
+    wahrung: "Currency",
+    belastung: "Debit",
+    gutschrift: "Credit",
+    beschreibung: "Description",
+    value: "Amount",
+    bedrag: "Amount",
+    betrag: "Amount",
+    importe: "Amount",
+    montant: "Amount",
+    "saldo na trn": "Balance",
+    "omschrijving-1": "Description",
+    "naam tegenpartij": "Counterparty",
+    schlusssaldo: "Closing Balance",
+    "c/f": "Closing Balance",
     buchungstag: "Posting date",
     valuta: "Value date",
     verwendungszweck: "Description",
