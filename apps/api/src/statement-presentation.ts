@@ -28,7 +28,8 @@ const ACTIONS: Record<StatementIssueCode, string> = {
   possible_non_cash_exchange:
     "Confirm the cash and non-cash parts, or split the exchange into its own journal.",
   asset_sale_in_trade_receivable: "Map the sale proceeds to an asset-sale receivable.",
-  other_noncurrent_review: "Choose investing for long-term assets, or financing for borrowings.",
+  other_noncurrent_review:
+    "Choose investing for deposits and loans given, financing for borrowings, or operating for long-term provisions.",
 };
 
 function presentFinding(finding: StatementFinding): PresentedFinding {
@@ -54,6 +55,10 @@ export function presentStatementPolicy(policy: StatementPolicy): PresentedPolicy
   return { label: statementPolicyLabel(leaseAccounting), leaseAccounting };
 }
 
+const MISSING_RETAINED_EARNINGS = "This entity has no retained earnings account.";
+const MISSING_RETAINED_EARNINGS_ACTION =
+  "Set the retained earnings account, then close the period.";
+
 const PLAIN_SENTENCES = [
   "We can't tell new leases apart from lease payments. Map right-of-use depreciation separately.",
   "Depreciation is posted as one combined amount. Split it so asset sales are read correctly.",
@@ -64,10 +69,12 @@ const PLAIN_SENTENCES = [
   "Other non-current assets need a cash-flow class. Investing is the usual class when they are long-term assets.",
   "Other non-current liabilities need a cash-flow class. Financing is the usual class when they are borrowings.",
   "We couldn't build this statement. Check the flagged accounts.",
+  MISSING_RETAINED_EARNINGS,
 ];
 
 /** User-facing text for a statement failure. Never a raw code or a journal id. */
 export function plainStatementMessage(message: string): string {
+  if (message.includes("no retained earnings account")) return MISSING_RETAINED_EARNINGS;
   if (PLAIN_SENTENCES.includes(message)) return message;
   const parts: string[] = [];
   if (message.includes("lease_additions_needed")) {
@@ -111,4 +118,18 @@ export function plainStatementMessage(message: string): string {
   }
   if (parts.length > 0) return parts.join(" ");
   return "We couldn't build this statement. Check the flagged accounts.";
+}
+
+/** One sentence and one action when a period cannot be closed. */
+export function closeRefusal(message: string): {
+  readonly message: string;
+  readonly action: string;
+} {
+  if (message.includes("no retained earnings account")) {
+    return { message: MISSING_RETAINED_EARNINGS, action: MISSING_RETAINED_EARNINGS_ACTION };
+  }
+  return {
+    message: plainStatementMessage(message),
+    action: "Fix the flagged accounts, then close the period.",
+  };
 }

@@ -365,8 +365,8 @@ const EXTRA_CASH_FLOWS: Readonly<Record<string, readonly CashFlowClass[]>> = {
   security_deposits_paid: ["cfo", "cfi"],
   lease_liabilities_current: ["cfo", "cff"],
   lease_liabilities_noncurrent: ["cfo", "cff"],
-  other_noncurrent_assets: ["cfo", "cfi", "cff", "non_cash"],
-  other_noncurrent_liabilities: ["cfo", "cfi", "cff", "non_cash"],
+  other_noncurrent_assets: ["cfo", "cfi", "cff"],
+  other_noncurrent_liabilities: ["cfo", "cfi", "cff"],
 };
 
 const EXTRA_REPORTS: Readonly<Record<string, readonly ReportClass[]>> = {
@@ -396,7 +396,9 @@ export function isRevenueAccount(code: string | null): boolean {
 /**
  * Canonical codes must use an allowed report and cash-flow class.
  * Unknown codes are caller-defined and are not rewritten.
- * Nothing here assigns non_cash by default.
+ * non_cash on other non-current assets and liabilities is a blocking
+ * placeholder until someone confirms a class. A user cannot choose it.
+ * Nothing else here assigns non_cash by default.
  */
 export function assertCanonicalClassification(input: {
   readonly code: string;
@@ -418,4 +420,30 @@ export function assertCanonicalClassification(input: {
 /** Current leftovers are operating. Non-current leftovers stay in review until a class is chosen. */
 export function unclassifiedCashFlow(term: "current" | "noncurrent"): "cfo" | "review" {
   return term === "current" ? "cfo" : "review";
+}
+
+const REVIEW_PLACEHOLDERS = new Set(["other_noncurrent_assets", "other_noncurrent_liabilities"]);
+
+/** True when non_cash on this code is the review placeholder, not a real class. */
+export function isReviewCashFlowPlaceholder(code: string): boolean {
+  return REVIEW_PLACEHOLDERS.has(code);
+}
+
+export type ReviewCashFlow = "cfo" | "cfi" | "cff";
+
+/**
+ * Suggested class for a placeholder mapping. Investing for deposits and loans
+ * given, financing for borrowings, operating for long-term provisions.
+ */
+export function suggestedReviewCashFlow(code: string, label: string): ReviewCashFlow | null {
+  if (!isReviewCashFlowPlaceholder(code)) return null;
+  const normalized = label
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (code === "other_noncurrent_assets") return "cfi";
+  if (/\b(provision|employee benefit|deferred revenue)\b/.test(normalized)) return "cfo";
+  return "cff";
 }

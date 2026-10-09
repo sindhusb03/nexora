@@ -50,6 +50,8 @@ export interface ClassifiedLine {
   readonly currency: string;
   /** Opening lines are posted activity from earlier periods. They are not rewritten. */
   readonly period: "opening" | "movement";
+  /** Period end of the source activity, when the caller has it. Year-to-date uses it. */
+  readonly periodEnd?: string;
 }
 
 /**
@@ -81,9 +83,10 @@ export interface StatementSet {
     readonly netIncomeMinor: string;
   };
   /**
-   * Opening income dated inside the current fiscal year. One bucket, never
-   * spread across months, and never a cash flow. Null when the opening is on
-   * a year boundary or there is no current-year opening income.
+   * Income from the opening journal only, when that journal is inside the
+   * current fiscal year. One column, never added to a month, and never a cash
+   * flow. Null when the opening is on a year boundary or there is no
+   * current-year opening income.
    */
   readonly beforeNexora: {
     readonly revenueMinor: string;
@@ -92,6 +95,17 @@ export interface StatementSet {
     readonly profitBeforeTaxMinor: string;
     readonly taxExpenseMinor: string;
   } | null;
+  /**
+   * Before Nexora plus every same-year month through this statement.
+   * The annual tax rate uses this total. A month's income statement does not.
+   */
+  readonly yearToDate: {
+    readonly revenueMinor: string;
+    readonly expensesMinor: string;
+    readonly netIncomeMinor: string;
+    readonly profitBeforeTaxMinor: string;
+    readonly taxExpenseMinor: string;
+  };
   readonly effectiveTax: {
     readonly profitBeforeTaxMinor: string;
     readonly taxExpenseMinor: string;
@@ -111,6 +125,7 @@ export interface StatementSet {
   };
   readonly retainedEarnings: {
     readonly openingMinor: string;
+    readonly beforeNexoraMinor: string;
     readonly netIncomeMinor: string;
     readonly distributionsMinor: string;
     readonly directEntriesMinor: string;
@@ -186,9 +201,11 @@ const GROSS_CODES = ["fixed_assets", "intangible_assets", "rou_assets"] as const
 /**
  * Derives the three statements and the retained-earnings roll-forward.
  * The income close into retained earnings is a presentation derivation.
- * Source lines are not mutated. The income statement is the movement period,
- * plus one before-Nexora bucket when the opening date is mid fiscal year.
- * Opening revenue and expense otherwise roll into retained earnings.
+ * Source lines are not mutated. The income statement is this period's movement
+ * only. An opening journal inside the current fiscal year is the before-Nexora
+ * column and its own retained-earnings line. Earlier months stay in those
+ * months and in year-to-date. Opening income on a year boundary rolls into
+ * retained earnings.
  *
  * Debit-positive convention: closing = opening + debit - credit.
  * With complete journal IDs, each cash journal is classified by the full
@@ -260,13 +277,7 @@ export function buildStatements(input: {
   }
 
   let balanceCheck = 0n;
-  let revenue = 0n;
-  let expenses = 0n;
-  let taxExpense = 0n;
   let priorEarnings = 0n;
-  let beforeRevenue = 0n;
-  let beforeExpenses = 0n;
-  let beforeTax = 0n;
   let assets = 0n;
   let liabilities = 0n;
   let otherEquity = 0n;
@@ -274,40 +285,18 @@ export function buildStatements(input: {
   let endingCash = 0n;
   let distributions = 0n;
   const carryOpeningIncome = carriesCurrentYearOpening(input.fiscalYear);
+  const income = splitIncome(input.lines, carryOpeningIncome, input.fiscalYear);
   const movementLines = input.lines.filter((line) => linePeriod(line) === "movement");
   const journalCashFlow = movementLines.every((line) => line.journalId !== undefined);
   const flows: Flows = { cfo: 0n, cfi: 0n, cff: 0n };
+  priorEarnings += income.priorEarnings;
 
   for (const [accountId, position] of accounts) {
     const closing = position.opening + position.movementDebit - position.movementCredit;
     balanceCheck += closing;
 
-    const code = codeByAccount.get(accountId);
-    if (position.report === "revenue") {
-      const movement = position.movementCredit - position.movementDebit;
-      const opening = -position.opening;
-      revenue += movement;
-      if (carryOpeningIncome) {
-        revenue += opening;
-        beforeRevenue += opening;
-      } else {
-        priorEarnings += opening;
-      }
-    } else if (position.report === "expense") {
-      const movement = position.movementDebit - position.movementCredit;
-      const opening = position.opening;
-      expenses += movement;
-      if (code === "tax_expense") taxExpense += movement;
-      if (carryOpeningIncome) {
-        expenses += opening;
-        beforeExpenses += opening;
-        if (code === "tax_expense") {
-          taxExpense += opening;
-          beforeTax += opening;
-        }
-      } else {
-        priorEarnings -= opening;
-      }
+    if (position.report === "revenue" || position.report === "expense") {
+      // Month, before-Nexora, and year-to-date are taken from the lines above.
     } else if (position.report === "asset") {
       assets += closing;
     } else if (position.report === "liability") {
@@ -342,8 +331,8 @@ export function buildStatements(input: {
   const moves = codeMoves(movementLines);
   applyDisposals(flows, movementLines, journals, !journalCashFlow);
   applyDeferredTax(flows, journals, journalCashFlow, movementLines);
-  const lease = leaseAdditions(moves);
-  const findings = collectFindings(movementLines, journals, moves, lease.error);
+  const lease = leaseAdditions(moves, movementLines);
+  const findings = collectFindings(input.lines, movementLines, journals, moves, lease.error);
 
   if (lease.error) {
     const blocked = findings.some(
@@ -359,6 +348,7 @@ export function buildStatements(input: {
     flows,
     moves,
     lease.additions,
+    lease.excusedRise,
     input.policy?.leaseAccounting ?? "ifrs16",
     movementLines,
   );
@@ -366,10 +356,14 @@ export function buildStatements(input: {
     throw new KernelError("FIN_STATEMENT_IMBALANCE", "Classified lines are not in balance");
   }
 
+  const revenue = income.period.revenue;
+  const expenses = income.period.expenses;
   const netIncome = revenue - expenses;
+  const beforeNet = income.before.revenue - income.before.expenses;
   const directEntries = retained ? retained.movementCredit - retained.movementDebit : 0n;
   const openingRetained = (retained ? -retained.opening : 0n) + priorEarnings;
-  const endingRetained = openingRetained + netIncome - distributions + directEntries;
+  const endingRetained = openingRetained + beforeNet + netIncome - distributions + directEntries;
+  const yearToDate = combineIncome(income.period, income.before, income.sameYear);
   const equity = otherEquity + endingRetained;
 
   if (assets !== liabilities + equity) {
@@ -416,6 +410,7 @@ export function buildStatements(input: {
         ...(line.accountCode === undefined ? {} : { accountCode: line.accountCode }),
         ...(line.journalKind === undefined ? {} : { journalKind: line.journalKind }),
         ...(line.sourceLabel === undefined ? {} : { sourceLabel: line.sourceLabel }),
+        ...(line.periodEnd === undefined ? {} : { periodEnd: line.periodEnd }),
         report: line.report,
         cashFlow: line.cashFlow,
         debitMinor: line.debitMinor,
@@ -429,8 +424,13 @@ export function buildStatements(input: {
       expensesMinor: expenses.toString(),
       netIncomeMinor: netIncome.toString(),
     },
-    beforeNexora: beforeNexoraResult(beforeRevenue, beforeExpenses, beforeTax),
-    effectiveTax: effectiveTaxResult(netIncome, taxExpense),
+    beforeNexora: beforeNexoraResult(
+      income.before.revenue,
+      income.before.expenses,
+      income.before.tax,
+    ),
+    yearToDate: yearToDateResult(yearToDate),
+    effectiveTax: effectiveTaxResult(yearToDate.revenue - yearToDate.expenses, yearToDate.tax),
     balanceSheet: {
       assetsMinor: assets.toString(),
       liabilitiesMinor: liabilities.toString(),
@@ -445,6 +445,7 @@ export function buildStatements(input: {
     },
     retainedEarnings: {
       openingMinor: openingRetained.toString(),
+      beforeNexoraMinor: beforeNet.toString(),
       netIncomeMinor: netIncome.toString(),
       distributionsMinor: distributions.toString(),
       directEntriesMinor: directEntries.toString(),
@@ -738,7 +739,11 @@ function deferredTaxAdjustsOperating(lines: readonly ClassifiedLine[]): boolean 
   return true;
 }
 
-function leaseAdditions(moves: Map<string, Move>): { additions: bigint; error: boolean } {
+function leaseAdditions(
+  moves: Map<string, Move>,
+  lines: readonly ClassifiedLine[],
+): { additions: bigint; error: boolean; excusedRise: bigint } {
+  const none = { additions: 0n, error: false, excusedRise: 0n };
   const rou = moveOf(moves, "rou_assets");
   const accum = moveOf(moves, "rou_accumulated_depreciation");
   const current = moveOf(moves, "lease_liabilities_current");
@@ -746,7 +751,7 @@ function leaseAdditions(moves: Map<string, Move>): { additions: bigint; error: b
   const rouMoved = rou.debit !== 0n || rou.credit !== 0n;
   const accumMoved = accum.debit !== 0n || accum.credit !== 0n;
   const liabMoved = current.debit + current.credit + noncurrent.debit + noncurrent.credit !== 0n;
-  if (!rouMoved && !liabMoved && !accumMoved) return { additions: 0n, error: false };
+  if (!rouMoved && !liabMoved && !accumMoved) return none;
 
   const depRou = expenseNet(moves, "depreciation_rou");
   const combined = expenseNet(moves, "depreciation");
@@ -755,30 +760,107 @@ function leaseAdditions(moves: Map<string, Move>): { additions: bigint; error: b
   const grossMapped = rouMoved && accumMoved;
   if (!rouMoved) {
     const accumDelta = accum.credit - accum.debit;
-    if (accumDelta < 0n && inseparable) return { additions: 0n, error: true };
-    return { additions: 0n, error: false };
+    if (accumDelta < 0n && inseparable) return { additions: 0n, error: true, excusedRise: 0n };
+    const rise = leaseLiabilityRise(moves);
+    const excused = excusedLeaseRise(lines, moves);
+    if (rise > excused) return { additions: 0n, error: true, excusedRise: 0n };
+    return { additions: 0n, error: false, excusedRise: excused };
   }
   if (grossMapped) {
     const accumDelta = accum.credit - accum.debit;
     const grossDelta = rou.debit - rou.credit;
-    if (accumDelta < 0n && inseparable) return { additions: 0n, error: true };
-    if (accumDelta < 0n) return { additions: grossDelta + (depRou - accumDelta), error: false };
-    return { additions: grossDelta, error: false };
+    if (accumDelta < 0n && inseparable) return { additions: 0n, error: true, excusedRise: 0n };
+    if (accumDelta < 0n) {
+      return { additions: grossDelta + (depRou - accumDelta), error: false, excusedRise: 0n };
+    }
+    return { additions: grossDelta, error: false, excusedRise: 0n };
   }
-  if (inseparable) return { additions: 0n, error: true };
+  if (inseparable) return { additions: 0n, error: true, excusedRise: 0n };
   const addBack = depRou > 0n ? depRou : rou.credit;
-  return { additions: rou.debit - rou.credit + addBack, error: false };
+  return { additions: rou.debit - rou.credit + addBack, error: false, excusedRise: 0n };
+}
+
+function leaseLiabilityRise(moves: Map<string, Move>): bigint {
+  const current = moveOf(moves, "lease_liabilities_current");
+  const noncurrent = moveOf(moves, "lease_liabilities_noncurrent");
+  return current.credit - current.debit + (noncurrent.credit - noncurrent.debit);
+}
+
+/**
+ * A rise with no right-of-use movement is a new lease unless this period's
+ * lease interest, or a foreign-exchange remeasurement in the same journal,
+ * explains it. Interest covers only the interest booked, not a larger rise.
+ */
+function excusedLeaseRise(lines: readonly ClassifiedLine[], moves: Map<string, Move>): bigint {
+  const rise = leaseLiabilityRise(moves);
+  if (rise <= 0n) return 0n;
+  const interest = expenseNet(moves, "interest_expense");
+  const interestCover = interest > 0n ? interest : 0n;
+  let fxCover = 0n;
+  for (const journal of groupJournals(lines).values()) {
+    let journalRise = 0n;
+    let fxLoss = 0n;
+    for (const line of journal) {
+      if (
+        line.accountCode === "lease_liabilities_current" ||
+        line.accountCode === "lease_liabilities_noncurrent"
+      ) {
+        journalRise += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
+      }
+      if (!isExchangeGainLoss(line)) continue;
+      const loss = parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
+      if (loss > 0n) fxLoss += loss;
+    }
+    if (journalRise > 0n && fxLoss > 0n) fxCover += fxLoss < journalRise ? fxLoss : journalRise;
+  }
+  const cover = interestCover + fxCover;
+  return cover < rise ? cover : rise;
+}
+
+/**
+ * A non-cash FX loss on a lease liability is pushed into operating cash
+ * because the liability is a special account. Add that loss back so the
+ * remeasurement does not become operating or financing cash.
+ */
+function nonCashFxLeaseAddBack(lines: readonly ClassifiedLine[]): bigint {
+  let addBack = 0n;
+  for (const journal of groupJournals(lines).values()) {
+    if (cashDeltaOf(journal) !== 0n) continue;
+    let journalRise = 0n;
+    let fxLoss = 0n;
+    for (const line of journal) {
+      if (
+        line.accountCode === "lease_liabilities_current" ||
+        line.accountCode === "lease_liabilities_noncurrent"
+      ) {
+        journalRise += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
+      }
+      if (!isExchangeGainLoss(line) || line.cashFlow !== "cfo") continue;
+      const loss = parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
+      if (loss > 0n) fxLoss += loss;
+    }
+    if (journalRise > 0n && fxLoss > 0n) addBack += fxLoss < journalRise ? fxLoss : journalRise;
+  }
+  return addBack;
+}
+
+function isExchangeGainLoss(line: ClassifiedLine): boolean {
+  if (line.accountCode === "exchange_gain_loss") return true;
+  const label = line.sourceLabel ?? "";
+  return /\b(foreign exchange|exchange gain|exchange loss|fx gain|fx loss)\b/i.test(label);
 }
 
 function applyLeaseCash(
   flows: Flows,
   moves: Map<string, Move>,
   additions: bigint,
+  excusedRise: bigint,
   leaseAccounting: LeaseAccounting,
   lines: readonly ClassifiedLine[],
 ): void {
   if (
     additions === 0n &&
+    excusedRise === 0n &&
     !lines.some((line) => line.accountCode?.startsWith("lease_liabilities"))
   ) {
     return;
@@ -786,7 +868,8 @@ function applyLeaseCash(
   const current = moveOf(moves, "lease_liabilities_current");
   const noncurrent = moveOf(moves, "lease_liabilities_noncurrent");
   const delta = current.credit - current.debit + (noncurrent.credit - noncurrent.debit);
-  const portion = delta - additions;
+  const portion = delta - additions - excusedRise;
+  flows.cfo += nonCashFxLeaseAddBack(lines);
   if (leaseAccounting === "asc842_operating") flows.cfo += portion;
   else flows.cff += portion;
   if (leaseAccounting === "asc842_operating" && expenseNet(moves, "depreciation_rou") === 0n) {
@@ -798,6 +881,7 @@ function applyLeaseCash(
 }
 
 function collectFindings(
+  allLines: readonly ClassifiedLine[],
   lines: readonly ClassifiedLine[],
   journals: Map<string, ClassifiedLine[]>,
   moves: Map<string, Move>,
@@ -899,15 +983,33 @@ function collectFindings(
     }
   }
 
+  const movedCodes = new Set<string>();
   for (const line of lines) {
     if (!isReviewNoncurrent(line)) continue;
     if (parseMinor(line.debitMinor) === 0n && parseMinor(line.creditMinor) === 0n) continue;
+    if (line.accountCode === undefined || movedCodes.has(line.accountCode)) continue;
+    movedCodes.add(line.accountCode);
     findings.push({
       code: "other_noncurrent_review",
-      severity: "notice",
+      severity: "error",
       sourceLabel: line.sourceLabel ?? null,
       message: reviewNoncurrentMessage(line),
     });
+  }
+  if (movedCodes.size === 0) {
+    const open = allLines.find(
+      (line) =>
+        isReviewNoncurrent(line) &&
+        (parseMinor(line.debitMinor) !== 0n || parseMinor(line.creditMinor) !== 0n),
+    );
+    if (open) {
+      findings.push({
+        code: "other_noncurrent_review",
+        severity: "notice",
+        sourceLabel: open.sourceLabel ?? null,
+        message: reviewNoncurrentMessage(open),
+      });
+    }
   }
   return findings;
 }
@@ -1027,6 +1129,95 @@ function isoDate(year: number, month: number, day: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+interface IncomeParts {
+  revenue: bigint;
+  expenses: bigint;
+  tax: bigint;
+}
+
+function emptyIncome(): IncomeParts {
+  return { revenue: 0n, expenses: 0n, tax: 0n };
+}
+
+function addIncome(bucket: IncomeParts, line: ClassifiedLine): void {
+  const debit = parseMinor(line.debitMinor);
+  const credit = parseMinor(line.creditMinor);
+  if (line.report === "revenue") bucket.revenue += credit - debit;
+  else if (line.report === "expense") {
+    const amount = debit - credit;
+    bucket.expenses += amount;
+    if (line.accountCode === "tax_expense") bucket.tax += amount;
+  }
+}
+
+function incomeEffect(line: ClassifiedLine): bigint {
+  const debit = parseMinor(line.debitMinor);
+  const credit = parseMinor(line.creditMinor);
+  if (line.report === "revenue") return credit - debit;
+  if (line.report === "expense") return -(debit - credit);
+  return 0n;
+}
+
+function splitIncome(
+  lines: readonly ClassifiedLine[],
+  carryOpeningIncome: boolean,
+  fiscal: StatementFiscalYear | undefined,
+): {
+  period: IncomeParts;
+  before: IncomeParts;
+  sameYear: IncomeParts;
+  priorEarnings: bigint;
+} {
+  const period = emptyIncome();
+  const before = emptyIncome();
+  const sameYear = emptyIncome();
+  let priorEarnings = 0n;
+  for (const line of lines) {
+    if (line.report !== "revenue" && line.report !== "expense") continue;
+    if (line.journalKind === "opening") {
+      if (carryOpeningIncome) addIncome(before, line);
+      else priorEarnings += incomeEffect(line);
+      continue;
+    }
+    if (line.period === "opening") {
+      priorEarnings += incomeEffect(line);
+      if (inCurrentFiscalYear(line, fiscal)) addIncome(sameYear, line);
+      continue;
+    }
+    addIncome(period, line);
+  }
+  return { period, before, sameYear, priorEarnings };
+}
+
+function inCurrentFiscalYear(
+  line: ClassifiedLine,
+  fiscal: StatementFiscalYear | undefined,
+): boolean {
+  if (!fiscal || line.periodEnd === undefined) return false;
+  return sameFiscalYear(line.periodEnd, fiscal.statementDate, fiscal);
+}
+
+function combineIncome(...parts: readonly IncomeParts[]): IncomeParts {
+  const total = emptyIncome();
+  for (const part of parts) {
+    total.revenue += part.revenue;
+    total.expenses += part.expenses;
+    total.tax += part.tax;
+  }
+  return total;
+}
+
+function yearToDateResult(income: IncomeParts): StatementSet["yearToDate"] {
+  const net = income.revenue - income.expenses;
+  return {
+    revenueMinor: income.revenue.toString(),
+    expensesMinor: income.expenses.toString(),
+    netIncomeMinor: net.toString(),
+    profitBeforeTaxMinor: (net + income.tax).toString(),
+    taxExpenseMinor: income.tax.toString(),
+  };
+}
+
 function beforeNexoraResult(
   revenue: bigint,
   expenses: bigint,
@@ -1065,7 +1256,9 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
     amountMinor: string;
     message: string;
   }[] = [];
-  const deferred = closingDebit(lines, (line) => line.accountCode === "asset_sale_receivable");
+  const disclosed = lines.filter((line) => line.journalKind !== "opening");
+  const movement = disclosed.filter((line) => line.period === "movement");
+  const deferred = closingDebit(disclosed, (line) => line.accountCode === "asset_sale_receivable");
   if (deferred > 0n) {
     items.push({
       type: "deferred_consideration",
@@ -1073,8 +1266,8 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
       message: "PP&E disposed of for deferred consideration",
     });
   }
-  const financed = financedAccounts(lines);
-  const debt = closingCredit(lines, (line) => financed.debt.has(line.accountId));
+  const financed = financedAccounts(nonCashJournals(movement));
+  const debt = netCredit(movement, financed.debt);
   if (debt > 0n) {
     items.push({
       type: "asset_acquired_with_debt",
@@ -1082,7 +1275,7 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
       message: "Assets acquired with debt",
     });
   }
-  const capex = closingCredit(lines, (line) => financed.capex.has(line.accountId));
+  const capex = netCredit(movement, financed.capex);
   if (capex > 0n) {
     items.push({
       type: "capex_on_credit",
@@ -1093,13 +1286,22 @@ function nonCashItems(lines: readonly ClassifiedLine[]): StatementSet["nonCash"]
   return items;
 }
 
-function financedAccounts(lines: readonly ClassifiedLine[]): {
+function nonCashJournals(lines: readonly ClassifiedLine[]): ClassifiedLine[][] {
+  const journals: ClassifiedLine[][] = [];
+  for (const journal of groupJournals(lines).values()) {
+    if (cashDeltaOf(journal) !== 0n) continue;
+    journals.push(journal);
+  }
+  return journals;
+}
+
+function financedAccounts(journals: readonly (readonly ClassifiedLine[])[]): {
   debt: Set<string>;
   capex: Set<string>;
 } {
   const debt = new Set<string>();
   const capex = new Set<string>();
-  for (const journal of groupJournals(lines).values()) {
+  for (const journal of journals) {
     const bought = journal.some(
       (line) =>
         (line.accountCode === "fixed_assets" ||
@@ -1117,6 +1319,15 @@ function financedAccounts(lines: readonly ClassifiedLine[]): {
   return { debt, capex };
 }
 
+function netCredit(lines: readonly ClassifiedLine[], accounts: ReadonlySet<string>): bigint {
+  let net = 0n;
+  for (const line of lines) {
+    if (!accounts.has(line.accountId)) continue;
+    net += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
+  }
+  return net > 0n ? net : 0n;
+}
+
 function closingDebit(
   lines: readonly ClassifiedLine[],
   match: (line: ClassifiedLine) => boolean,
@@ -1125,18 +1336,6 @@ function closingDebit(
   for (const line of lines) {
     if (!match(line)) continue;
     net += parseMinor(line.debitMinor) - parseMinor(line.creditMinor);
-  }
-  return net > 0n ? net : 0n;
-}
-
-function closingCredit(
-  lines: readonly ClassifiedLine[],
-  match: (line: ClassifiedLine) => boolean,
-): bigint {
-  let net = 0n;
-  for (const line of lines) {
-    if (!match(line)) continue;
-    net += parseMinor(line.creditMinor) - parseMinor(line.debitMinor);
   }
   return net > 0n ? net : 0n;
 }

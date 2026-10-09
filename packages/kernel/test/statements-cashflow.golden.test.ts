@@ -170,6 +170,7 @@ describe("journal cash flow and retained earnings golden vectors (fe-kernel-0.3.
     ]);
     expect(result.retainedEarnings).toEqual({
       openingMinor: "80",
+      beforeNexoraMinor: "0",
       netIncomeMinor: "0",
       distributionsMinor: "5",
       directEntriesMinor: "0",

@@ -63,6 +63,7 @@ describe("single entity statements", () => {
     });
     expect(statement.retainedEarnings).toEqual({
       openingMinor: "100000",
+      beforeNexoraMinor: "0",
       netIncomeMinor: "50000",
       distributionsMinor: "5000",
       directEntriesMinor: "0",

@@ -67,9 +67,12 @@ export { stateHash } from "./state-hash.js";
 export {
   assertCanonicalClassification,
   canonicalAccount,
+  isReviewCashFlowPlaceholder,
   listCanonicalAccounts,
+  suggestedReviewCashFlow,
   unclassifiedCashFlow,
 } from "./ingestion-chart.js";
+export type { ReviewCashFlow } from "./ingestion-chart.js";
 export type { CanonicalAccount } from "./ingestion-chart.js";
 export { allocateExact, allocateSplit } from "./allocate.js";
 export { runIngestionChecks } from "./ingestion-checks.js";

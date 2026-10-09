@@ -34,6 +34,7 @@ export {
   assertCurrencyScaleVisible,
   assertStoredCurrencyScales,
   PRE_CUTOVER_CURRENCY_SQL,
+  STORED_CURRENCY_SQL,
 } from "./currency-scale-check.js";
-export { CURRENCY_SCALE_CUTOVER } from "./currency-scale-cutover.js";
+export { CURRENCY_SCALE_TABLE_VERSION } from "./currency-scale-cutover.js";
 export type { CurrencyScaleCutoverResult } from "./currency-scale-cutover.js";

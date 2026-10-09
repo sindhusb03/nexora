@@ -32,6 +32,7 @@ import {
 } from "./classify-activity.js";
 import { ExplainedKernelError, type ActorContext } from "./http.js";
 import {
+  closeRefusal,
   plainStatementMessage,
   presentStatementFindings,
   presentStatementPolicy,
@@ -355,11 +356,8 @@ async function closePeriod(store: LedgerStore, actor: ActorContext, periodId: st
     presented = presentStatement(statement, DEFAULT_STATEMENT_POLICY);
   } catch (error) {
     if (error instanceof KernelError) {
-      throw new ExplainedKernelError(
-        error.code,
-        plainStatementMessage(error.message),
-        "Fix the flagged accounts, then close the period.",
-      );
+      const refusal = closeRefusal(error.message);
+      throw new ExplainedKernelError(error.code, refusal.message, refusal.action);
     }
     throw error;
   }
@@ -949,6 +947,7 @@ function presentStatement(statement: StatementSet, policy: typeof DEFAULT_STATEM
     },
     retainedEarnings: {
       opening: amount(statement.retainedEarnings.openingMinor),
+      beforeNexora: amount(statement.retainedEarnings.beforeNexoraMinor),
       netIncome: amount(statement.retainedEarnings.netIncomeMinor),
       distributions: amount(statement.retainedEarnings.distributionsMinor),
       directEntries: amount(statement.retainedEarnings.directEntriesMinor),
@@ -965,6 +964,13 @@ function presentStatement(statement: StatementSet, policy: typeof DEFAULT_STATEM
             profitBeforeTax: amount(statement.beforeNexora.profitBeforeTaxMinor),
             taxExpense: amount(statement.beforeNexora.taxExpenseMinor),
           },
+    yearToDate: {
+      revenue: amount(statement.yearToDate.revenueMinor),
+      expenses: amount(statement.yearToDate.expensesMinor),
+      netIncome: amount(statement.yearToDate.netIncomeMinor),
+      profitBeforeTax: amount(statement.yearToDate.profitBeforeTaxMinor),
+      taxExpense: amount(statement.yearToDate.taxExpenseMinor),
+    },
     effectiveTax: {
       profitBeforeTax: amount(statement.effectiveTax.profitBeforeTaxMinor),
       taxExpense: amount(statement.effectiveTax.taxExpenseMinor),

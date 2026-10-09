@@ -5,6 +5,7 @@ import {
   assertCanonicalClassification,
   buildStatements,
   canonicalAccount,
+  isReviewCashFlowPlaceholder,
   unclassifiedCashFlow,
   type ClassifiedLine,
   type StatementPolicy,
@@ -23,6 +24,7 @@ function leg(
     sourceLabel?: string;
     journalKind?: "opening";
     period?: ClassifiedLine["period"];
+    periodEnd?: string;
   } = {},
 ): ClassifiedLine {
   return {
@@ -37,6 +39,7 @@ function leg(
     ...(extras.accountCode === undefined ? {} : { accountCode: extras.accountCode }),
     ...(extras.sourceLabel === undefined ? {} : { sourceLabel: extras.sourceLabel }),
     ...(extras.journalKind === undefined ? {} : { journalKind: extras.journalKind }),
+    ...(extras.periodEnd === undefined ? {} : { periodEnd: extras.periodEnd }),
   };
 }
 
@@ -81,6 +84,36 @@ describe("statement class taxonomy goldens", () => {
     expect(canonicalAccount("other_current_assets")?.cashFlow).toBe("cfo");
     expect(canonicalAccount("other_noncurrent_assets")?.cashFlow).toBe("non_cash");
     expect(canonicalAccount("other_noncurrent_liabilities")?.cashFlow).toBe("non_cash");
+    expect(isReviewCashFlowPlaceholder("other_noncurrent_assets")).toBe(true);
+    expect(isReviewCashFlowPlaceholder("cash")).toBe(false);
+    expect(() =>
+      assertCanonicalClassification({
+        code: "other_noncurrent_assets",
+        report: "asset",
+        cashFlow: "non_cash",
+      }),
+    ).toThrow(/cannot be classified/);
+    expect(() =>
+      assertCanonicalClassification({
+        code: "other_noncurrent_liabilities",
+        report: "liability",
+        cashFlow: "non_cash",
+      }),
+    ).toThrow(/cannot be classified/);
+    expect(() =>
+      assertCanonicalClassification({
+        code: "other_noncurrent_assets",
+        report: "asset",
+        cashFlow: "cfi",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertCanonicalClassification({
+        code: "other_noncurrent_liabilities",
+        report: "liability",
+        cashFlow: "cfo",
+      }),
+    ).not.toThrow();
     expect(canonicalAccount("amortisation")?.name).toBe("Amortization");
     expect(unclassifiedCashFlow("current")).toBe("cfo");
     expect(unclassifiedCashFlow("noncurrent")).toBe("review");
@@ -770,6 +803,46 @@ describe("statement class taxonomy goldens", () => {
       expect.objectContaining({ type: "asset_acquired_with_debt", amountMinor: "500" }),
     ]);
 
+    const opened = run([
+      leg("fa", "asset", "cfi", 10000, 0, "open", {
+        accountCode: "fixed_assets",
+        journalKind: "opening",
+      }),
+      leg("debt", "liability", "cff", 0, 6000, "open", { journalKind: "opening" }),
+      leg("equity", "equity", "cff", 0, 4000, "open", { journalKind: "opening" }),
+    ]);
+    expect(opened.nonCash.items).toEqual([]);
+
+    const firstPeriod = run([
+      leg("fa", "asset", "cfi", 10000, 0, "open", {
+        accountCode: "fixed_assets",
+        journalKind: "opening",
+        period: "opening",
+      }),
+      leg("debt", "liability", "cff", 0, 6000, "open", {
+        journalKind: "opening",
+        period: "opening",
+      }),
+      leg("equity", "equity", "cff", 0, 4000, "open", {
+        journalKind: "opening",
+        period: "opening",
+      }),
+      leg("fa", "asset", "cfi", 500, 0, "buy", { accountCode: "fixed_assets" }),
+      leg("debt", "liability", "cff", 0, 500, "buy"),
+    ]);
+    expect(firstPeriod.nonCash.items).toEqual([
+      expect.objectContaining({ type: "asset_acquired_with_debt", amountMinor: "500" }),
+    ]);
+    const nextPeriod = run([
+      leg("fa", "asset", "cfi", 10500, 0, "open", {
+        accountCode: "fixed_assets",
+        period: "opening",
+      }),
+      leg("debt", "liability", "cff", 0, 6500, "open", { period: "opening" }),
+      leg("equity", "equity", "cff", 0, 4000, "open", { period: "opening" }),
+    ]);
+    expect(nextPeriod.nonCash.items).toEqual([]);
+
     const capex = run([
       leg("fa", "asset", "cfi", 400, 0, "capex", { accountCode: "fixed_assets" }),
       leg("pay", "liability", "cfi", 0, 400, "capex", { accountCode: "capex_payables" }),
@@ -824,6 +897,60 @@ describe("statement class taxonomy goldens", () => {
     expect(netOnly.cashFlow).toMatchObject({ cfoMinor: "-60", cffMinor: "-190" });
   });
 
+  it("raises a lease error when the liability rises with no right-of-use movement", () => {
+    const accretion = [
+      leg("interest", "expense", "cff", 10, 0, "acc", { accountCode: "interest_expense" }),
+      leg("liab", "liability", "cff", 0, 10, "acc", {
+        accountCode: "lease_liabilities_noncurrent",
+      }),
+    ];
+    const passed = run(accretion);
+    expect(passed.issues).toEqual([]);
+    expect(passed.nonCash.leaseAdditionsMinor).toBe("0");
+    expect(passed.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+
+    expect(() =>
+      run([
+        leg("interest", "expense", "cff", 10, 0, "over", { accountCode: "interest_expense" }),
+        leg("fa", "asset", "cfi", 5, 0, "over", { accountCode: "fixed_assets" }),
+        leg("liab", "liability", "cff", 0, 15, "over", {
+          accountCode: "lease_liabilities_noncurrent",
+        }),
+      ]),
+    ).toThrow(/lease_additions_needed/);
+
+    expect(() =>
+      run([
+        leg("fa", "asset", "cfi", 500, 0, "new", { accountCode: "fixed_assets" }),
+        leg("liab", "liability", "cff", 0, 500, "new", {
+          accountCode: "lease_liabilities_noncurrent",
+        }),
+      ]),
+    ).toThrow(/lease_additions_needed/);
+
+    const fx = run([
+      leg("fx", "expense", "cfo", 20, 0, "fx", {
+        accountCode: "exchange_gain_loss",
+        sourceLabel: "Foreign exchange loss",
+      }),
+      leg("liab", "liability", "cff", 0, 20, "fx", {
+        accountCode: "lease_liabilities_noncurrent",
+      }),
+    ]);
+    expect(fx.issues).toEqual([]);
+    expect(fx.cashFlow).toMatchObject({ cfoMinor: "0", cfiMinor: "0", cffMinor: "0" });
+
+    const remeasured = run([
+      leg("rou", "asset", "non_cash", 40, 0, "remeasure", { accountCode: "rou_assets" }),
+      leg("liab", "liability", "cff", 0, 40, "remeasure", {
+        accountCode: "lease_liabilities_noncurrent",
+      }),
+    ]);
+    expect(remeasured.issues).toEqual([]);
+    expect(remeasured.nonCash.leaseAdditionsMinor).toBe("40");
+    expect(remeasured.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "0" });
+  });
+
   it("keeps a mid-year opening apart from prior retained earnings", () => {
     const lines = [
       leg("cash", "asset", "cash", 1000, 0, "open", { journalKind: "opening" }),
@@ -857,14 +984,20 @@ describe("statement class taxonomy goldens", () => {
       taxExpenseMinor: "60",
     });
     expect(midYear.incomeStatement).toEqual({
-      revenueMinor: "500",
-      expensesMinor: "260",
-      netIncomeMinor: "240",
+      revenueMinor: "0",
+      expensesMinor: "0",
+      netIncomeMinor: "0",
     });
     expect(midYear.retainedEarnings).toMatchObject({
       openingMinor: "760",
-      netIncomeMinor: "240",
+      beforeNexoraMinor: "240",
+      netIncomeMinor: "0",
       endingMinor: "1000",
+    });
+    expect(midYear.yearToDate).toMatchObject({
+      netIncomeMinor: "240",
+      profitBeforeTaxMinor: "300",
+      taxExpenseMinor: "60",
     });
     expect(midYear.effectiveTax.effectiveTaxRate).toBe("0.200000");
     expect(midYear.cashFlow).toMatchObject({
@@ -891,9 +1024,14 @@ describe("statement class taxonomy goldens", () => {
         yearEndDay: 31,
       },
     });
-    expect(withLater.incomeStatement).toMatchObject({ revenueMinor: "600", netIncomeMinor: "340" });
+    expect(withLater.incomeStatement).toMatchObject({ revenueMinor: "100", netIncomeMinor: "100" });
     expect(withLater.beforeNexora?.netIncomeMinor).toBe("240");
-    expect(withLater.retainedEarnings.openingMinor).toBe("760");
+    expect(withLater.retainedEarnings).toMatchObject({
+      openingMinor: "760",
+      beforeNexoraMinor: "240",
+      netIncomeMinor: "100",
+      endingMinor: "1100",
+    });
     expect(withLater.effectiveTax).toMatchObject({
       profitBeforeTaxMinor: "400",
       taxExpenseMinor: "60",
@@ -915,7 +1053,131 @@ describe("statement class taxonomy goldens", () => {
     expect(yearStart.beforeNexora).toBeNull();
     expect(yearStart.incomeStatement.netIncomeMinor).toBe("0");
     expect(yearStart.retainedEarnings.openingMinor).toBe("1000");
+    expect(yearStart.retainedEarnings.beforeNexoraMinor).toBe("0");
     expect(yearStart.cashFlow.cfoMinor).toBe("0");
+  });
+
+  it("G-H5b keeps each month to itself and shows before Nexora once", () => {
+    const opening = [
+      leg("cash", "asset", "cash", 1000, 0, "open", { journalKind: "opening" }),
+      leg("revenue", "revenue", "cfo", 0, 500, "open", {
+        journalKind: "opening",
+        accountCode: "revenue",
+      }),
+      leg("opex", "expense", "cfo", 200, 0, "open", { journalKind: "opening" }),
+      leg("tax", "expense", "cfo", 60, 0, "open", {
+        journalKind: "opening",
+        accountCode: "tax_expense",
+      }),
+      leg("re", "equity", "non_cash", 0, 760, "open", { journalKind: "opening" }),
+    ];
+    const july = [
+      leg("cash", "asset", "cash", 100, 0, "july"),
+      leg("revenue", "revenue", "cfo", 0, 100, "july", { accountCode: "revenue" }),
+    ];
+    const august = [
+      leg("cash", "asset", "cash", 50, 0, "august"),
+      leg("revenue", "revenue", "cfo", 0, 50, "august", { accountCode: "revenue" }),
+    ];
+    const fiscal = {
+      openingDate: "2025-07-01",
+      yearEndMonth: 12,
+      yearEndDay: 31,
+    };
+    const julyStatement = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines: opening.concat(july),
+      fiscalYear: { ...fiscal, statementDate: "2025-07-31" },
+    });
+    expect(julyStatement.incomeStatement).toMatchObject({
+      revenueMinor: "100",
+      netIncomeMinor: "100",
+    });
+    expect(julyStatement.beforeNexora).toMatchObject({
+      revenueMinor: "500",
+      netIncomeMinor: "240",
+      profitBeforeTaxMinor: "300",
+      taxExpenseMinor: "60",
+    });
+    expect(julyStatement.yearToDate).toMatchObject({
+      netIncomeMinor: "340",
+      profitBeforeTaxMinor: "400",
+      taxExpenseMinor: "60",
+    });
+    expect(julyStatement.effectiveTax.effectiveTaxRate).toBe("0.150000");
+    expect(julyStatement.retainedEarnings).toMatchObject({
+      openingMinor: "760",
+      beforeNexoraMinor: "240",
+      netIncomeMinor: "100",
+      endingMinor: "1100",
+    });
+    expect(julyStatement.balanceSheet.assetsMinor).toBe("1100");
+    expect(julyStatement.cashFlow).toMatchObject({ cfoMinor: "100", cfiMinor: "0", cffMinor: "0" });
+
+    const augustStatement = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines: opening.concat(
+        july.map((line) => ({ ...line, period: "opening" as const, periodEnd: "2025-07-31" })),
+        august,
+      ),
+      fiscalYear: { ...fiscal, statementDate: "2025-08-31" },
+    });
+    expect(augustStatement.incomeStatement).toMatchObject({
+      revenueMinor: "50",
+      netIncomeMinor: "50",
+    });
+    expect(augustStatement.beforeNexora).toMatchObject({
+      revenueMinor: "500",
+      netIncomeMinor: "240",
+      profitBeforeTaxMinor: "300",
+      taxExpenseMinor: "60",
+    });
+    expect(augustStatement.yearToDate).toMatchObject({
+      netIncomeMinor: "390",
+      profitBeforeTaxMinor: "450",
+      taxExpenseMinor: "60",
+    });
+    expect(augustStatement.effectiveTax.effectiveTaxRate).toBe("0.133333");
+    expect(augustStatement.retainedEarnings).toMatchObject({
+      openingMinor: "860",
+      beforeNexoraMinor: "240",
+      netIncomeMinor: "50",
+      endingMinor: "1150",
+    });
+    expect(augustStatement.balanceSheet.assetsMinor).toBe("1150");
+    expect(augustStatement.balanceSheet.assetsMinor).toBe(augustStatement.balanceSheet.equityMinor);
+    expect(augustStatement.cashFlow).toMatchObject({
+      cfoMinor: "50",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "1150",
+    });
+
+    const december = buildStatements({
+      currency: "USD",
+      retainedEarningsAccountId: "re",
+      lines: opening.concat(
+        july.map((line) => ({ ...line, period: "opening" as const, periodEnd: "2025-07-31" })),
+        august.map((line) => ({ ...line, period: "opening" as const, periodEnd: "2025-08-31" })),
+      ),
+      fiscalYear: { ...fiscal, statementDate: "2025-12-31" },
+    });
+    expect(december.incomeStatement).toMatchObject({ revenueMinor: "0", netIncomeMinor: "0" });
+    expect(december.beforeNexora?.netIncomeMinor).toBe("240");
+    expect(december.beforeNexora?.revenueMinor).toBe("500");
+    expect(december.yearToDate).toMatchObject({
+      netIncomeMinor: "390",
+      profitBeforeTaxMinor: "450",
+    });
+    expect(december.retainedEarnings.endingMinor).toBe("1150");
+    expect(december.cashFlow).toMatchObject({
+      cfoMinor: "0",
+      cfiMinor: "0",
+      cffMinor: "0",
+      endingCashMinor: "1150",
+    });
   });
 
   it("treats deferred tax and OCI in a movement journal as non-cash", () => {
@@ -967,9 +1229,30 @@ describe("statement class taxonomy goldens", () => {
       leg("equity", "equity", "cff", 0, 40, "park"),
     ]);
     expect(parked.cashFlow).toMatchObject({ cfiMinor: "0", cffMinor: "0" });
-    expect(parked.notices.map((item) => item.message).join(" ")).toMatch(
+    expect(parked.issues).toEqual([
+      expect.objectContaining({
+        code: "other_noncurrent_review",
+        severity: "error",
+      }),
+    ]);
+    expect(parked.issues.map((item) => item.message).join(" ")).toMatch(
       /Investing is the usual class/,
     );
+    expect(parked.notices).toEqual([]);
+
+    const openBalance = run([
+      leg("other", "asset", "non_cash", 40, 0, "open", {
+        accountCode: "other_noncurrent_assets",
+        journalKind: "opening",
+        period: "opening",
+      }),
+      leg("equity", "equity", "cff", 0, 40, "open", {
+        journalKind: "opening",
+        period: "opening",
+      }),
+    ]);
+    expect(openBalance.issues).toEqual([]);
+    expect(openBalance.notices.map((item) => item.code)).toEqual(["other_noncurrent_review"]);
 
     expect(() =>
       run([

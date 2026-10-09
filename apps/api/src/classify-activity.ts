@@ -73,6 +73,7 @@ export function classifyPostedActivity(
       creditMinor: line.creditMinor,
       currency: line.currency,
       period: line.periodId === period.periodId ? "movement" : "opening",
+      periodEnd: line.periodEnd,
       ...(journalKind === undefined ? {} : { journalKind }),
     });
   }
