@@ -25,6 +25,7 @@ import {
   classifyPostedActivity,
   displaySourceRef,
   fiscalYearForStatements,
+  isOpeningPeriod,
 } from "../classify-activity.js";
 import {
   plainStatementMessage,
@@ -381,11 +382,16 @@ async function snapshot(
   const accountName = new Map(
     accounts.map((account) => [account.accountId, `${account.code} ${account.name}`]),
   );
+  const statementPeriods = periods.filter((period) => !isOpeningPeriod(period, activity));
   const selectedPeriod = selection.periodId
-    ? periods.find((period) => period.periodId === selection.periodId)
-    : periods.filter((period) => period.startDate <= new Date().toISOString().slice(0, 10)).at(-1);
+    ? statementPeriods.find((period) => period.periodId === selection.periodId)
+    : statementPeriods
+        .filter((period) => period.startDate <= new Date().toISOString().slice(0, 10))
+        .at(-1);
   if (!selectedPeriod) throw new KernelError("FIN_NOT_FOUND", "Period not found");
-  const activityPeriods = periods.filter((period) => period.startDate <= selectedPeriod.startDate);
+  const activityPeriods = statementPeriods.filter(
+    (period) => period.startDate <= selectedPeriod.startDate,
+  );
   const unavailablePeriods: { periodId: string; reason: string }[] = [];
   const series = activityPeriods.flatMap((period) => {
     try {

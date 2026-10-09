@@ -190,7 +190,7 @@ describe("ingestion checks", () => {
   it("names sixteen checks and keeps prior-period variance advisory", () => {
     expect(INGESTION_CHECK_IDS).toHaveLength(16);
     expect(INGESTION_CHECK_IDS[15]).toBe("prior_period_variance");
-    expect(INGESTION_FORMULA_VERSION).toBe("ingestion-checks-0.3.0");
+    expect(INGESTION_FORMULA_VERSION).toBe("ingestion-checks-0.4.0");
   });
 
   it("passes a balanced two-period package and flags the cash move as info", () => {
@@ -516,6 +516,127 @@ describe("chart mapping", () => {
 });
 
 describe("linked model", () => {
+  it.each([
+    ["2025-06-30", "2025-12-31", "560", "240"],
+    ["2024-12-31", "2025-06-30", "800", "0"],
+  ])(
+    "classifies opening income at %s and preserves ending balances",
+    (openingDate, closingDate, openingEarnings, beforeIncome) => {
+      const amounts = [
+        [openingDate, `${openingDate.slice(0, 4)}-01-01`, "cash", "1000", "balance_sheet"],
+        [
+          openingDate,
+          `${openingDate.slice(0, 4)}-01-01`,
+          "accounts_payable",
+          "200",
+          "balance_sheet",
+        ],
+        [
+          openingDate,
+          `${openingDate.slice(0, 4)}-01-01`,
+          "retained_earnings",
+          "800",
+          "balance_sheet",
+        ],
+        [openingDate, `${openingDate.slice(0, 4)}-01-01`, "revenue", "500", "income_statement"],
+        [
+          openingDate,
+          `${openingDate.slice(0, 4)}-01-01`,
+          "operating_expenses",
+          "260",
+          "income_statement",
+        ],
+        [
+          closingDate,
+          closingDate.endsWith("06-30") ? "2025-01-01" : "2025-07-01",
+          "cash",
+          "1500",
+          "balance_sheet",
+        ],
+        [
+          closingDate,
+          closingDate.endsWith("06-30") ? "2025-01-01" : "2025-07-01",
+          "accounts_payable",
+          "200",
+          "balance_sheet",
+        ],
+        [
+          closingDate,
+          closingDate.endsWith("06-30") ? "2025-01-01" : "2025-07-01",
+          "retained_earnings",
+          "1300",
+          "balance_sheet",
+        ],
+        [
+          closingDate,
+          closingDate.endsWith("06-30") ? "2025-01-01" : "2025-07-01",
+          "revenue",
+          "700",
+          "income_statement",
+        ],
+        [
+          closingDate,
+          closingDate.endsWith("06-30") ? "2025-01-01" : "2025-07-01",
+          "operating_expenses",
+          "200",
+          "income_statement",
+        ],
+      ].map(([periodEnd, periodStart, accountCode, minor, statement], index) =>
+        line({
+          valueId: String(index),
+          periodEnd: periodEnd!,
+          periodStart: periodStart!,
+          accountCode: accountCode!,
+          minor: minor!,
+          statement: statement as IngestionAmount["statement"],
+          spanMonths: 6,
+        }),
+      );
+      const result = buildLinkedModel({
+        ...balancedPackage(),
+        amounts,
+        banks: [],
+        fiscalYearEnd: { month: 12, day: 31 },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const opening = result.model.journals[0]!;
+      expect(opening.periodStart).toBe(openingDate);
+      expect(opening.periodEnd).toBe(openingDate);
+      expect(
+        opening.lines.find((line) => line.accountCode === "retained_earnings")?.creditMinor,
+      ).toBe(openingEarnings);
+      if (openingDate === "2024-12-31") {
+        expect(opening.lines.map((line) => line.accountCode)).toEqual([
+          "accounts_payable",
+          "cash",
+          "retained_earnings",
+        ]);
+        expect(result.model.statements.beforeNexora).toBeNull();
+      }
+      for (const journal of result.model.journals) {
+        expect(
+          journal.lines.reduce(
+            (sum, line) => sum + BigInt(line.debitMinor) - BigInt(line.creditMinor),
+            0n,
+          ),
+        ).toBe(0n);
+      }
+      expect(result.model.statements.incomeStatement).toMatchObject({
+        revenueMinor: "700",
+        expensesMinor: "200",
+        netIncomeMinor: "500",
+      });
+      expect(result.model.statements.beforeNexora?.netIncomeMinor ?? "0").toBe(beforeIncome);
+      expect(result.model.statements.retainedEarnings).toMatchObject({
+        openingMinor: openingEarnings,
+        netIncomeMinor: "500",
+        endingMinor: "1300",
+      });
+      expect(result.model.statements.cashFlow.endingCashMinor).toBe("1500");
+    },
+  );
+
   it("posts an opening snapshot and a movement that the statement engine reproduces", () => {
     const result = buildLinkedModel(balancedPackage());
     expect(result.ok).toBe(true);

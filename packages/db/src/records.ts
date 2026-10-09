@@ -161,6 +161,7 @@ export interface IngestionPostCommit {
   readonly journals: readonly {
     readonly journalId: string;
     readonly periodId: string;
+    readonly journalKind?: "opening" | "standard";
     readonly idempotencyKey: string;
     readonly payloadHash: string;
     readonly sourceRef: string;

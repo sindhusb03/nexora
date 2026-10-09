@@ -105,13 +105,41 @@ export function buildLinkedModel(input: IngestionCheckInput): LinkedModelResult 
 
   const journals: ModelJournal[] = [];
   if (!posted[first]) {
-    const openingLines = snapshotLines(snapshot(input.amounts, first));
+    const balances = snapshot(input.amounts, first);
+    const openingIncome = incomeFor(input.amounts, first);
+    if (openingIncome.length > 0 && !input.fiscalYearEnd) {
+      return {
+        ok: false,
+        message:
+          "Your company has no year-end set, so these opening figures can't be placed. Set your year-end in company settings, then confirm this upload again.",
+      };
+    }
+    const atYearEnd =
+      input.fiscalYearEnd &&
+      Number(first.slice(5, 7)) === input.fiscalYearEnd.month &&
+      Number(first.slice(8, 10)) === input.fiscalYearEnd.day;
+    const income = atYearEnd ? [] : openingIncome;
+    const netIncome = income.reduce(
+      (sum, amount) =>
+        sum +
+        (isRevenueAccount(amount.accountCode)
+          ? parseMinor(amount.minor)
+          : -parseMinor(amount.minor)),
+      0n,
+    );
+    if (income.length > 0) {
+      balances.set("retained_earnings", (balances.get("retained_earnings") ?? 0n) - netIncome);
+    }
+    const openingLines = [
+      ...snapshotLines(balances),
+      ...movementLines(new Map(), new Map(), income),
+    ];
     if (openingLines.length < 2) {
       return { ok: false, message: "Opening snapshot does not have a balanced journal" };
     }
     journals.push({
       kind: "opening",
-      periodStart: periodStart(input.amounts, first),
+      periodStart: first,
       periodEnd: first,
       lines: openingLines,
     });
@@ -162,6 +190,16 @@ export function buildLinkedModel(input: IngestionCheckInput): LinkedModelResult 
       currency: input.currency,
       retainedEarningsAccountId: "retained_earnings",
       lines: classified,
+      ...(input.fiscalYearEnd
+        ? {
+            fiscalYear: {
+              openingDate: first,
+              statementDate: periods[periods.length - 1] ?? first,
+              yearEndMonth: input.fiscalYearEnd.month,
+              yearEndDay: input.fiscalYearEnd.day,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Statement derivation failed";
@@ -317,6 +355,8 @@ function classifiedLines(journals: readonly ModelJournal[], currency: string): C
         creditMinor: line.creditMinor,
         currency,
         period,
+        periodEnd: journal.periodEnd,
+        ...(journal.kind === "opening" ? { journalKind: "opening" as const } : {}),
       });
     }
   });
@@ -428,7 +468,13 @@ function sumCode(amounts: readonly IngestionAmount[], period: string, code: stri
 }
 
 function periodStart(amounts: readonly IngestionAmount[], periodEnd: string): string {
-  const found = amounts.find((amount) => amount.periodEnd === periodEnd && amount.periodStart);
+  const found =
+    amounts.find(
+      (amount) =>
+        amount.statement === "income_statement" &&
+        amount.periodEnd === periodEnd &&
+        amount.periodStart,
+    ) ?? amounts.find((amount) => amount.periodEnd === periodEnd && amount.periodStart);
   return found?.periodStart ?? periodEnd;
 }
 
@@ -594,6 +640,9 @@ function signedBalance(report: ReportClass, code: string, debit: bigint, credit:
 function hashableInput(input: IngestionCheckInput): unknown {
   return {
     currency: input.currency,
+    fiscalYearEnd: input.fiscalYearEnd
+      ? { month: String(input.fiscalYearEnd.month), day: String(input.fiscalYearEnd.day) }
+      : null,
     toleranceMinor: input.toleranceMinor,
     postedBalances: Object.entries(input.postedBalances ?? {})
       .sort(([left], [right]) => left.localeCompare(right))
