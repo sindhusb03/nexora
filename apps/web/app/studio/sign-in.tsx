@@ -132,6 +132,14 @@ export function SignInScreen(props: {
             {magic ? "Use a password instead" : "Email me a sign-in link"}
           </button>
         ) : null}
+        {props.config.signupAllowed && !props.challengeId ? (
+          <p>
+            New on this deployment?{" "}
+            <a href="/studio/sign-up" data-testid="signin-signup">
+              Create an account
+            </a>
+          </p>
+        ) : null}
         {props.config.oidcProviders.map((provider) => (
           <a key={provider.id} href={`${API_URL}/auth/oidc/${provider.id}/start`}>
             Continue with {provider.label}

@@ -343,6 +343,104 @@ export async function setFlag(
   return body;
 }
 
+export async function signup(input: {
+  actorId: string;
+  password: string;
+  email?: string;
+}): Promise<void> {
+  await request(
+    "/auth/signup",
+    {
+      method: "POST",
+      body: JSON.stringify(
+        input.email
+          ? { actorId: input.actorId, password: input.password, email: input.email }
+          : input,
+      ),
+    },
+    null,
+  );
+}
+
+export interface ProvisionedTenant {
+  readonly tenantId: string;
+  readonly homeRegion: string;
+  readonly name: string;
+}
+
+export async function provisionTenant(
+  csrf: string,
+  input: { name: string; homeRegion: string; ownerActorId: string },
+): Promise<ProvisionedTenant> {
+  const body = await request("/v1/tenants", { method: "POST", body: JSON.stringify(input) }, csrf);
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as { tenantId?: unknown }).tenantId !== "string" ||
+    typeof (body as { homeRegion?: unknown }).homeRegion !== "string" ||
+    typeof (body as { name?: unknown }).name !== "string"
+  ) {
+    throw new ApiFailure(500, "The company response was not readable");
+  }
+  const record = body as { tenantId: string; homeRegion: string; name: string };
+  return { tenantId: record.tenantId, homeRegion: record.homeRegion, name: record.name };
+}
+
+export interface LegalEntityView {
+  readonly entityId: string;
+  readonly legalName: string;
+  readonly functionalCurrency: string;
+}
+
+export async function createLegalEntity(
+  csrf: string,
+  input: {
+    legalName: string;
+    functionalCurrency: string;
+    fiscalYearEndMonth: number;
+    fiscalYearEndDay: number;
+  },
+): Promise<LegalEntityView> {
+  const body = await request("/v1/entities", { method: "POST", body: JSON.stringify(input) }, csrf);
+  return readLegalEntity(body);
+}
+
+export async function listLegalEntities(csrf: string): Promise<readonly LegalEntityView[]> {
+  const body = await request("/v1/entities", { method: "GET" }, csrf);
+  if (typeof body !== "object" || body === null) return [];
+  const entities = (body as { entities?: unknown }).entities;
+  if (!Array.isArray(entities)) return [];
+  return entities.flatMap((item) => {
+    try {
+      return [readLegalEntity(item)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function readLegalEntity(body: unknown): LegalEntityView {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    typeof (body as { entityId?: unknown }).entityId !== "string" ||
+    typeof (body as { legalName?: unknown }).legalName !== "string" ||
+    typeof (body as { functionalCurrency?: unknown }).functionalCurrency !== "string"
+  ) {
+    throw new ApiFailure(500, "The entity response was not readable");
+  }
+  const record = body as {
+    entityId: string;
+    legalName: string;
+    functionalCurrency: string;
+  };
+  return {
+    entityId: record.entityId,
+    legalName: record.legalName,
+    functionalCurrency: record.functionalCurrency,
+  };
+}
+
 export async function grantSupport(
   csrf: string,
   tenantId: string,
