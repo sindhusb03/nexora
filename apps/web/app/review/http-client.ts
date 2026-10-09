@@ -1,7 +1,6 @@
 import {
   apiExceptionSchema,
   apiExtractedValueSchema,
-  currencyScale,
   ingestionJobSchema,
   ingestionPaths,
   readApiError,
@@ -17,6 +16,7 @@ import {
   type ExtractedValueResponse,
   type IngestionExceptionResponse,
 } from "@nexora/contracts";
+import { lookupCurrencyScale } from "@nexora/currency";
 import { z } from "zod";
 import type { IngestionClient } from "./types";
 
@@ -284,7 +284,12 @@ export function createHttpIngestionClient(baseUrl: string): IngestionClient {
       if (request.action === "correct") {
         if (!linked?.currency || !/^-?\d+$/.test(request.correctedMinor ?? ""))
           return invalid("Load the extracted value before correcting its minor units.");
-        const digits = currencyScale(linked.currency);
+        const currency = lookupCurrencyScale(linked.currency);
+        if (!currency.ok)
+          return invalid(
+            "This currency has no minor units, so the amount can't be corrected here.",
+          );
+        const digits = currency.scale;
         const scaleDigits: Record<string, number> = {
           units: 0,
           thousands: 3,
