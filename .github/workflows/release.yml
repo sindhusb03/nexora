@@ -41,9 +41,9 @@ jobs:
       - name: Version or tag
         uses: changesets/action@v2
         with:
-          version: pnpm changeset version
-          publish: pnpm changeset tag
-          commit: "chore: version packages"
-          title: "chore: version packages"
+          version-script: pnpm changeset version
+          publish-script: pnpm changeset tag
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
