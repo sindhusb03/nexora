@@ -1,5 +1,17 @@
 # @nexora/kernel
 
+## 0.2.0
+
+### Minor Changes
+
+- 6fafef5: Classify each cash leg by the accounts it settles, keep opening balances and direct retained earnings inside the statements, and apply the disposal and lease cash-flow rules. Share one ISO 4217 minor-unit scale and add exact allocation.
+
+### Patch Changes
+
+- 1705d3b: Gate demonstration planning evidence, require independent bank imports for reconciliation, select tenant-scoped historical snapshots, and audit conditional review decisions. Target explicit tenants for flags and grant support membership and evidence atomically. Require exact numeric grounding and resolvable citations, separating document context from kernel facts, and record live model corpus metadata.
+- Updated dependencies [6fafef5]
+  - @nexora/currency@0.2.0
+
 ## 0.1.2
 
 ### Patch Changes
