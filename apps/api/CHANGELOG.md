@@ -1,5 +1,21 @@
 # @nexora/api
 
+## 0.1.3
+
+### Patch Changes
+
+- 9bdfa44: Derive group translation and elimination trial balances from posted activity through the period end. Balance-sheet accounts are cumulative, current-period income stays on the income accounts, and prior-period earnings roll into retained earnings. Reject caller-supplied trial balances.
+- 1705d3b: Gate demonstration planning evidence, require independent bank imports for reconciliation, select tenant-scoped historical snapshots, and audit conditional review decisions. Target explicit tenants for flags and grant support membership and evidence atomically. Require exact numeric grounding and resolvable citations, separating document context from kernel facts, and record live model corpus metadata.
+- 1c7dab5: Bank and statement ingestion (blind-r6): keep a printed closing balance only when it reconciles with opening plus transactions, or when the running balances are themselves inconsistent (which goes to review); drop a closing that contradicts reconciling running balances. Add signed single-amount columns, Dutch signed decimals, Swiss German preambles and headers, PDF B/F and C/F rows, counterparty-first descriptions, and localized Swiss German, Portuguese, Spanish and Korean statement titles and periods.
+- 6fafef5: Classify each cash leg by the accounts it settles, keep opening balances and direct retained earnings inside the statements, and apply the disposal and lease cash-flow rules. Share one ISO 4217 minor-unit scale and add exact allocation.
+- Updated dependencies [9bdfa44]
+- Updated dependencies [6fd7980]
+- Updated dependencies [1705d3b]
+- Updated dependencies [6fafef5]
+  - @nexora/db@0.1.3
+  - @nexora/kernel@0.2.0
+  - @nexora/contracts@0.3.0
+
 ## 0.1.2
 
 ### Patch Changes

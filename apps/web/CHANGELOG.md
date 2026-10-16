@@ -1,5 +1,16 @@
 # @nexora/web
 
+## 0.2.2
+
+### Patch Changes
+
+- 6fd7980: Patch Next.js to 15.5.27 and pin source-map-js to 1.2.2 or later to clear production audit advisories GHSA-4jqv-mc3x-m676, GHSA-mcj8-r9mp-w47p, and GHSA-68fv-2mgg-jv7q.
+- 6fafef5: Classify each cash leg by the accounts it settles, keep opening balances and direct retained earnings inside the statements, and apply the disposal and lease cash-flow rules. Share one ISO 4217 minor-unit scale and add exact allocation.
+- 1e3a5a8: Add a main-app sign-up page and a first-run stepper for company name, base currency, and fiscal year end.
+- Updated dependencies [6fafef5]
+  - @nexora/currency@0.2.0
+  - @nexora/contracts@0.3.0
+
 ## 0.2.1
 
 ### Patch Changes
